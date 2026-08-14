@@ -115,6 +115,23 @@ def test_action_params_complete(registry):
         assert schema.get("required"), f"{action.name} 应有必填参数"
 
 
+def test_canonical_error_codes_include_a1_codes():
+    """§4.3：create_order 的客户/商品不存在·下架三码必须在内（LLM 反馈粒度）。"""
+    for code in ("CUSTOMER_NOT_FOUND", "PRODUCT_NOT_FOUND", "PRODUCT_INACTIVE"):
+        assert code in CANONICAL_ERROR_CODES, f"{code} 不在错误码全集"
+
+
+def test_create_order_has_dedicated_error_codes(registry):
+    """create_order 前置规则用独立三码，而非笼统归入 INVALID_PARAMS。"""
+    create = registry.action("create_order")
+    codes = [pc.error_code for pc in create.preconditions]
+    assert "CUSTOMER_NOT_FOUND" in codes
+    assert "PRODUCT_NOT_FOUND" in codes
+    assert "PRODUCT_INACTIVE" in codes
+    assert "OUT_OF_STOCK" in codes
+    assert "INVALID_PARAMS" not in codes
+
+
 def test_action_error_codes_within_canonical(registry):
     """动作声明的错误码 ⊆ §4.3 全集；每条前置规则引用的错误码 ⊆ 动作声明集。"""
     for action in registry.actions():
@@ -197,6 +214,25 @@ def test_self_check_flags_bad_inverse_name():
         description="命名错误"))
     codes = {i.code for i in reg.self_check()}
     assert "LINK_INVERSE_MISMATCH" in codes
+
+
+def test_self_check_flags_inverse_duplicate():
+    """反向名前缀正确但重复（两个链接共用同一 inverse_name）必须被 self_check 检出。"""
+    reg = Registry()
+    for name in ("Order", "Customer", "Shipment"):
+        reg.register_object_type(ObjectTypeDef(
+            name=name, api_name=name.lower(), description="d",
+            model=BaseModel, pk_field=f"{name.lower()}_id", source_table=name.lower()))
+    reg.register_link_type(LinkTypeDef(
+        name="order.customer", source_type="Order", target_type="Customer",
+        cardinality="N:1", fk_field="customer_id", inverse_name="customer.orders",
+        description="链接 A"))
+    reg.register_link_type(LinkTypeDef(
+        name="shipment.order", source_type="Shipment", target_type="Order",
+        cardinality="N:1", fk_field="order_id", inverse_name="customer.orders",
+        description="链接 B（反向名与 A 重复）"))
+    codes = {i.code for i in reg.self_check()}
+    assert "LINK_INVERSE_DUPLICATE" in codes
 
 
 def test_self_check_flags_unknown_action_error_code():

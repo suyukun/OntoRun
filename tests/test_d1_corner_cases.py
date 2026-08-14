@@ -153,14 +153,19 @@ def test_all_order_statuses_present(conn):
     assert present == {"pending", "confirmed", "shipped", "delivered", "cancelled", "refunded"}, present
 
 
+TABLE_PKS = {
+    "customers": "customer_id", "products": "product_id", "warehouses": "warehouse_id",
+    "inventory": "inventory_id", "orders": "order_id", "order_items": "order_item_id",
+    "shipments": "shipment_id", "refunds": "refund_id",
+}
+
+
 def test_seed_is_deterministic(tmp_path):
-    """同一 seed 两次生成，各表行数一致（确定性种子保证）。"""
+    """同一 seed 两次生成，各表逐行内容一致（按主键排序全行比对，非仅行数）。"""
     db1 = seed.build_database(tmp_path / "a.db")
     db2 = seed.build_database(tmp_path / "b.db")
-    tables = ["customers", "products", "warehouses", "inventory",
-              "orders", "order_items", "shipments", "refunds"]
-    for table in tables:
+    for table, pk in TABLE_PKS.items():
         with sqlite3.connect(db1) as c1, sqlite3.connect(db2) as c2:
-            n1 = c1.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            n2 = c2.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            assert n1 == n2, f"{table} 行数不一致: {n1} vs {n2}"
+            rows1 = c1.execute(f"SELECT * FROM {table} ORDER BY {pk}").fetchall()
+            rows2 = c2.execute(f"SELECT * FROM {table} ORDER BY {pk}").fetchall()
+            assert rows1 == rows2, f"{table} 逐行不一致（{len(rows1)} vs {len(rows2)} 行）"
