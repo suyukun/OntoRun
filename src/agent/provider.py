@@ -85,13 +85,9 @@ class DeepSeekProvider:
         self.model = model or os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
         from openai import OpenAI  # 延迟导入：仅 DeepSeek 路径需要该依赖
 
-        # key 只进 SDK client，不存为 provider 自身属性（防打印/序列化泄密）
+        # key 只进 SDK client，不存为 provider 自身属性（防打印/序列化泄密）；
+        # 不提供任何 key 访问器（red-team 建议 1：可反读明文 = 泄密面，已删除）
         self._client = OpenAI(api_key=api_key, base_url=self.base_url)
-
-    @property
-    def api_key(self) -> str | None:
-        """只读访问器（key 仅在 SDK client 内部，不落 provider 属性）。"""
-        return getattr(self._client, "api_key", None)
 
     def chat(
         self, messages: list[ChatMessage], tools: list[dict] | None = None

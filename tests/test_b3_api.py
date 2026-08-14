@@ -344,9 +344,13 @@ def test_error_code_full_set_mapped():
 # ---------- 无泛化写路径（D-T3，§1.1/§5.2） ----------
 
 
-def test_no_generic_write_paths():
-    """OpenAPI 中不存在对对象/字段的泛化写端点（无 PUT/PATCH/DELETE /objects）。"""
-    openapi = TestClient(create_app()).get("/openapi.json").json()
+def test_no_generic_write_paths(client):
+    """OpenAPI 中不存在对对象/字段的泛化写端点（无 PUT/PATCH/DELETE /objects）。
+
+    用 client fixture（tmp 双库）而非无参 create_app()——避免触碰正式双库
+    （red-team 建议 2：无参 create_app 会让 Store 落 data/ 正式路径，属脏副作用）。
+    """
+    openapi = client.get("/openapi.json").json()
     for path, methods in openapi["paths"].items():
         if path.startswith("/objects"):
             assert not ({"put", "patch", "delete", "post"} & set(methods)), (

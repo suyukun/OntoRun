@@ -54,6 +54,7 @@ class RecordingExecutor:
     def __init__(self, client: TestClient) -> None:
         self._client = client
         self.calls: list[tuple[str, dict]] = []
+        self.read_calls: list[tuple[str, dict | None, int]] = []
 
     def execute(
         self,
@@ -74,6 +75,19 @@ class RecordingExecutor:
                 "X-Request-ID": request_id,
             },
         )
+        return resp.json()
+
+    def search(
+        self,
+        object_type: str,
+        filter: dict | None = None,
+        page_size: int = 10,
+    ) -> dict:
+        self.read_calls.append((object_type, filter, page_size))
+        query = {"page_size": page_size}
+        if filter:
+            query.update({k: v for k, v in filter.items()})
+        resp = self._client.get(f"/objects/{object_type}", params=query)
         return resp.json()
 
 
@@ -458,3 +472,134 @@ def test_history_accumulates_across_turns(executor):
     assert agent.run_turn("继续").reply == "第二轮"
     roles = [m.role for m in provider.calls[1][0]]
     assert roles == ["system", "user", "assistant", "user"]
+
+
+def test_search_objects_then_act_e2e(app_source, executor):
+    """I1 修复回归：LLM 先 search_objects 查上下文 → 回填对象数据 → 再决策执行动作。
+
+    白名单内只读工具（不在 6 动作注册表）必须可执行且不崩（曾 KeyError 整轮崩溃）。
+    """
+    provider = MockProvider(
+        responses=[
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call_s1",
+                        name="search_objects",
+                        arguments={
+                            "object_type": "order",
+                            "filter": {"order_id": "ORD-1001"},
+                        },
+                    )
+                ]
+            ),
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call_c3",
+                        name="cancel_order",
+                        arguments={"order_id": "ORD-1001", "reason": "查证后取消"},
+                    )
+                ]
+            ),
+            ChatResponse(content="已查证并取消 ORD-1001。"),
+        ]
+    )
+    agent = make_agent(provider, executor)
+    turn = agent.run_turn("先查 ORD-1001 状态，再决定是否取消")
+
+    assert turn.reply == "已查证并取消 ORD-1001。"
+    # 读路径走 GET /objects（search），写路径走 POST /actions（execute）
+    assert executor.read_calls == [("order", {"order_id": "ORD-1001"}, 10)]
+    assert executor.calls == [
+        ("cancel_order", {"order_id": "ORD-1001", "reason": "查证后取消"})
+    ]
+    # 源库真变更
+    conn = source(app_source)
+    assert (
+        conn.execute("SELECT status FROM orders WHERE order_id='ORD-1001'").fetchone()[
+            "status"
+        ]
+        == "cancelled"
+    )
+    conn.close()
+    # 第二轮 LLM 消息里应含 search 回填的对象数据（查上下文闭环）
+    read_tool_msgs = [m for m in provider.calls[1][0] if m.role == "tool"]
+    assert len(read_tool_msgs) == 1
+    payload = json.loads(read_tool_msgs[0].content)
+    assert payload["outcome"] == "ok"
+    assert payload["data"]["items"][0]["properties"]["status"] == "confirmed"
+
+
+def test_search_objects_invalid_object_type_guard(executor):
+    """只读 guard：对象类型不在注册表 → INVALID_PARAMS，不触碰读端点。"""
+    provider = MockProvider(
+        responses=[
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call_s2",
+                        name="search_objects",
+                        arguments={"object_type": "ghost_table"},
+                    )
+                ]
+            ),
+            ChatResponse(content="对象类型不存在。"),
+        ]
+    )
+    agent = make_agent(provider, executor)
+    turn = agent.run_turn("查 ghost_table")
+    assert turn.reply == "对象类型不存在。"
+    assert executor.read_calls == [] and executor.calls == []
+    tool_msgs = [m for m in provider.calls[1][0] if m.role == "tool"]
+    payload = json.loads(tool_msgs[0].content)
+    assert payload["error"]["code"] == "INVALID_PARAMS"
+    assert payload["error"]["detail"]["object_type"] == "ghost_table"
+    assert "ghost_table" not in payload["error"]["detail"]["known"]
+
+
+def test_search_objects_bad_params_guard(executor):
+    """只读 guard：search 参数非法（page_size 越界）→ INVALID_PARAMS，不触碰读端点。"""
+    provider = MockProvider(
+        responses=[
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call_s3",
+                        name="search_objects",
+                        arguments={"object_type": "order", "page_size": 9999},
+                    )
+                ]
+            ),
+            ChatResponse(content="参数不合法。"),
+        ]
+    )
+    agent = make_agent(provider, executor)
+    turn = agent.run_turn("查全部订单")
+    assert turn.reply == "参数不合法。"
+    assert executor.read_calls == []
+    tool_msgs = [m for m in provider.calls[1][0] if m.role == "tool"]
+    assert json.loads(tool_msgs[0].content)["error"]["code"] == "INVALID_PARAMS"
+
+
+def test_tool_round_limit_guard(executor):
+    """防死循环：LLM 持续提议工具（不可信输入）→ 上限后兜底终止，不无限刷写入口。"""
+
+    class InfiniteToolsProvider(MockProvider):
+        def chat(self, messages, tools=None):
+            self.calls.append((messages, tools))
+            return ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id=f"call_{len(self.calls)}",
+                        name="confirm_order",
+                        arguments={"order_id": "ORD-1001"},
+                    )
+                ]
+            )
+
+    provider = InfiniteToolsProvider()
+    agent = make_agent(provider, executor)
+    turn = agent.run_turn("一直确认")
+    assert "超限" in turn.reply
+    assert len(executor.calls) == 6  # _MAX_TOOL_ROUNDS

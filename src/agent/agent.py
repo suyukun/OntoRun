@@ -26,8 +26,11 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field, ValidationError
 
 from src.agent.provider import ChatMessage, ChatResponse, LLMProvider, ToolCall
-from src.agent.tools_generator import build_tool_map, build_tools
+from src.agent.tools_generator import READ_TOOL_NAME, build_tool_map, build_tools
 from src.ontology.registry import Registry
+
+# LLM 输出视为不可信输入：单轮内工具往返上限（防死循环烧 token / 刷写入口）
+_MAX_TOOL_ROUNDS = 6
 
 
 def _j(value: Any) -> str:
@@ -69,7 +72,11 @@ class AgentTurn(BaseModel):
 
 
 class ActionExecutor(Protocol):
-    """动作执行入口（§5.5：走与 UI 相同的 REST 动作端点，统一写入口）。"""
+    """执行入口（§5.5：走与 UI 相同的 REST 端点，统一入口，不直连 runtime）。
+
+    - execute：写路径 POST /actions/{name}（唯一写入口）；
+    - search：只读路径 GET /objects/{type}（LLM 查上下文，不修改任何数据）。
+    """
 
     def execute(
         self,
@@ -80,6 +87,21 @@ class ActionExecutor(Protocol):
         actor_detail: str = "",
         request_id: str = "",
     ) -> dict: ...
+
+    def search(
+        self,
+        object_type: str,
+        filter: dict | None = None,
+        page_size: int = 10,
+    ) -> dict: ...
+
+
+class SearchObjectsParams(BaseModel):
+    """search_objects 工具参数（白名单化：类型 + 等值过滤 + 分页上限）。"""
+
+    object_type: str = Field(min_length=1, max_length=64)
+    filter: dict[str, Any] | None = None
+    page_size: int = Field(default=10, ge=1, le=50)
 
 
 class Agent:
@@ -99,6 +121,7 @@ class Agent:
         self._tools = build_tools(registry)
         self._tool_map = build_tool_map(registry)
         self._high_risk = {a.name for a in registry.actions() if a.high_risk}
+        self._read_object_types = {o.api_name for o in registry.object_types()}
         self._system_prompt = system_prompt or build_system_prompt(registry)
         self._history: list[ChatMessage] = []
         self._pending: ToolCall | None = None
@@ -150,34 +173,43 @@ class Agent:
     def _handle_response(
         self, resp: ChatResponse, extra_results: list[ToolResult] | None = None
     ) -> AgentTurn:
+        """多轮工具往返（上限 _MAX_TOOL_ROUNDS 防死循环）：执行/提议 → 回填 → 再决策。
+
+        - 只读 search_objects 与动作可在同一轮内连续多次（查上下文 → 决策 → 执行）；
+        - 任何一轮出现高风险动作：只提议不执行其余（双签优先，§5.4 人机层）；
+        - 超轮次上限：LLM 输出视为不可信输入，兜底终止（不静默执行、不烧 token）。
+        """
         results = list(extra_results or [])
-        if not resp.has_tool_calls:
-            content = resp.content or ""
-            self._history.append(ChatMessage(role="assistant", content=content))
-            return AgentTurn(reply=content or None, tool_results=results)
-
-        for call in resp.tool_calls:
-            # 双签：高风险动作只提议不执行，交由人工确认（§5.4 人机层）
-            if call.name in self._high_risk:
-                self._pending = call
-                return AgentTurn(need_confirm=call, tool_results=results)
-
-        # 全低风险：逐个执行，结果回填后再让 LLM 生成回复（§5.3 错误码学习闭环）
-        calls: list[ToolCall] = []
-        for call in resp.tool_calls:
-            calls.append(call)
-            results.append(self._execute_tool_call(call))
-        self._history.append(
-            ChatMessage(role="assistant", content=None, tool_calls=calls)
-        )
-        for r in results:
+        for _ in range(_MAX_TOOL_ROUNDS):
+            if not resp.has_tool_calls:
+                content = resp.content or ""
+                self._history.append(ChatMessage(role="assistant", content=content))
+                return AgentTurn(reply=content or None, tool_results=results)
+            high = next((c for c in resp.tool_calls if c.name in self._high_risk), None)
+            if high is not None:
+                self._pending = high
+                return AgentTurn(need_confirm=high, tool_results=results)
+            calls: list[ToolCall] = []
+            round_results: list[ToolResult] = []
+            for call in resp.tool_calls:
+                calls.append(call)
+                result = self._execute_tool_call(call)
+                round_results.append(result)
+                results.append(result)
+            # OpenAI 兼容约束：tool 结果紧跟 assistant tool_calls 消息
             self._history.append(
-                ChatMessage(role="tool", content=r.content, tool_call_id=r.tool_call_id)
+                ChatMessage(role="assistant", content=None, tool_calls=calls)
             )
-        resp2 = self._provider.chat(self._messages(), self._tools)
-        content = resp2.content or ""
+            for r in round_results:
+                self._history.append(
+                    ChatMessage(
+                        role="tool", content=r.content, tool_call_id=r.tool_call_id
+                    )
+                )
+            resp = self._provider.chat(self._messages(), self._tools)
+        content = "（工具调用轮次超限，已停止，请重试）"
         self._history.append(ChatMessage(role="assistant", content=content))
-        return AgentTurn(reply=content or None, tool_results=results)
+        return AgentTurn(reply=content, tool_results=results)
 
     def _execute_tool_call(self, call: ToolCall) -> ToolResult:
         """guard：白名单 → 参数校验（复用 runtime 校验）→ 走统一写入口 POST /actions。"""
@@ -196,7 +228,11 @@ class Agent:
                     }
                 ),
             )
-        # 2) 服务端前置：动作参数校验复用 runtime 校验（LLM 输出视为不可信输入）
+        # 2) 只读工具分路：search_objects 不在动作注册表，走读端点 GET /objects
+        #    （I1 修复：白名单内工具必须全可执行，一调即崩 = 功能缺陷）
+        if call.name == READ_TOOL_NAME:
+            return self._execute_search(call)
+        # 3) 服务端前置：动作参数校验复用 runtime 校验（LLM 输出视为不可信输入）
         action = self._registry.action(call.name)
         try:
             action.params_model.model_validate(call.arguments)
@@ -219,7 +255,7 @@ class Agent:
                     }
                 ),
             )
-        # 3) 执行：与 UI 同一 REST 动作端点（§5.5 统一写入口，审计 actor=llm）
+        # 4) 执行：与 UI 同一 REST 动作端点（§5.5 统一写入口，审计 actor=llm）
         request_id = f"req_{uuid.uuid4().hex[:10]}"
         actor_detail = f"llm:{type(self._provider).__name__}"
         result = self._executor.execute(
@@ -228,6 +264,52 @@ class Agent:
             actor="llm",
             actor_detail=actor_detail,
             request_id=request_id,
+        )
+        return ToolResult(tool_call_id=call.id, name=call.name, content=_j(result))
+
+    def _execute_search(self, call: ToolCall) -> ToolResult:
+        """只读查询：search_objects → GET /objects/{type}，回填对象数据供 LLM 决策。"""
+        try:
+            params = SearchObjectsParams.model_validate(call.arguments)
+        except ValidationError as exc:
+            detail = [
+                {"loc": ".".join(str(x) for x in e["loc"]), "msg": e["msg"]}
+                for e in exc.errors()
+            ]
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content=_j(
+                    {
+                        "outcome": "invalid_params",
+                        "error": {
+                            "code": "INVALID_PARAMS",
+                            "message": "search_objects 参数校验失败",
+                            "detail": detail,
+                        },
+                    }
+                ),
+            )
+        if params.object_type not in self._read_object_types:
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content=_j(
+                    {
+                        "outcome": "invalid_params",
+                        "error": {
+                            "code": "INVALID_PARAMS",
+                            "message": "对象类型不在注册表",
+                            "detail": {
+                                "object_type": params.object_type,
+                                "known": sorted(self._read_object_types),
+                            },
+                        },
+                    }
+                ),
+            )
+        result = self._executor.search(
+            params.object_type, filter=params.filter, page_size=params.page_size
         )
         return ToolResult(tool_call_id=call.id, name=call.name, content=_j(result))
 

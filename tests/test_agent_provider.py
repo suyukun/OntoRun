@@ -131,13 +131,6 @@ def test_deepseek_missing_key_raises(monkeypatch):
         DeepSeekProvider()
 
 
-def test_deepseek_api_key_accessor_does_not_break(monkeypatch):
-    """api_key 访问器可用（只校验存在性，不断言明文值）。"""
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-fake-key")
-    p = DeepSeekProvider()
-    assert p.api_key is not None
-
-
 def test_deepseek_never_exposes_key_in_attributes(monkeypatch):
     """防回归：provider 对象上不保留明文 key 属性（打印/序列化不泄密）。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-secret-abc")
