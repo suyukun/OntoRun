@@ -510,3 +510,204 @@ def test_own_rejects_illegal_ownership():
 
     with pytest.raises(ValueError):
         own("bogus", "非法归属")
+
+
+# ---------- self_check 负路径补测（red-team 第 7 项：registry 覆盖率红线 80%+） ----------
+
+
+def _obj(name, api_name, model, pk_field, source_table) -> ObjectTypeDef:
+    return ObjectTypeDef(
+        name=name,
+        api_name=api_name,
+        description="d",
+        model=model,
+        pk_field=pk_field,
+        source_table=source_table,
+    )
+
+
+def test_self_check_flags_object_api_name_invalid():
+    """对象 api_name 不符合 ^[a-z][a-z0-9_]*$（含大写）→ OBJECT_API_NAME_INVALID。"""
+    reg = Registry()
+    reg.register_object_type(_obj("Order", "BadName", BaseModel, "order_id", "orders"))
+    codes = {i.code for i in reg.self_check()}
+    assert "OBJECT_API_NAME_INVALID" in codes
+
+
+def test_self_check_flags_object_no_source_table():
+    """对象缺少源系统承载表 → OBJECT_NO_SOURCE_TABLE。"""
+    reg = Registry()
+    reg.register_object_type(_obj("Order", "order", BaseModel, "order_id", ""))
+    codes = {i.code for i in reg.self_check()}
+    assert "OBJECT_NO_SOURCE_TABLE" in codes
+
+
+def test_self_check_flags_link_name_duplicate():
+    """两个链接共用同一正向名 → LINK_NAME_DUPLICATE（反向名不重复）。"""
+    from src.ontology.objects import Customer, Order
+
+    reg = Registry()
+    reg.register_object_type(_obj("Order", "order", Order, "order_id", "orders"))
+    reg.register_object_type(
+        _obj("Customer", "customer", Customer, "customer_id", "customers")
+    )
+    for i in range(2):
+        reg.register_link_type(
+            LinkTypeDef(
+                name="order.customer",
+                source_type="Order",
+                target_type="Customer",
+                cardinality="N:1",
+                fk_field="customer_id",
+                inverse_name=f"customer.orders{i}",
+                description=f"链接 {i}",
+            )
+        )
+    codes = {i.code for i in reg.self_check()}
+    assert "LINK_NAME_DUPLICATE" in codes
+
+
+def test_self_check_flags_self_loop_link():
+    """自环链接（source_type == target_type）→ LINK_SELF_LOOP。"""
+    from src.ontology.objects import Order
+
+    reg = Registry()
+    reg.register_object_type(_obj("Order", "order", Order, "order_id", "orders"))
+    reg.register_link_type(
+        LinkTypeDef(
+            name="order.parent",
+            source_type="Order",
+            target_type="Order",
+            cardinality="N:1",
+            fk_field="customer_id",
+            inverse_name="order.children",
+            description="自环链接",
+        )
+    )
+    codes = {i.code for i in reg.self_check()}
+    assert "LINK_SELF_LOOP" in codes
+
+
+def test_self_check_flags_params_schema_fail():
+    """参数模型 JSON Schema 导出失败 → ACTION_PARAMS_SCHEMA_FAIL。"""
+    reg = Registry()
+
+    class BrokenParams(BaseModel):
+        x: str
+
+        @classmethod
+        def model_json_schema(cls, *args, **kwargs):
+            raise RuntimeError("schema 导出失败")
+
+    reg.register_action_type(
+        ActionDef(
+            name="broken_schema",
+            description="d",
+            params_model=BrokenParams,
+            preconditions=[],
+            state_effects=StateEffects(source_backed=["Customer.name"]),
+            error_codes=[],
+        )
+    )
+    codes = {i.code for i in reg.self_check()}
+    assert "ACTION_PARAMS_SCHEMA_FAIL" in codes
+
+
+def test_self_check_flags_precondition_undeclared():
+    """前置规则错误码合法（§4.3 全集内）但未在 action.error_codes 声明 → UNDECLARED。"""
+    reg = Registry()
+
+    class P(BaseModel):
+        x: str
+
+    reg.register_action_type(
+        ActionDef(
+            name="undeclared_pc",
+            description="d",
+            params_model=P,
+            preconditions=[Precondition(error_code="ORDER_NOT_FOUND", summary="x")],
+            state_effects=StateEffects(source_backed=["Customer.name"]),
+            error_codes=["INVALID_PARAMS"],
+        )
+    )
+    codes = {i.code for i in reg.self_check()}
+    assert "ACTION_PRECONDITION_UNDECLARED" in codes
+    assert "ACTION_PRECONDITION_UNKNOWN" not in codes  # 错误码本身在全集内
+
+
+def test_self_check_flags_no_effects():
+    """动作无任何状态效果（source_backed/ontology_owned 均空）→ ACTION_NO_EFFECTS。"""
+    reg = Registry()
+
+    class P(BaseModel):
+        x: str
+
+    reg.register_action_type(
+        ActionDef(
+            name="no_effects",
+            description="d",
+            params_model=P,
+            preconditions=[],
+            state_effects=StateEffects(),
+            error_codes=[],
+        )
+    )
+    codes = {i.code for i in reg.self_check()}
+    assert "ACTION_NO_EFFECTS" in codes
+
+
+def test_self_check_accepts_derived_effects():
+    """derived 效果标注引用真实 derived 字段 → self_check 零问题（覆盖 derived 校验循环）。"""
+    from src.ontology.objects import Customer, Inventory
+
+    reg = Registry()
+    reg.register_object_type(
+        _obj("Customer", "customer", Customer, "customer_id", "customers")
+    )
+    reg.register_object_type(
+        _obj("Inventory", "inventory", Inventory, "inventory_id", "inventory")
+    )
+
+    class P(BaseModel):
+        x: str
+
+    reg.register_action_type(
+        ActionDef(
+            name="derived_effect",
+            description="d",
+            params_model=P,
+            preconditions=[],
+            state_effects=StateEffects(
+                source_backed=["Customer.name"], derived=["Inventory.available_qty"]
+            ),
+            error_codes=[],
+        )
+    )
+    issues = reg.self_check()
+    assert issues == [], (
+        f"含 derived 效果的动作应自检通过: {[i.message for i in issues]}"
+    )
+
+
+def test_self_check_flags_effect_ownership_mismatch():
+    """效果字段存在但归属标注与定义不符（ontology-owned 标成 source-backed）→ MISMATCH。"""
+    from src.ontology.objects import Order
+
+    reg = Registry()
+    reg.register_object_type(_obj("Order", "order", Order, "order_id", "orders"))
+
+    class P(BaseModel):
+        x: str
+
+    reg.register_action_type(
+        ActionDef(
+            name="mismatch_effect",
+            description="d",
+            params_model=P,
+            preconditions=[],
+            state_effects=StateEffects(source_backed=["Order.cancel_reason"]),
+            error_codes=[],
+        )
+    )
+    codes = {i.code for i in reg.self_check()}
+    assert "ACTION_EFFECT_OWNERSHIP_MISMATCH" in codes
