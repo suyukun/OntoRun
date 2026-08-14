@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 # §4.3 错误码全集（MVP）——新增错误码必须先修技术方案
 CANONICAL_ERROR_CODES: tuple[str, ...] = (
     "INVALID_PARAMS", "UNKNOWN_ACTION", "ORDER_NOT_FOUND", "INVENTORY_NOT_FOUND",
+    "CUSTOMER_NOT_FOUND", "PRODUCT_NOT_FOUND", "PRODUCT_INACTIVE",
     "OUT_OF_STOCK", "ORDER_NOT_CONFIRMABLE", "ORDER_NOT_CANCELLABLE",
     "SHIPPED_ORDER_CANNOT_BE_CANCELLED", "ORDER_NOT_SHIPPABLE",
     "INSUFFICIENT_INVENTORY", "INSUFFICIENT_RESERVED",
@@ -88,14 +89,16 @@ ACTIONS: list[ActionDef] = [
                      "目标仓可用量不足时拒绝（返回当前可用量）。"),
         params_model=CreateOrderParams,
         preconditions=[
-            Precondition(error_code="INVALID_PARAMS",
-                         summary="customer 存在、product 存在且 status=active（MVP 全集内归入参数校验）"),
+            Precondition(error_code="CUSTOMER_NOT_FOUND", summary="customer 存在"),
+            Precondition(error_code="PRODUCT_NOT_FOUND", summary="product 存在"),
+            Precondition(error_code="PRODUCT_INACTIVE", summary="product status=active（已下架拒绝下单）"),
             Precondition(error_code="OUT_OF_STOCK",
                          summary="每个订单行：目标仓 available_qty ≥ qty，否则返回当前可用量"),
         ],
         state_effects=StateEffects(source_backed=["Order.status", "OrderItem.qty",
                                                   "Inventory.reserved_qty"]),
-        error_codes=["INVALID_PARAMS", "OUT_OF_STOCK"],
+        error_codes=["INVALID_PARAMS", "CUSTOMER_NOT_FOUND", "PRODUCT_NOT_FOUND",
+                     "PRODUCT_INACTIVE", "OUT_OF_STOCK"],
     ),
     ActionDef(
         name="confirm_order",
