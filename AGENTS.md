@@ -70,6 +70,7 @@ OntoRun/
 ```python
 from pydantic import BaseModel, Field
 
+
 class Customer(BaseModel):
     customer_id: str = Field(..., description="全局唯一客户号")
     name: str
