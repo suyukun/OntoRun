@@ -1,0 +1,252 @@
+[
+  {
+    "function": {
+      "description": "下单：按客户与商品行创建订单（pending）并锁定库存 reserved+=qty；目标仓可用量不足时拒绝（返回当前可用量）。",
+      "name": "create_order",
+      "parameters": {
+        "$defs": {
+          "OrderItemInput": {
+            "properties": {
+              "product_id": {
+                "maxLength": 64,
+                "title": "Product Id",
+                "type": "string"
+              },
+              "qty": {
+                "minimum": 1,
+                "title": "Qty",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "product_id",
+              "qty"
+            ],
+            "title": "OrderItemInput",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "customer_id": {
+            "maxLength": 64,
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/$defs/OrderItemInput"
+            },
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "customer_id",
+          "items"
+        ],
+        "title": "CreateOrderParams",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "履约确认：仅 pending 订单可确认，状态 → confirmed。",
+      "name": "confirm_order",
+      "parameters": {
+        "properties": {
+          "order_id": {
+            "maxLength": 64,
+            "title": "Order Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "title": "ConfirmOrderParams",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "取消订单（三问测试对象）：仅 pending/confirmed 且无 shipped/delivered shipment 的订单可取消；取消后释放未发货行库存 reserved-=qty，cancel_reason 落本体自有状态。已发货订单请走退款流程。",
+      "name": "cancel_order",
+      "parameters": {
+        "properties": {
+          "order_id": {
+            "maxLength": 64,
+            "title": "Order Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "title": "CancelOrderParams",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "发货：仅 confirmed 订单可发货；校验该仓物理在库 on_hand ≥ 订单行总量；成功后建 Shipment(shipped)、订单 → shipped、on_hand-=qty、reserved-=qty。",
+      "name": "create_shipment",
+      "parameters": {
+        "properties": {
+          "order_id": {
+            "maxLength": 64,
+            "title": "Order Id",
+            "type": "string"
+          },
+          "warehouse_id": {
+            "maxLength": 64,
+            "title": "Warehouse Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "warehouse_id"
+        ],
+        "title": "CreateShipmentParams",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "人工盘点/纠错：设置 on_hand_qty = new_on_hand_qty；不能把已锁库存调没（new_on_hand ≥ reserved），reason 必填。",
+      "name": "adjust_inventory",
+      "parameters": {
+        "properties": {
+          "new_on_hand_qty": {
+            "minimum": 0,
+            "title": "New On Hand Qty",
+            "type": "integer"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "title": "Product Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "warehouse_id": {
+            "maxLength": 64,
+            "title": "Warehouse Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "warehouse_id",
+          "product_id",
+          "new_on_hand_qty",
+          "reason"
+        ],
+        "title": "AdjustInventoryParams",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "审核退款（高风险，LLM 提议 + 用户确认双签）：仅 pending 可审；approved 时金额 ≤ 实付-已批退款，且订单须已履约（shipped/delivered）或 已取消未退款；整单退款后订单 → refunded；review_note 落本体自有状态。",
+      "name": "approve_refund",
+      "parameters": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "refund_id": {
+            "maxLength": 64,
+            "title": "Refund Id",
+            "type": "string"
+          },
+          "review_note": {
+            "maxLength": 500,
+            "title": "Review Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refund_id",
+          "decision",
+          "review_note"
+        ],
+        "title": "ApproveRefundParams",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "只读查询：按对象类型与可选等值过滤检索对象（供 LLM 获取上下文，不修改任何数据）。对象类型见 object_type 枚举。",
+      "name": "search_objects",
+      "parameters": {
+        "properties": {
+          "filter": {
+            "description": "等值/枚举过滤（键=属性名，值=期望值；可省略）",
+            "type": "object"
+          },
+          "object_type": {
+            "description": "对象类型 API 名",
+            "enum": [
+              "customer",
+              "inventory",
+              "order",
+              "order_item",
+              "product",
+              "refund",
+              "shipment",
+              "warehouse"
+            ],
+            "type": "string"
+          },
+          "page_size": {
+            "default": 10,
+            "description": "每页条数",
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object_type"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  }
+]
