@@ -3,6 +3,7 @@
 build_registry() 为统一入口：8 对象 / 8 链接 / 6 动作注册后返回 Registry，
 供 runtime（B1/B2）、API（B3）、Agent 工具生成（A2）消费。
 """
+
 from src.ontology.actions import (
     ACTIONS,
     CANONICAL_ERROR_CODES,

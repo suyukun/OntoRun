@@ -6,6 +6,7 @@
 
 查询只读内存索引；读错误抛 QueryError 子类，由 API 层映射为信封错误。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -65,8 +66,13 @@ class ObjectQuery:
                 return obj
         raise UnknownObjectType(type_name)
 
-    def list_objects(self, type_name: str, filters: dict[str, Any] | None = None,
-                     page: int = 1, page_size: int = 20) -> tuple[list[dict], int]:
+    def list_objects(
+        self,
+        type_name: str,
+        filters: dict[str, Any] | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
         """对象列表：等值过滤 + 分页。返回 (items, total)，items 按主键升序。"""
         obj = self.resolve_type(type_name)
         filters = filters or {}
@@ -76,12 +82,15 @@ class ObjectQuery:
             if field not in known:
                 raise UnknownFilterField(obj.name, field)
         if filters:
-            attrs_list = [a for a in attrs_list
-                          if all(str(a.get(f)) == str(v) for f, v in filters.items())]
+            attrs_list = [
+                a
+                for a in attrs_list
+                if all(str(a.get(f)) == str(v) for f, v in filters.items())
+            ]
         attrs_list.sort(key=lambda a: str(a[obj.pk_field]))
         total = len(attrs_list)
         start = max(page - 1, 0) * page_size
-        items = [self._wrap(obj, a) for a in attrs_list[start:start + page_size]]
+        items = [self._wrap(obj, a) for a in attrs_list[start : start + page_size]]
         return items, total
 
     def get(self, type_name: str, pk: str) -> dict | None:
@@ -102,8 +111,9 @@ class ObjectQuery:
             "links": self._index.get_link_counts(obj.name, str(pk)),
         }
 
-    def get_links(self, type_name: str, pk: str, link_name: str,
-                  direction: str = "out") -> list[dict]:
+    def get_links(
+        self, type_name: str, pk: str, link_name: str, direction: str = "out"
+    ) -> list[dict]:
         """链接遍历：direction=out|in，返回另一端对象列表（完整属性）。"""
         if direction not in ("out", "in"):
             raise InvalidDirection(direction)
@@ -134,5 +144,8 @@ class ObjectQuery:
 
     @staticmethod
     def _wrap(obj_def: Any, attrs: dict[str, Any]) -> dict:
-        return {"object_type": obj_def.name, "pk": str(attrs[obj_def.pk_field]),
-                "properties": attrs}
+        return {
+            "object_type": obj_def.name,
+            "pk": str(attrs[obj_def.pk_field]),
+            "properties": attrs,
+        }

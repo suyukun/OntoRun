@@ -14,6 +14,7 @@
   direction=out → (L.name + L.source_type==type) 或 (L.inverse_name + L.target_type==type)；
   direction=in  → (L.inverse_name + L.source_type==type) 或 (L.name + L.target_type==type)。
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -34,10 +35,14 @@ class ObjectIndex:
 
     def __init__(self, registry: Registry) -> None:
         self._registry = registry
-        self._objects: dict[str, dict[str, dict[str, Any]]] = {}    # type -> pk -> attrs
-        self._out: dict[tuple[str, str], dict[str, list[str]]] = {}  # 出向（本对象出发）
-        self._in: dict[tuple[str, str], dict[str, list[str]]] = {}   # 入向（指向本对象）
-        self._ontology_state: dict[tuple[str, str, str], Any] = {}   # (type,pk,prop) -> value
+        self._objects: dict[str, dict[str, dict[str, Any]]] = {}  # type -> pk -> attrs
+        self._out: dict[
+            tuple[str, str], dict[str, list[str]]
+        ] = {}  # 出向（本对象出发）
+        self._in: dict[tuple[str, str], dict[str, list[str]]] = {}  # 入向（指向本对象）
+        self._ontology_state: dict[
+            tuple[str, str, str], Any
+        ] = {}  # (type,pk,prop) -> value
 
     # ---- 加载 ----
 
@@ -60,10 +65,16 @@ class ObjectIndex:
         if conn is None:
             return
         conn.row_factory = sqlite3.Row
-        for row in conn.execute("SELECT object_type, pk, prop, value FROM ontology_state"):
-            self._ontology_state[(row["object_type"], row["pk"], row["prop"])] = row["value"]
+        for row in conn.execute(
+            "SELECT object_type, pk, prop, value FROM ontology_state"
+        ):
+            self._ontology_state[(row["object_type"], row["pk"], row["prop"])] = row[
+                "value"
+            ]
 
-    def set_ontology_state(self, type_name: str, pk: str, prop: str, value: Any) -> None:
+    def set_ontology_state(
+        self, type_name: str, pk: str, prop: str, value: Any
+    ) -> None:
         """写入/清除一条 ontology-owned 状态（get 时合并）。"""
         if value is None:
             self._ontology_state.pop((type_name, pk, prop), None)
@@ -89,34 +100,54 @@ class ObjectIndex:
                     tgt = attrs.get(link.fk_field)
                     if tgt is not None:
                         tgt = str(tgt)
-                        self._out.setdefault((type_name, pk), {}).setdefault(link.name, []).append(tgt)
+                        self._out.setdefault((type_name, pk), {}).setdefault(
+                            link.name, []
+                        ).append(tgt)
                 else:
-                    targets = [t_pk for t_pk, t_attrs in self._objects.get(link.target_type, {}).items()
-                               if t_attrs.get(link.fk_field) == pk]
+                    targets = [
+                        t_pk
+                        for t_pk, t_attrs in self._objects.get(
+                            link.target_type, {}
+                        ).items()
+                        if t_attrs.get(link.fk_field) == pk
+                    ]
                     for t_pk in targets:
-                        self._out.setdefault((type_name, pk), {}).setdefault(link.name, []).append(t_pk)
+                        self._out.setdefault((type_name, pk), {}).setdefault(
+                            link.name, []
+                        ).append(t_pk)
                         self._in.setdefault((link.target_type, t_pk), {}).setdefault(
-                            link.name, []).append(pk)
+                            link.name, []
+                        ).append(pk)
             if link.target_type == type_name:
                 if link.cardinality == "N:1":
                     # T 侧：扫描 source 侧 fk==pk → T 出向走 L.inverse_name、T 入向走 L.name
-                    sources = [s_pk for s_pk, s_attrs in self._objects.get(link.source_type, {}).items()
-                               if s_attrs.get(link.fk_field) == pk]
+                    sources = [
+                        s_pk
+                        for s_pk, s_attrs in self._objects.get(
+                            link.source_type, {}
+                        ).items()
+                        if s_attrs.get(link.fk_field) == pk
+                    ]
                     for s_pk in sources:
                         self._out.setdefault((type_name, pk), {}).setdefault(
-                            link.inverse_name, []).append(s_pk)
+                            link.inverse_name, []
+                        ).append(s_pk)
                         self._in.setdefault((type_name, pk), {}).setdefault(
-                            link.name, []).append(s_pk)
+                            link.name, []
+                        ).append(s_pk)
                 else:
                     src = attrs.get(link.fk_field)
                     if src is not None:
                         src = str(src)
                         self._out.setdefault((type_name, pk), {}).setdefault(
-                            link.inverse_name, []).append(src)
+                            link.inverse_name, []
+                        ).append(src)
                         self._out.setdefault((link.source_type, src), {}).setdefault(
-                            link.name, []).append(pk)
+                            link.name, []
+                        ).append(pk)
                         self._in.setdefault((link.source_type, src), {}).setdefault(
-                            link.inverse_name, []).append(pk)
+                            link.inverse_name, []
+                        ).append(pk)
 
     def _rebuild_links(self) -> None:
         """按 8 条链接定义重建正/反向索引（FK 位置：N:1 在 source、1:N 在 target）。"""
@@ -142,8 +173,11 @@ class ObjectIndex:
                 merged[prop] = value
         # ontology-owned 字段未落库时补模型默认值（保持 schema 输出完整，§2.7）
         obj = self._registry.object_type(type_name)
-        for fname, field in obj.model.model_fields.items():
-            if field_ownership(obj.model, fname) == OWN_ONTOLOGY and fname not in merged:
+        for fname in obj.model.model_fields:
+            if (
+                field_ownership(obj.model, fname) == OWN_ONTOLOGY
+                and fname not in merged
+            ):
                 merged[fname] = None
         return merged
 
@@ -168,8 +202,9 @@ class ObjectIndex:
         inn = {name: len(set(in_map.get(name, []))) for name in in_names}
         return {"out": out, "in": inn}
 
-    def get_links(self, type_name: str, pk: str, link_name: str,
-                  direction: str = "out") -> list[dict[str, Any]]:
+    def get_links(
+        self, type_name: str, pk: str, link_name: str, direction: str = "out"
+    ) -> list[dict[str, Any]]:
         """链接遍历：direction=out（本对象出发）/ in（指向本对象），返回另一端完整对象。"""
         key = (type_name, str(pk))
         if direction == "out":
@@ -198,8 +233,9 @@ class ObjectIndex:
                 result.append(bucket[p])
         return result
 
-    def _find_link(self, link_name: str, *, type_name: str,
-                   forward: bool) -> tuple | None:
+    def _find_link(
+        self, link_name: str, *, type_name: str, forward: bool
+    ) -> tuple | None:
         """按遍历名定位链接；forward=True=出向。返回 (link, side)；side ∈ {source, target}。
 
         出向：L.name+source 侧，或 L.inverse_name+target 侧；
@@ -224,8 +260,9 @@ class ObjectIndex:
         """从源库重读单行并更新对象与链接（FK 变更也能正确处理）。"""
         obj = self._registry.object_type(type_name)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(f"SELECT * FROM {obj.source_table} WHERE {obj.pk_field}=?",
-                           (str(pk),)).fetchone()
+        row = conn.execute(
+            f"SELECT * FROM {obj.source_table} WHERE {obj.pk_field}=?", (str(pk),)
+        ).fetchone()
         if row is None:
             self._remove_object(type_name, str(pk))
             return
@@ -234,7 +271,9 @@ class ObjectIndex:
         self._objects.setdefault(type_name, {})[str(pk)] = attrs
         self._reindex_object(type_name, str(pk), attrs)
 
-    def refresh_many(self, pairs: list[tuple[str, str]], conn: sqlite3.Connection) -> None:
+    def refresh_many(
+        self, pairs: list[tuple[str, str]], conn: sqlite3.Connection
+    ) -> None:
         for type_name, pk in pairs:
             self.refresh(type_name, pk, conn)
 

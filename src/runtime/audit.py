@@ -4,6 +4,7 @@ audit_log 是"运行语义层"区别于"只读语义层"的证据面：writeback
 三问测试 2 除直查源库断言外，审计亦可自证（§3.5 注）。
 audit_id 用 ULID（时间有序 + 随机，标准库实现，不引依赖）。
 """
+
 from __future__ import annotations
 
 import json
@@ -34,6 +35,7 @@ def new_ulid() -> str:
 
 class AuditRecord(BaseModel):
     """审计记录（§3.5 schema，逐字段对齐）。"""
+
     audit_id: str = Field(default_factory=new_ulid)
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     action_name: str
@@ -68,11 +70,24 @@ class AuditLog:
                 "INSERT INTO audit_log (audit_id, ts, action_name, actor, actor_detail, request_id, "
                 "params_json, preconditions_json, effects_json, writeback_json, outcome, error_code, "
                 "message, detail_json, duration_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (record.audit_id, record.ts.strftime("%Y-%m-%d %H:%M:%S"), record.action_name,
-                 record.actor, record.actor_detail, record.request_id, record.params_json,
-                 record.preconditions_json, record.effects_json, record.writeback_json,
-                 record.outcome, record.error_code, record.message, record.detail_json,
-                 record.duration_ms))
+                (
+                    record.audit_id,
+                    record.ts.strftime("%Y-%m-%d %H:%M:%S"),
+                    record.action_name,
+                    record.actor,
+                    record.actor_detail,
+                    record.request_id,
+                    record.params_json,
+                    record.preconditions_json,
+                    record.effects_json,
+                    record.writeback_json,
+                    record.outcome,
+                    record.error_code,
+                    record.message,
+                    record.detail_json,
+                    record.duration_ms,
+                ),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -81,13 +96,20 @@ class AuditLog:
     def get(self, audit_id: str) -> dict | None:
         conn = self._store.ontology_conn()
         try:
-            row = conn.execute("SELECT * FROM audit_log WHERE audit_id=?", (audit_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM audit_log WHERE audit_id=?", (audit_id,)
+            ).fetchone()
             return dict(row) if row else None
         finally:
             conn.close()
 
-    def query(self, action: str | None = None, outcome: str | None = None,
-              page: int = 1, page_size: int = 20) -> tuple[list[dict], int]:
+    def query(
+        self,
+        action: str | None = None,
+        outcome: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
         """审计查询（演示用）：按 action/outcome 过滤 + 分页，按时间倒序。"""
         where, params = [], []
         if action:
@@ -100,10 +122,13 @@ class AuditLog:
         conn = self._store.ontology_conn()
         try:
             total = conn.execute(
-                f"SELECT COUNT(*) AS n FROM audit_log {sql_where}", params).fetchone()["n"]
+                f"SELECT COUNT(*) AS n FROM audit_log {sql_where}", params
+            ).fetchone()["n"]
             rows = conn.execute(
                 f"SELECT * FROM audit_log {sql_where} ORDER BY ts DESC, audit_id DESC "
-                "LIMIT ? OFFSET ?", params + [page_size, max(page - 1, 0) * page_size]).fetchall()
+                "LIMIT ? OFFSET ?",
+                params + [page_size, max(page - 1, 0) * page_size],
+            ).fetchall()
             return [dict(r) for r in rows], total
         finally:
             conn.close()

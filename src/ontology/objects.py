@@ -5,6 +5,7 @@
 - ontology-owned：本体自有状态（源系统无此列，如 Order.cancel_reason）；
 - derived：计算态，永不写（available_qty / line_total_cents）。
 """
+
 from datetime import datetime
 from typing import Literal
 
@@ -15,14 +16,18 @@ OWN_ONTOLOGY = "ontology-owned"
 OWN_DERIVED = "derived"
 _OWNERSHIPS = (OWN_SOURCE, OWN_ONTOLOGY, OWN_DERIVED)
 
-OrderStatus = Literal["pending", "confirmed", "shipped", "delivered", "cancelled", "refunded"]
+OrderStatus = Literal[
+    "pending", "confirmed", "shipped", "delivered", "cancelled", "refunded"
+]
 
 
 def own(ownership: str, description: str, **kwargs) -> Field:
     """带状态归属标注的 Pydantic Field（json_schema_extra 供 self_check 与 schema 导出消费）。"""
     if ownership not in _OWNERSHIPS:
         raise ValueError(f"非法状态归属: {ownership}")
-    return Field(description=description, json_schema_extra={"ownership": ownership}, **kwargs)
+    return Field(
+        description=description, json_schema_extra={"ownership": ownership}, **kwargs
+    )
 
 
 def field_ownership(model: type[BaseModel], field_name: str) -> str | None:
@@ -33,6 +38,7 @@ def field_ownership(model: type[BaseModel], field_name: str) -> str | None:
 
 class Customer(BaseModel):
     """客户。PK/Title = customer_id。"""
+
     customer_id: str = own(OWN_SOURCE, "全局唯一客户号（PK/Title）")
     name: str = own(OWN_SOURCE, "客户名称")
     segment: Literal["retail", "sme", "corporate"] = own(OWN_SOURCE, "客户分层")
@@ -43,16 +49,20 @@ class Customer(BaseModel):
 
 class Product(BaseModel):
     """商品（SKU）。PK/Title = product_id。archived 商品不可下单。"""
+
     product_id: str = own(OWN_SOURCE, "SKU（PK/Title）")
     name: str = own(OWN_SOURCE, "商品名")
     category: str = own(OWN_SOURCE, "品类")
     price_cents: int = own(OWN_SOURCE, "单价（分）")
     status: Literal["active", "archived"] = own(OWN_SOURCE, "在售状态")
-    description: str = own(OWN_SOURCE, "商品描述（自由文本，prompt-injection 演示靶场字段）")
+    description: str = own(
+        OWN_SOURCE, "商品描述（自由文本，prompt-injection 演示靶场字段）"
+    )
 
 
 class Warehouse(BaseModel):
     """仓库。PK/Title = warehouse_id。"""
+
     warehouse_id: str = own(OWN_SOURCE, "仓库号（PK/Title）")
     name: str = own(OWN_SOURCE, "仓库名")
     city: str = own(OWN_SOURCE, "所在城市")
@@ -61,17 +71,23 @@ class Warehouse(BaseModel):
 
 class Inventory(BaseModel):
     """库存（每仓每商品一条）。PK = inventory_id（"WH|SKU" 组合）。"""
-    inventory_id: str = own(OWN_SOURCE, "库存记录号（PK，派生自 warehouse_id+product_id）")
+
+    inventory_id: str = own(
+        OWN_SOURCE, "库存记录号（PK，派生自 warehouse_id+product_id）"
+    )
     warehouse_id: str = own(OWN_SOURCE, "所属仓库（FK->Warehouse）")
     product_id: str = own(OWN_SOURCE, "商品（FK->Product）")
     on_hand_qty: int = own(OWN_SOURCE, "在库数量")
     reserved_qty: int = own(OWN_SOURCE, "已锁定数量（下单锁定、发货扣减）")
-    available_qty: int = own(OWN_DERIVED, "可用数量 = on_hand - reserved（计算态，永不写）")
+    available_qty: int = own(
+        OWN_DERIVED, "可用数量 = on_hand - reserved（计算态，永不写）"
+    )
     updated_at: datetime = own(OWN_SOURCE, "更新时间")
 
 
 class Order(BaseModel):
     """订单。PK/Title = order_id。状态机见 §2.5。"""
+
     order_id: str = own(OWN_SOURCE, "订单号（PK/Title）")
     customer_id: str = own(OWN_SOURCE, "下单客户（FK->Customer）")
     status: OrderStatus = own(OWN_SOURCE, "订单状态（状态机 §2.5）")
@@ -81,43 +97,55 @@ class Order(BaseModel):
     note: str = own(OWN_SOURCE, "订单备注（自由文本，prompt-injection 演示靶场字段）")
     created_at: datetime = own(OWN_SOURCE, "下单时间")
     updated_at: datetime = own(OWN_SOURCE, "更新时间")
-    cancel_reason: str | None = own(OWN_ONTOLOGY, "取消原因（本体自有状态，源系统无此列）", default=None)
+    cancel_reason: str | None = own(
+        OWN_ONTOLOGY, "取消原因（本体自有状态，源系统无此列）", default=None
+    )
 
 
 class OrderItem(BaseModel):
     """订单行。PK = order_item_id。"""
+
     order_item_id: str = own(OWN_SOURCE, "订单行号（PK）")
     order_id: str = own(OWN_SOURCE, "所属订单（FK->Order）")
     product_id: str = own(OWN_SOURCE, "商品（FK->Product）")
     qty: int = own(OWN_SOURCE, "数量")
     unit_price_cents: int = own(OWN_SOURCE, "下单时单价快照")
-    line_total_cents: int = own(OWN_DERIVED, "行金额 = qty × unit_price（计算态，永不写）")
+    line_total_cents: int = own(
+        OWN_DERIVED, "行金额 = qty × unit_price（计算态，永不写）"
+    )
 
 
 class Shipment(BaseModel):
     """发货单。PK/Title = shipment_id。MVP 一单一运（1:1）。"""
+
     shipment_id: str = own(OWN_SOURCE, "发货单号（PK/Title）")
     order_id: str = own(OWN_SOURCE, "履约订单（FK->Order）")
     warehouse_id: str = own(OWN_SOURCE, "发货仓（FK->Warehouse）")
-    status: Literal["shipped", "delivered"] = own(OWN_SOURCE, "发货状态（create_shipment 即置 shipped）")
+    status: Literal["shipped", "delivered"] = own(
+        OWN_SOURCE, "发货状态（create_shipment 即置 shipped）"
+    )
     tracking_no: str = own(OWN_SOURCE, "运单号（自动生成）")
     shipped_at: datetime = own(OWN_SOURCE, "出库时间")
 
 
 class Refund(BaseModel):
     """退款申请。PK/Title = refund_id。MVP 整单退款为主。"""
+
     refund_id: str = own(OWN_SOURCE, "退款单号（PK/Title）")
     order_id: str = own(OWN_SOURCE, "退款订单（FK->Order）")
     amount_cents: int = own(OWN_SOURCE, "退款金额（分）")
     status: Literal["pending", "approved", "rejected"] = own(OWN_SOURCE, "退款状态")
     reason: str = own(OWN_SOURCE, "客户申请原因")
-    review_note: str | None = own(OWN_ONTOLOGY, "审核备注（本体自有状态，源系统无此列）", default=None)
+    review_note: str | None = own(
+        OWN_ONTOLOGY, "审核备注（本体自有状态，源系统无此列）", default=None
+    )
     created_at: datetime = own(OWN_SOURCE, "申请时间")
     reviewed_at: datetime | None = own(OWN_SOURCE, "审核时间", default=None)
 
 
 class ObjectTypeDef(BaseModel):
     """对象类型注册定义（§3.2）：模型 + 主键 + API 命名 + 源系统承载表。"""
+
     name: str
     api_name: str
     description: str
@@ -127,11 +155,23 @@ class ObjectTypeDef(BaseModel):
     source_table: str
 
 
-def _obj(name: str, api_name: str, description: str, model: type[BaseModel],
-         pk_field: str, source_table: str) -> ObjectTypeDef:
-    return ObjectTypeDef(name=name, api_name=api_name, description=description,
-                         model=model, pk_field=pk_field, title_field=pk_field,
-                         source_table=source_table)
+def _obj(
+    name: str,
+    api_name: str,
+    description: str,
+    model: type[BaseModel],
+    pk_field: str,
+    source_table: str,
+) -> ObjectTypeDef:
+    return ObjectTypeDef(
+        name=name,
+        api_name=api_name,
+        description=description,
+        model=model,
+        pk_field=pk_field,
+        title_field=pk_field,
+        source_table=source_table,
+    )
 
 
 OBJECT_TYPES: list[ObjectTypeDef] = [
@@ -140,7 +180,9 @@ OBJECT_TYPES: list[ObjectTypeDef] = [
     _obj("Warehouse", "warehouse", "仓库", Warehouse, "warehouse_id", "warehouses"),
     _obj("Inventory", "inventory", "库存", Inventory, "inventory_id", "inventory"),
     _obj("Order", "order", "订单", Order, "order_id", "orders"),
-    _obj("OrderItem", "order_item", "订单行", OrderItem, "order_item_id", "order_items"),
+    _obj(
+        "OrderItem", "order_item", "订单行", OrderItem, "order_item_id", "order_items"
+    ),
     _obj("Shipment", "shipment", "发货", Shipment, "shipment_id", "shipments"),
     _obj("Refund", "refund", "退款", Refund, "refund_id", "refunds"),
 ]

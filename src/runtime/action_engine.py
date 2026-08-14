@@ -10,22 +10,23 @@
 - 拒绝路径早退：任何前置不满足 → rejected + 业务错误码 + 源库零变更（三问测试 3 的机制保证）；
 - 写回与索引同事务语义：源库提交成功才更新索引；索引/本体库失败 → 审计记 failed + 告警（可对账）；
 - 效果计算是纯函数（可单测、可重放，审计 diff 来源）；
-- 一切写操作只能经 execute()（无泛化 update，D-T3）。
+- 一切写操作只能经 execute()（无泛化 update，D-T3）；
+- 审计完整性：actor 白名单（human/llm/api）与 audit_log CHECK 同源，非法 actor
+  在写源库前拒绝（failed），保证"源库已写则必有审计"（补偿式承诺的底线）。
 """
+
 from __future__ import annotations
 
-import json
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from src.ontology import CANONICAL_ERROR_CODES
 from src.ontology.objects import OWN_ONTOLOGY, field_ownership
 from src.ontology.registry import Registry
 from src.runtime.audit import AuditLog, AuditRecord, _j
-from src.runtime.conflict import DEFAULT_STRATEGY, resolve as resolve_conflict
 from src.runtime.index import ObjectIndex
 from src.runtime.store import Store
 
@@ -50,6 +51,10 @@ ERROR_MESSAGES: dict[str, str] = {
     "REFUND_NOT_ALLOWED": "订单状态不允许退款",
 }
 
+# 合法操作者（与 audit_log 的 CHECK 约束同源，store.py ONTOLOGY_SCHEMA；
+# API 层 X-Actor 白名单引用同一常量，防双轨漂移）
+ALLOWED_ACTORS: tuple[str, ...] = ("human", "llm", "api")
+
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -59,6 +64,7 @@ def _now() -> str:
 
 class Effect(BaseModel):
     """变更 diff（前后对比，审计 effects_json 来源，§3.5）。"""
+
     object_type: str
     pk: str
     prop: str
@@ -69,6 +75,7 @@ class Effect(BaseModel):
 
 class Writeback(BaseModel):
     """写回源库的一条 SQL（含影响行数，审计 writeback_json 来源——"源记录真变"铁证）。"""
+
     sql: str
     params: list[Any]
     table: str
@@ -77,6 +84,7 @@ class Writeback(BaseModel):
 
 class Violation(BaseModel):
     """前置规则违反：错误码 + 消息 + 详情。"""
+
     error_code: str
     message: str
     detail: dict[str, Any] | None = None
@@ -84,6 +92,7 @@ class Violation(BaseModel):
 
 class ActionResult(BaseModel):
     """动作执行结果（outcome ∈ applied/rejected/failed）。"""
+
     action_name: str
     outcome: str
     error_code: str | None = None
@@ -106,14 +115,17 @@ class Snapshot:
     def get(self, type_name: str, pk: str) -> dict | None:
         obj = self._registry.object_type(type_name)
         cur = self._conn.execute(
-            f"SELECT * FROM {obj.source_table} WHERE {obj.pk_field}=?", (str(pk),))
+            f"SELECT * FROM {obj.source_table} WHERE {obj.pk_field}=?", (str(pk),)
+        )
         cols = [c[0] for c in cur.description]
         row = cur.fetchone()
         return dict(zip(cols, row)) if row else None
 
     def list_where(self, type_name: str, field: str, value: Any) -> list[dict]:
         obj = self._registry.object_type(type_name)
-        cur = self._conn.execute(f"SELECT * FROM {obj.source_table} WHERE {field}=?", (value,))
+        cur = self._conn.execute(
+            f"SELECT * FROM {obj.source_table} WHERE {field}=?", (value,)
+        )
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
@@ -132,7 +144,7 @@ class Snapshot:
 class ActionHandler:
     """动作处理基类：每动作实现 快照/语义校验/前置规则/效果计算。"""
 
-    def __init__(self, engine: "ActionEngine") -> None:
+    def __init__(self, engine: ActionEngine) -> None:
         self.engine = engine
 
     def load_snapshot(self, snapshot: Snapshot, params: Any) -> dict:
@@ -145,27 +157,32 @@ class ActionHandler:
     def check(self, code: str, snapshot: dict, params: Any) -> tuple[bool, dict | None]:
         raise NotImplementedError
 
-    def compute_effects(self, conn: Any, snapshot: dict, params: Any
-                        ) -> tuple[list[Effect], list[Writeback]]:
+    def compute_effects(
+        self, conn: Any, snapshot: dict, params: Any
+    ) -> tuple[list[Effect], list[Writeback]]:
         raise NotImplementedError
 
 
 class ActionEngine:
     """动作执行管道（§3.3）。"""
 
-    def __init__(self, registry: Registry, store: Store, index: ObjectIndex,
-                 audit: AuditLog, conflict_strategy: str = DEFAULT_STRATEGY) -> None:
+    def __init__(
+        self, registry: Registry, store: Store, index: ObjectIndex, audit: AuditLog
+    ) -> None:
+        # 冲突消解策略 1（user_edit_wins）由各 handler 的无条件写回隐式执行
+        # （compute_effects 算新值 → writeback 覆盖源库当前值）；conflict.py 保留为
+        # 策略 2（时间戳优先）的声明与测试锚点，未接线（技术方案 §3.4 发布期待定）。
         self.registry = registry
         self.store = store
         self.index = index
         self.audit = audit
-        self.conflict_strategy = conflict_strategy
         self._handlers: dict[str, ActionHandler] = {
             a.name: self._build_handler(a.name) for a in registry.actions()
         }
 
     def _build_handler(self, action_name: str) -> ActionHandler:
         from src.runtime import actions_impl  # 延迟导入避免循环
+
         factory = actions_impl.HANDLERS.get(action_name)
         if factory is None:
             raise ValueError(f"动作实现缺失: {action_name}")
@@ -173,24 +190,62 @@ class ActionEngine:
 
     # ---- 主入口 ----
 
-    def execute(self, action_name: str, params: dict[str, Any], actor: str = "api",
-                actor_detail: str = "", request_id: str = "") -> ActionResult:
+    def execute(
+        self,
+        action_name: str,
+        params: dict[str, Any],
+        actor: str = "api",
+        actor_detail: str = "",
+        request_id: str = "",
+    ) -> ActionResult:
         t0 = time.monotonic()
+        # 审计完整性底线：非法 actor 无法落审计（audit_log CHECK），拒绝执行、源库零变更；
+        # API 层另有 400 白名单校验（routes.py），此处为绕过 API 直调 runtime 的兜底。
+        if actor not in ALLOWED_ACTORS:
+            return ActionResult(
+                action_name=action_name,
+                outcome="failed",
+                message=f"非法操作者: {actor}（仅允许 {ALLOWED_ACTORS}）",
+                request_id=request_id,
+                duration_ms=int((time.monotonic() - t0) * 1000),
+            )
         try:
             action = self.registry.action(action_name)
         except KeyError:
-            return self._reject(None, action_name, "UNKNOWN_ACTION", params,
-                                actor, actor_detail, request_id, t0, None, [])
+            return self._reject(
+                None,
+                action_name,
+                "UNKNOWN_ACTION",
+                params,
+                actor,
+                actor_detail,
+                request_id,
+                t0,
+                None,
+                [],
+            )
         handler = self._handlers[action_name]
 
         # ① 参数校验（LLM 输出视为不可信输入，Pydantic 强校验）
         try:
             validated = action.params_model.model_validate(params)
         except ValidationError as exc:
-            detail = [{"loc": ".".join(str(x) for x in e["loc"]), "msg": e["msg"]}
-                      for e in exc.errors()]
-            return self._reject(action, action_name, "INVALID_PARAMS", params,
-                                actor, actor_detail, request_id, t0, detail, [])
+            detail = [
+                {"loc": ".".join(str(x) for x in e["loc"]), "msg": e["msg"]}
+                for e in exc.errors()
+            ]
+            return self._reject(
+                action,
+                action_name,
+                "INVALID_PARAMS",
+                params,
+                actor,
+                actor_detail,
+                request_id,
+                t0,
+                detail,
+                [],
+            )
 
         conn = self.store.source_conn()
         conn.execute("BEGIN IMMEDIATE")
@@ -202,9 +257,19 @@ class ActionEngine:
             violation = handler.validate_semantics(snapshot, validated)
             if violation is not None:
                 conn.rollback()
-                return self._reject(action, action_name, violation.error_code, params,
-                                    actor, actor_detail, request_id, t0,
-                                    violation.detail, [], violation.message)
+                return self._reject(
+                    action,
+                    action_name,
+                    violation.error_code,
+                    params,
+                    actor,
+                    actor_detail,
+                    request_id,
+                    t0,
+                    violation.detail,
+                    [],
+                    violation.message,
+                )
 
             # ④ 前置规则按声明顺序全部求值（审计全量留痕，§3.5 preconditions_json），
             #    拒绝时取第一个违反项（§3.3 violations[0]），源库零变更。
@@ -212,14 +277,25 @@ class ActionEngine:
             first_violation: tuple[str, Any] | None = None
             for pc in action.preconditions:
                 passed, detail = handler.check(pc.error_code, snapshot, validated)
-                checks.append({"code": pc.error_code, "passed": bool(passed), "detail": detail})
+                checks.append(
+                    {"code": pc.error_code, "passed": bool(passed), "detail": detail}
+                )
                 if not passed and first_violation is None:
                     first_violation = (pc.error_code, detail)
             if first_violation is not None:
                 conn.rollback()
-                return self._reject(action, action_name, first_violation[0], params,
-                                    actor, actor_detail, request_id, t0,
-                                    first_violation[1], checks)
+                return self._reject(
+                    action,
+                    action_name,
+                    first_violation[0],
+                    params,
+                    actor,
+                    actor_detail,
+                    request_id,
+                    t0,
+                    first_violation[1],
+                    checks,
+                )
 
             # ⑤ 计算变更（纯函数）+ ⑥ 写回源库
             effects, writebacks = handler.compute_effects(conn, snapshot, validated)
@@ -232,15 +308,20 @@ class ActionEngine:
                 conn.rollback()
             finally:
                 conn.close()
-            return self._failed(action_name, params, actor, actor_detail, request_id,
-                                t0, f"执行异常: {type(exc).__name__}: {exc}")
+            return self._failed(
+                action_name,
+                params,
+                actor,
+                actor_detail,
+                request_id,
+                t0,
+                f"执行异常: {type(exc).__name__}: {exc}",
+            )
         finally:
-            # 拒绝路径（return 在 try 内）也会走到这里释放连接
+            # 拒绝路径（return 在 try 内）也会走到这里释放连接（关闭失败可忽略）
             if conn:
-                try:
+                with suppress(Exception):
                     conn.close()
-                except Exception:  # noqa: BLE001
-                    pass
 
         # ⑦ 源库已提交 → 同步索引 + 本体自有状态（补偿式：失败留审计可对账）
         sync_conn = self.store.source_conn()
@@ -251,21 +332,47 @@ class ActionEngine:
                 obj_def = self.registry.object_type(eff.object_type)
                 if field_ownership(obj_def.model, eff.prop) == OWN_ONTOLOGY:
                     self._persist_ontology_state(eff)
-                    self.index.set_ontology_state(eff.object_type, eff.pk, eff.prop, eff.new)
+                    self.index.set_ontology_state(
+                        eff.object_type, eff.pk, eff.prop, eff.new
+                    )
         except Exception as exc:  # noqa: BLE001 —— 补偿式：审计记 failed + 告警
-            return self._failed(action_name, params, actor, actor_detail, request_id,
-                                t0, f"本体库同步失败（源库已变更，需对账）: {exc}",
-                                effects=effects, writebacks=writebacks)
+            return self._failed(
+                action_name,
+                params,
+                actor,
+                actor_detail,
+                request_id,
+                t0,
+                f"本体库同步失败（源库已变更，需对账）: {exc}",
+                effects=effects,
+                writebacks=writebacks,
+            )
         finally:
             sync_conn.close()
 
         # ⑧ 审计落库（applied）
-        audit_id = self._append_audit(action_name, actor, actor_detail, request_id, params,
-                                      checks, effects, writebacks, "applied", None, t0)
-        return ActionResult(action_name=action_name, outcome="applied", audit_id=audit_id,
-                            request_id=request_id,
-                            duration_ms=int((time.monotonic() - t0) * 1000),
-                            effects=effects, writebacks=writebacks)
+        audit_id = self._append_audit(
+            action_name,
+            actor,
+            actor_detail,
+            request_id,
+            params,
+            checks,
+            effects,
+            writebacks,
+            "applied",
+            None,
+            t0,
+        )
+        return ActionResult(
+            action_name=action_name,
+            outcome="applied",
+            audit_id=audit_id,
+            request_id=request_id,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            effects=effects,
+            writebacks=writebacks,
+        )
 
     # ---- 内部：审计组装 ----
 
@@ -274,19 +381,39 @@ class ActionEngine:
         try:
             conn.execute(
                 "INSERT OR REPLACE INTO ontology_state (object_type, pk, prop, value, updated_at) "
-                "VALUES (?,?,?,?,?)", (eff.object_type, eff.pk, eff.prop,
-                                       None if eff.new is None else str(eff.new), _now()))
+                "VALUES (?,?,?,?,?)",
+                (
+                    eff.object_type,
+                    eff.pk,
+                    eff.prop,
+                    None if eff.new is None else str(eff.new),
+                    _now(),
+                ),
+            )
             conn.commit()
         finally:
             conn.close()
 
-    def _append_audit(self, action_name: str, actor: str, actor_detail: str, request_id: str,
-                      params: dict, checks: list[dict], effects: list[Effect],
-                      writebacks: list[Writeback], outcome: str,
-                      error: tuple[str, dict | None, str | None] | None, t0: float) -> str:
+    def _append_audit(
+        self,
+        action_name: str,
+        actor: str,
+        actor_detail: str,
+        request_id: str,
+        params: dict,
+        checks: list[dict],
+        effects: list[Effect],
+        writebacks: list[Writeback],
+        outcome: str,
+        error: tuple[str, dict | None, str | None] | None,
+        t0: float,
+    ) -> str:
         record = AuditRecord(
-            action_name=action_name, actor=actor, actor_detail=actor_detail,
-            request_id=request_id, params_json=_j(params),
+            action_name=action_name,
+            actor=actor,
+            actor_detail=actor_detail,
+            request_id=request_id,
+            params_json=_j(params),
             preconditions_json=_j(checks),
             effects_json=_j([e.model_dump() for e in effects]),
             writeback_json=_j([w.model_dump() for w in writebacks]),
@@ -298,27 +425,80 @@ class ActionEngine:
         )
         return self.audit.append(record)
 
-    def _reject(self, action: Any, action_name: str, code: str, params: dict,
-                actor: str, actor_detail: str, request_id: str, t0: float,
-                detail: dict | None, checks: list[dict], message: str | None = None) -> ActionResult:
+    def _reject(
+        self,
+        action: Any,
+        action_name: str,
+        code: str,
+        params: dict,
+        actor: str,
+        actor_detail: str,
+        request_id: str,
+        t0: float,
+        detail: dict | None,
+        checks: list[dict],
+        message: str | None = None,
+    ) -> ActionResult:
         msg = message or ERROR_MESSAGES.get(code, code)
-        audit_id = self._append_audit(action_name, actor, actor_detail, request_id, params,
-                                      checks, [], [], "rejected", (code, detail, msg), t0)
-        return ActionResult(action_name=action_name, outcome="rejected", error_code=code,
-                            message=msg, detail=detail, audit_id=audit_id,
-                            request_id=request_id,
-                            duration_ms=int((time.monotonic() - t0) * 1000))
+        audit_id = self._append_audit(
+            action_name,
+            actor,
+            actor_detail,
+            request_id,
+            params,
+            checks,
+            [],
+            [],
+            "rejected",
+            (code, detail, msg),
+            t0,
+        )
+        return ActionResult(
+            action_name=action_name,
+            outcome="rejected",
+            error_code=code,
+            message=msg,
+            detail=detail,
+            audit_id=audit_id,
+            request_id=request_id,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+        )
 
-    def _failed(self, action_name: str, params: dict, actor: str, actor_detail: str,
-                request_id: str, t0: float, message: str, effects: list[Effect] | None = None,
-                writebacks: list[Writeback] | None = None) -> ActionResult:
-        audit_id = self._append_audit(action_name, actor, actor_detail, request_id, params,
-                                      [], effects or [], writebacks or [], "failed",
-                                      (None, None, message), t0)
-        return ActionResult(action_name=action_name, outcome="failed", message=message,
-                            audit_id=audit_id, request_id=request_id,
-                            duration_ms=int((time.monotonic() - t0) * 1000),
-                            effects=effects or [], writebacks=writebacks or [])
+    def _failed(
+        self,
+        action_name: str,
+        params: dict,
+        actor: str,
+        actor_detail: str,
+        request_id: str,
+        t0: float,
+        message: str,
+        effects: list[Effect] | None = None,
+        writebacks: list[Writeback] | None = None,
+    ) -> ActionResult:
+        audit_id = self._append_audit(
+            action_name,
+            actor,
+            actor_detail,
+            request_id,
+            params,
+            [],
+            effects or [],
+            writebacks or [],
+            "failed",
+            (None, None, message),
+            t0,
+        )
+        return ActionResult(
+            action_name=action_name,
+            outcome="failed",
+            message=message,
+            audit_id=audit_id,
+            request_id=request_id,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            effects=effects or [],
+            writebacks=writebacks or [],
+        )
 
     # ---- 工具 ----
 
@@ -326,5 +506,6 @@ class ActionEngine:
         """取源表主键最大序号 +1（如 ORD-2200 → 2201）。"""
         row = conn.execute(
             f"SELECT MAX(CAST(SUBSTR({pk_field}, {len(prefix) + 1}) AS INTEGER)) AS m "
-            f"FROM {table}").fetchone()
+            f"FROM {table}"
+        ).fetchone()
         return (row[0] or 0) + 1

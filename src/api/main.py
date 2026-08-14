@@ -4,6 +4,7 @@ create_app 组装：registry（self_check）→ Store（双库+migrate）→ Obj
 → AuditLog → ActionEngine → ObjectQuery；挂载 meta/objects/actions/audit 路由。
 OpenAPI 自动生成（/openapi.json 与 /docs）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from src.runtime.store import Store
 @dataclass
 class RuntimeServices:
     """进程内服务聚合（API 薄壳的依赖注入）。"""
+
     registry: Any
     store: Store
     index: ObjectIndex
@@ -32,11 +34,15 @@ class RuntimeServices:
     engine: ActionEngine
 
 
-def create_app(source_db: str | Path | None = None, ontology_db: str | Path | None = None,
-               rebuild_seed: bool = False) -> FastAPI:
+def create_app(
+    source_db: str | Path | None = None,
+    ontology_db: str | Path | None = None,
+    rebuild_seed: bool = False,
+) -> FastAPI:
     """创建语义接口应用。source_db/ontology_db 可注入（测试用临时库）。"""
     if rebuild_seed:
         from data import seed_retail_source
+
         seed_path = Path(source_db) if source_db else seed_retail_source.DEFAULT_DB_PATH
         seed_retail_source.build_database(seed_path)
 
@@ -62,8 +68,14 @@ def create_app(source_db: str | Path | None = None, ontology_db: str | Path | No
         description="零售供应链最小语义接口闭环（对象/链接/动作 + 本体运行时写回回路）",
         version="0.1.0",
     )
-    app.state.runtime = RuntimeServices(registry=registry, store=store, index=index,
-                                        query=query, audit=audit, engine=engine)
+    app.state.runtime = RuntimeServices(
+        registry=registry,
+        store=store,
+        index=index,
+        query=query,
+        audit=audit,
+        engine=engine,
+    )
     app.include_router(routes.meta_router)
     app.include_router(routes.objects_router)
     app.include_router(routes.actions_router)
@@ -79,8 +91,12 @@ def _inject_schema_into_openapi(app: FastAPI, registry: Any) -> None:
     def custom_openapi() -> dict:
         if app.openapi_schema:
             return app.openapi_schema
-        schema = get_openapi(title=app.title, version=app.version,
-                             description=app.description, routes=app.routes)
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
         schemas = schema.setdefault("components", {}).setdefault("schemas", {})
         for obj in registry.object_types():
             name = obj.model.__name__

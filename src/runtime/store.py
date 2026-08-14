@@ -5,6 +5,7 @@
 - 一致性取补偿式（§7.4）：源库事务先提交，本体库后写；本体库失败 → 审计记 failed，可人工对账；
 - schema_version：本体演进最小实现（版本号+变更记录，分支/场景发布期，§7.3）。
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -48,8 +49,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action_name);
 CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_log(outcome);
 """
 
-DEFAULT_SOURCE_DB = Path(__file__).resolve().parents[2] / "data" / "sources" / "retail_source.db"
-DEFAULT_ONTOLOGY_DB = Path(__file__).resolve().parents[2] / "data" / "ontology" / "ontology.db"
+DEFAULT_SOURCE_DB = (
+    Path(__file__).resolve().parents[2] / "data" / "sources" / "retail_source.db"
+)
+DEFAULT_ONTOLOGY_DB = (
+    Path(__file__).resolve().parents[2] / "data" / "ontology" / "ontology.db"
+)
 
 
 def _now() -> str:
@@ -59,10 +64,15 @@ def _now() -> str:
 class Store:
     """双库访问入口：每次调用返回独立连接（SQLite 单写连接 = 天然串行，§3.4）。"""
 
-    def __init__(self, source_path: str | Path | None = None,
-                 ontology_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        source_path: str | Path | None = None,
+        ontology_path: str | Path | None = None,
+    ) -> None:
         self._source_path = Path(source_path) if source_path else DEFAULT_SOURCE_DB
-        self._ontology_path = Path(ontology_path) if ontology_path else DEFAULT_ONTOLOGY_DB
+        self._ontology_path = (
+            Path(ontology_path) if ontology_path else DEFAULT_ONTOLOGY_DB
+        )
         self._ontology_path.parent.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -90,7 +100,12 @@ class Store:
             conn.executescript(ONTOLOGY_SCHEMA)
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) VALUES (?,?,?)",
-                (version, "MVP 本体运行时 v1：audit_log / ontology_state / schema_version", _now()))
+                (
+                    version,
+                    "MVP 本体运行时 v1：audit_log / ontology_state / schema_version",
+                    _now(),
+                ),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -98,7 +113,9 @@ class Store:
     def get_schema_version(self) -> int | None:
         conn = self.ontology_conn()
         try:
-            row = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+            row = conn.execute(
+                "SELECT MAX(version) AS v FROM schema_version"
+            ).fetchone()
             return row["v"] if row else None
         finally:
             conn.close()
