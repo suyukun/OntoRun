@@ -6,16 +6,18 @@
 - §4.3 错误码全集 17 码在 API 层有映射（错误码全集单测）；
 - OpenAPI 自动生成（/openapi.json）。
 """
+
 import json
 import shutil
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 
 from data import seed_retail_source as seed
 from src.api.main import create_app
-from src.ontology.actions import CANONICAL_ERROR_CODES
 from src.api.schemas import ERROR_CODE_HTTP_STATUS, ERROR_MESSAGES
+from src.ontology.actions import CANONICAL_ERROR_CODES
 
 
 @pytest.fixture(scope="session")
@@ -46,6 +48,7 @@ def assert_ok(resp):
 
 # ---------- /meta ----------
 
+
 def test_meta_schema_counts(client):
     body = assert_ok(client.get("/meta/schema"))
     assert len(body["data"]["objects"]) == 8
@@ -65,8 +68,14 @@ def test_meta_objects(client):
 def test_meta_actions_include_params_schema(client):
     body = assert_ok(client.get("/meta/actions"))
     names = {a["name"] for a in body["data"]}
-    assert names == {"create_order", "confirm_order", "cancel_order",
-                     "create_shipment", "adjust_inventory", "approve_refund"}
+    assert names == {
+        "create_order",
+        "confirm_order",
+        "cancel_order",
+        "create_shipment",
+        "adjust_inventory",
+        "approve_refund",
+    }
     cancel = next(a for a in body["data"] if a["name"] == "cancel_order")
     assert "order_id" in cancel["params_schema"]["properties"]
     assert cancel["params_schema"]["required"] == ["order_id"]
@@ -76,8 +85,13 @@ def test_meta_actions_include_params_schema(client):
 
 # ---------- /objects ----------
 
+
 def test_object_list_filter_pagination(client):
-    body = assert_ok(client.get("/objects/Order", params={"status": "confirmed", "page": 1, "page_size": 5}))
+    body = assert_ok(
+        client.get(
+            "/objects/Order", params={"status": "confirmed", "page": 1, "page_size": 5}
+        )
+    )
     data = body["data"]
     assert data["total"] >= 100
     assert len(data["items"]) == 5
@@ -120,6 +134,7 @@ def test_object_detail_not_found(client):
 
 # ---------- 链接遍历 ----------
 
+
 def test_link_traversal_out(client):
     body = assert_ok(client.get("/objects/Order/ORD-1001/links/order.items"))
     data = body["data"]
@@ -128,15 +143,22 @@ def test_link_traversal_out(client):
 
 
 def test_link_traversal_in(client):
-    cus = client.get("/objects/Order/ORD-1001").json()["data"]["properties"]["customer_id"]
-    body = assert_ok(client.get(f"/objects/Customer/{cus}/links/order.customer",
-                                params={"direction": "in"}))
+    cus = client.get("/objects/Order/ORD-1001").json()["data"]["properties"][
+        "customer_id"
+    ]
+    body = assert_ok(
+        client.get(
+            f"/objects/Customer/{cus}/links/order.customer", params={"direction": "in"}
+        )
+    )
     assert body["data"]["direction"] == "in"
     assert body["data"]["objects"]
 
 
 def test_link_traversal_bad_direction(client):
-    resp = client.get("/objects/Order/ORD-1001/links/order.items", params={"direction": "up"})
+    resp = client.get(
+        "/objects/Order/ORD-1001/links/order.items", params={"direction": "up"}
+    )
     assert resp.status_code == 400
     assert envelope(resp)["error"]["code"] == "INVALID_DIRECTION"
 
@@ -149,8 +171,11 @@ def test_link_traversal_unknown_link(client):
 
 # ---------- /actions（唯一写入口） ----------
 
+
 def test_post_action_applied_and_audit_replay(client):
-    resp = client.post("/actions/cancel_order", json={"order_id": "ORD-1001", "reason": "改主意"})
+    resp = client.post(
+        "/actions/cancel_order", json={"order_id": "ORD-1001", "reason": "改主意"}
+    )
     body = envelope(resp)
     assert resp.status_code == 200
     assert body["outcome"] == "applied"
@@ -181,39 +206,115 @@ def test_post_action_unknown(client):
 
 
 def test_post_action_invalid_params(client):
-    resp = client.post("/actions/create_order",
-                       json={"customer_id": "CUS-0001", "items": [{"product_id": "SKU-003", "qty": 0}]})
+    resp = client.post(
+        "/actions/create_order",
+        json={
+            "customer_id": "CUS-0001",
+            "items": [{"product_id": "SKU-003", "qty": 0}],
+        },
+    )
+    body = envelope(resp)
+    assert body["outcome"] == "rejected" and body["error"]["code"] == "INVALID_PARAMS"
+
+
+def test_post_action_string_param_length_limit(client):
+    """【建议5】自由文本参数超 500 字符 → INVALID_PARAMS（§5.4 长度上限）。"""
+    resp = client.post(
+        "/actions/cancel_order", json={"order_id": "ORD-1001", "reason": "x" * 501}
+    )
     body = envelope(resp)
     assert body["outcome"] == "rejected" and body["error"]["code"] == "INVALID_PARAMS"
 
 
 def test_post_action_malformed_json(client):
-    resp = client.post("/actions/confirm_order", content="{not json", headers={"Content-Type": "application/json"})
+    resp = client.post(
+        "/actions/confirm_order",
+        content="{not json",
+        headers={"Content-Type": "application/json"},
+    )
     assert resp.status_code == 400
     assert envelope(resp)["error"]["code"] == "INVALID_REQUEST"
 
 
 def test_post_action_echo_request_id(client):
-    resp = client.post("/actions/confirm_order", json={"order_id": "ORD-0001"},
-                       headers={"X-Request-ID": "req_abc123"})
+    resp = client.post(
+        "/actions/confirm_order",
+        json={"order_id": "ORD-0001"},
+        headers={"X-Request-ID": "req_abc123"},
+    )
     assert envelope(resp)["request_id"] == "req_abc123"
+
+
+def test_post_action_invalid_actor_rejected_400(client, tmp_path):
+    """【重要1】X-Actor 白名单：非法值 400 拒绝，源库零变更、零审计（写必有痕）。"""
+    resp = client.post(
+        "/actions/confirm_order",
+        json={"order_id": "ORD-0001"},
+        headers={"X-Actor": "evil_hacker"},
+    )
+    assert resp.status_code == 400
+    body = envelope(resp)
+    assert body["outcome"] == "error"
+    assert body["error"]["code"] == "INVALID_ACTOR"
+    # 源库未变（不再出现"写已提交、无留痕"）
+    conn = sqlite3.connect(tmp_path / "source.db")
+    try:
+        status = conn.execute(
+            "SELECT status FROM orders WHERE order_id='ORD-0001'"
+        ).fetchone()[0]
+        assert status == "pending"
+    finally:
+        conn.close()
+    # 无审计记录
+    aud = assert_ok(client.get("/audit", params={"action": "confirm_order"}))
+    assert aud["data"]["total"] == 0
+
+
+def test_post_action_valid_actors_audited(client):
+    """【重要1】合法 actor（human/llm/api）正常执行且审计 actor 与请求头一致（写必有痕）。"""
+    for actor in ("human", "llm", "api"):
+        resp = client.post(
+            "/actions/create_order",
+            json={
+                "customer_id": "CUS-0001",
+                "items": [{"product_id": "SKU-003", "qty": 1}],
+            },
+            headers={"X-Actor": actor},
+        )
+        body = envelope(resp)
+        assert body["outcome"] == "applied", f"actor={actor}: {body}"
+        replay = assert_ok(client.get(f"/actions/{body['data']['audit_id']}"))
+        assert replay["data"]["actor"] == actor
 
 
 def test_action_create_order_end_to_end(client):
     """create_order → confirm_order → create_shipment 全链路（唯一写入口）。"""
-    r1 = client.post("/actions/create_order",
-                     json={"customer_id": "CUS-0001", "items": [{"product_id": "SKU-003", "qty": 2}]})
+    r1 = client.post(
+        "/actions/create_order",
+        json={
+            "customer_id": "CUS-0001",
+            "items": [{"product_id": "SKU-003", "qty": 2}],
+        },
+    )
     assert envelope(r1)["outcome"] == "applied"
     order_id = envelope(r1)["data"]["effects"][0]["pk"]
-    assert client.post("/actions/confirm_order", json={"order_id": order_id}).json()["outcome"] == "applied"
-    r3 = client.post("/actions/create_shipment",
-                     json={"order_id": order_id, "warehouse_id": seed.MAIN_WAREHOUSE_ID})
+    assert (
+        client.post("/actions/confirm_order", json={"order_id": order_id}).json()[
+            "outcome"
+        ]
+        == "applied"
+    )
+    r3 = client.post(
+        "/actions/create_shipment",
+        json={"order_id": order_id, "warehouse_id": seed.MAIN_WAREHOUSE_ID},
+    )
     assert envelope(r3)["outcome"] == "applied"
     detail = assert_ok(client.get(f"/objects/Order/{order_id}"))
     assert detail["data"]["properties"]["status"] == "shipped"
 
 
 # ---------- /audit ----------
+
 
 def test_audit_query_and_get(client):
     client.post("/actions/cancel_order", json={"order_id": "ORD-1001"})
@@ -227,10 +328,13 @@ def test_audit_query_and_get(client):
 
 # ---------- 错误码全集映射（§4.3） ----------
 
+
 def test_error_code_full_set_mapped():
     """17 个规范错误码全部有 API 层消息与 HTTP 状态映射。"""
     missing_msg = [c for c in CANONICAL_ERROR_CODES if not ERROR_MESSAGES.get(c)]
-    missing_status = [c for c in CANONICAL_ERROR_CODES if c not in ERROR_CODE_HTTP_STATUS]
+    missing_status = [
+        c for c in CANONICAL_ERROR_CODES if c not in ERROR_CODE_HTTP_STATUS
+    ]
     assert missing_msg == [], f"缺消息: {missing_msg}"
     assert missing_status == [], f"缺状态映射: {missing_status}"
     # 业务码（§4.3 全集）在信封内以 200 返回，不产生 4xx 语义
@@ -239,17 +343,21 @@ def test_error_code_full_set_mapped():
 
 # ---------- 无泛化写路径（D-T3，§1.1/§5.2） ----------
 
+
 def test_no_generic_write_paths():
     """OpenAPI 中不存在对对象/字段的泛化写端点（无 PUT/PATCH/DELETE /objects）。"""
     openapi = TestClient(create_app()).get("/openapi.json").json()
     for path, methods in openapi["paths"].items():
         if path.startswith("/objects"):
-            assert not ({"put", "patch", "delete", "post"} & set(methods)), f"泛化写路径: {path} {methods}"
+            assert not ({"put", "patch", "delete", "post"} & set(methods)), (
+                f"泛化写路径: {path} {methods}"
+            )
     assert "/actions/{action_name}" in openapi["paths"]
     assert "post" in openapi["paths"]["/actions/{action_name}"]
 
 
 # ---------- OpenAPI ----------
+
 
 def test_openapi_generated(client):
     resp = client.get("/openapi.json")
@@ -257,10 +365,17 @@ def test_openapi_generated(client):
     spec = resp.json()
     assert spec["info"]["title"] == "OntoRun 语义接口"
     paths = spec["paths"]
-    for p in ["/meta/schema", "/meta/objects", "/meta/actions",
-              "/objects/{type}", "/objects/{type}/{pk}",
-              "/objects/{type}/{pk}/links/{link_name}",
-              "/actions/{action_name}", "/audit", "/audit/{audit_id}"]:
+    for p in [
+        "/meta/schema",
+        "/meta/objects",
+        "/meta/actions",
+        "/objects/{type}",
+        "/objects/{type}/{pk}",
+        "/objects/{type}/{pk}/links/{link_name}",
+        "/actions/{action_name}",
+        "/audit",
+        "/audit/{audit_id}",
+    ]:
         assert p in paths, f"OpenAPI 缺端点 {p}"
     # 动作参数 schema 进入 OpenAPI components
     assert "CreateOrderParams" in spec["components"]["schemas"]

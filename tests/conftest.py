@@ -1,4 +1,5 @@
 """pytest 全局配置：将项目根目录加入 sys.path（src/data 均为顶层包）。"""
+
 import sys
 from pathlib import Path
 

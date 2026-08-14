@@ -2,6 +2,7 @@
 
 技术方案依据：§2.6 corner case 设计、§7.1 表结构、§7.2 seed 设计。
 """
+
 import sqlite3
 
 import pytest
@@ -9,8 +10,8 @@ import pytest
 from data import seed_retail_source as seed
 
 # 4 类 corner case 的期望样本（与 data/seed_retail_source.py 中常量对应）
-SHORTAGE_SKU_ID = "SKU-001"      # available = 30（缺货演示：要 100 件被拦）
-ZERO_STOCK_SKU_ID = "SKU-002"    # on_hand = 0（零库存演示）
+SHORTAGE_SKU_ID = "SKU-001"  # available = 30（缺货演示：要 100 件被拦）
+ZERO_STOCK_SKU_ID = "SKU-002"  # on_hand = 0（零库存演示）
 INTERCEPT_ORDER_ID = "ORD-2007"  # 已发货订单（拦截取消演示，对齐 §4.2 示例）
 INTERCEPT_SHIPMENT_ID = "SHP-88"
 
@@ -27,6 +28,7 @@ def conn() -> sqlite3.Connection:
 
 
 # ---------- 4 类 corner case ----------
+
 
 def test_corner_1_shortage_sku_exists(conn):
     """corner ①缺货：存在 available_qty == 30 的 active 商品（on_hand - reserved = 30）。"""
@@ -48,7 +50,8 @@ def test_corner_2_shipped_order_exists(conn):
     row = conn.execute(
         "SELECT o.order_id, s.shipment_id, s.status AS ship_status "
         "FROM orders o JOIN shipments s ON s.order_id = o.order_id "
-        "WHERE o.order_id = ?", (INTERCEPT_ORDER_ID,),
+        "WHERE o.order_id = ?",
+        (INTERCEPT_ORDER_ID,),
     ).fetchone()
     assert row is not None, "已发货拦截样本 ORD-2007 不存在"
     assert row["shipment_id"] == INTERCEPT_SHIPMENT_ID
@@ -57,7 +60,9 @@ def test_corner_2_shipped_order_exists(conn):
 
 def test_corner_3_pending_refund_exists(conn):
     """corner ③退款：pending 退款存在（双签演示），且含 1 笔超实付、1 笔已 approved（冲突演示）。"""
-    pending = conn.execute("SELECT COUNT(*) AS n FROM refunds WHERE status='pending'").fetchone()["n"]
+    pending = conn.execute(
+        "SELECT COUNT(*) AS n FROM refunds WHERE status='pending'"
+    ).fetchone()["n"]
     assert pending >= 2, f"pending 退款应 ≥2 笔，实际 {pending}"
     # 超实付样本：amount > 对应订单 paid_cents
     over = conn.execute(
@@ -65,7 +70,9 @@ def test_corner_3_pending_refund_exists(conn):
         "WHERE r.status='pending' AND r.amount_cents > o.paid_cents LIMIT 1"
     ).fetchone()
     assert over is not None, "缺少超实付 pending 退款样本（AMOUNT_EXCEEDS_PAID 演示）"
-    approved = conn.execute("SELECT COUNT(*) AS n FROM refunds WHERE status='approved'").fetchone()["n"]
+    approved = conn.execute(
+        "SELECT COUNT(*) AS n FROM refunds WHERE status='approved'"
+    ).fetchone()["n"]
     assert approved >= 1, "缺少已 approved 退款样本（REFUND_NOT_PENDING 冲突演示）"
 
 
@@ -80,6 +87,7 @@ def test_corner_4_zero_inventory_exists(conn):
 
 
 # ---------- 规模与一致性不变量 ----------
+
 
 def test_scale_targets(conn):
     """§7.2 规模：几百客户 / 上千订单 / 几十商品 / 多仓库 / 有发货与退款。"""
@@ -148,15 +156,29 @@ def test_refunded_orders_have_full_approved_refund(conn):
 
 def test_all_order_statuses_present(conn):
     """§7.2：pending/confirmed/shipped/delivered/cancelled/refunded 各状态都要有。"""
-    rows = conn.execute("SELECT status, COUNT(*) AS n FROM orders GROUP BY status").fetchall()
+    rows = conn.execute(
+        "SELECT status, COUNT(*) AS n FROM orders GROUP BY status"
+    ).fetchall()
     present = {r["status"] for r in rows if r["n"] > 0}
-    assert present == {"pending", "confirmed", "shipped", "delivered", "cancelled", "refunded"}, present
+    assert present == {
+        "pending",
+        "confirmed",
+        "shipped",
+        "delivered",
+        "cancelled",
+        "refunded",
+    }, present
 
 
 TABLE_PKS = {
-    "customers": "customer_id", "products": "product_id", "warehouses": "warehouse_id",
-    "inventory": "inventory_id", "orders": "order_id", "order_items": "order_item_id",
-    "shipments": "shipment_id", "refunds": "refund_id",
+    "customers": "customer_id",
+    "products": "product_id",
+    "warehouses": "warehouse_id",
+    "inventory": "inventory_id",
+    "orders": "order_id",
+    "order_items": "order_item_id",
+    "shipments": "shipment_id",
+    "refunds": "refund_id",
 }
 
 
@@ -168,4 +190,6 @@ def test_seed_is_deterministic(tmp_path):
         with sqlite3.connect(db1) as c1, sqlite3.connect(db2) as c2:
             rows1 = c1.execute(f"SELECT * FROM {table} ORDER BY {pk}").fetchall()
             rows2 = c2.execute(f"SELECT * FROM {table} ORDER BY {pk}").fetchall()
-            assert rows1 == rows2, f"{table} 逐行不一致（{len(rows1)} vs {len(rows2)} 行）"
+            assert rows1 == rows2, (
+                f"{table} 逐行不一致（{len(rows1)} vs {len(rows2)} 行）"
+            )

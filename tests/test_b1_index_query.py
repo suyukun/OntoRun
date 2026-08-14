@@ -4,13 +4,13 @@
 - query：list_objects（等值过滤/分页）、get_detail（属性+链接计数）、get_links（双向遍历）；
 - §2.7 derived 字段（available_qty / line_total_cents）计算态永不写。
 """
+
 import sqlite3
 
 import pytest
 
 from data import seed_retail_source as seed
 from src.ontology import build_registry
-from src.ontology.registry import Registry
 from src.runtime.index import ObjectIndex
 from src.runtime.query import (
     InvalidDirection,
@@ -50,14 +50,30 @@ def source_conn() -> sqlite3.Connection:
 
 # ---------- 加载与对象读取 ----------
 
+
 def test_index_load_counts_match_source(index, source_conn):
     """索引行数 = 源库各表行数（8 对象全量加载）。"""
-    tables = ["customers", "products", "warehouses", "inventory",
-              "orders", "order_items", "shipments", "refunds"]
+    tables = [
+        "customers",
+        "products",
+        "warehouses",
+        "inventory",
+        "orders",
+        "order_items",
+        "shipments",
+        "refunds",
+    ]
     for table in tables:
-        obj_type = {"customers": "Customer", "products": "Product", "warehouses": "Warehouse",
-                    "inventory": "Inventory", "orders": "Order", "order_items": "OrderItem",
-                    "shipments": "Shipment", "refunds": "Refund"}[table]
+        obj_type = {
+            "customers": "Customer",
+            "products": "Product",
+            "warehouses": "Warehouse",
+            "inventory": "Inventory",
+            "orders": "Order",
+            "order_items": "OrderItem",
+            "shipments": "Shipment",
+            "refunds": "Refund",
+        }[table]
         n_source = source_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         assert len(index.list_all(obj_type)) == n_source, f"{obj_type} 行数不一致"
 
@@ -97,16 +113,22 @@ def test_ontology_state_merge(index):
 
 # ---------- 对象查询（list/filter/分页） ----------
 
+
 def test_list_objects_filter_and_pagination(query, source_conn):
     """等值过滤 + 分页 + total（MVP 过滤：等值与枚举，§3.2）。"""
     n_confirmed = source_conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE status='confirmed'").fetchone()[0]
-    page1, total = query.list_objects("Order", filters={"status": "confirmed"}, page=1, page_size=10)
+        "SELECT COUNT(*) FROM orders WHERE status='confirmed'"
+    ).fetchone()[0]
+    page1, total = query.list_objects(
+        "Order", filters={"status": "confirmed"}, page=1, page_size=10
+    )
     assert total == n_confirmed
     assert len(page1) == 10
     pks1 = [it["pk"] for it in page1]
     assert pks1 == sorted(pks1), "分页结果应按主键升序（确定性）"
-    page2, _ = query.list_objects("Order", filters={"status": "confirmed"}, page=2, page_size=10)
+    page2, _ = query.list_objects(
+        "Order", filters={"status": "confirmed"}, page=2, page_size=10
+    )
     assert [it["pk"] for it in page2] != pks1
 
 
@@ -129,6 +151,7 @@ def test_list_objects_unknown_filter_field_raises(query):
 
 # ---------- 详情与链接计数 ----------
 
+
 def test_get_detail_shape_and_link_counts(query, source_conn):
     """Order 详情：全属性 + out（order.customer/order.items）+ in（order.shipments 等）。"""
     detail = query.get_detail("Order", ORD_1001)
@@ -149,18 +172,21 @@ def test_get_detail_shape_and_link_counts(query, source_conn):
     assert links["in"]["refund.order"] == 0
     # 源库一致：该订单行数
     n_items = source_conn.execute(
-        "SELECT COUNT(*) FROM order_items WHERE order_id=?", (ORD_1001,)).fetchone()[0]
+        "SELECT COUNT(*) FROM order_items WHERE order_id=?", (ORD_1001,)
+    ).fetchone()[0]
     assert n_items == 2
 
 
 def test_get_detail_customer_incoming_orders(query, source_conn):
     """Customer 详情：out 为空、in 含 customer.orders（订单数 = 源库该客户订单数）。"""
     cus = source_conn.execute(
-        "SELECT customer_id FROM orders WHERE order_id=?", (ORD_1001,)).fetchone()["customer_id"]
+        "SELECT customer_id FROM orders WHERE order_id=?", (ORD_1001,)
+    ).fetchone()["customer_id"]
     detail = query.get_detail("Customer", cus)
     # out：从 Customer 出发经反向名 customer.orders；in：order.customer 指向它
     n_orders = source_conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE customer_id=?", (cus,)).fetchone()[0]
+        "SELECT COUNT(*) FROM orders WHERE customer_id=?", (cus,)
+    ).fetchone()[0]
     assert detail["links"]["out"]["customer.orders"] == n_orders
     assert detail["links"]["in"]["order.customer"] == n_orders
 
@@ -172,11 +198,14 @@ def test_get_detail_unknown_pk_raises(query):
 
 # ---------- 链接遍历（双向） ----------
 
+
 def test_traverse_out_order_items(query):
     objs = query.get_links("Order", ORD_1001, "order.items", "out")
     assert len(objs) == 2
     assert {o["object_type"] for o in objs} == {"OrderItem"}
-    qty_by_product = {o["properties"]["product_id"]: o["properties"]["qty"] for o in objs}
+    qty_by_product = {
+        o["properties"]["product_id"]: o["properties"]["qty"] for o in objs
+    }
     assert qty_by_product == {"SKU-003": 3, "SKU-004": 2}
 
 
@@ -190,12 +219,14 @@ def test_traverse_out_order_customer(query):
 def test_traverse_in_customer_orders(query, source_conn):
     """Customer → order.customer（in 方向：指向该客户的订单）。"""
     cus = source_conn.execute(
-        "SELECT customer_id FROM orders WHERE order_id=?", (ORD_1001,)).fetchone()["customer_id"]
+        "SELECT customer_id FROM orders WHERE order_id=?", (ORD_1001,)
+    ).fetchone()["customer_id"]
     objs = query.get_links("Customer", cus, "order.customer", "in")
     assert objs, "客户应有订单"
     assert all(o["object_type"] == "Order" for o in objs)
     n = source_conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE customer_id=?", (cus,)).fetchone()[0]
+        "SELECT COUNT(*) FROM orders WHERE customer_id=?", (cus,)
+    ).fetchone()[0]
     assert len(objs) == n
 
 
@@ -217,6 +248,7 @@ def test_traverse_wrong_endpoint_raises(query):
 
 # ---------- 增量更新（动作后同步，§3.3 ⑦） ----------
 
+
 def test_refresh_updates_row_and_links(index):
     """refresh：源库行变更后增量更新对象与链接（不重建全索引）。"""
     db_path = seed.build_database()
@@ -226,8 +258,10 @@ def test_refresh_updates_row_and_links(index):
     idx = ObjectIndex(build_registry())
     idx.load_all(conn)
     assert idx.get("Order", ORD_1001)["status"] == "confirmed"
-    conn.execute("UPDATE orders SET status='cancelled', updated_at='2026-08-14 12:00:00' WHERE order_id=?",
-                 (ORD_1001,))
+    conn.execute(
+        "UPDATE orders SET status='cancelled', updated_at='2026-08-14 12:00:00' WHERE order_id=?",
+        (ORD_1001,),
+    )
     conn.commit()
     idx.refresh("Order", ORD_1001, conn)
     assert idx.get("Order", ORD_1001)["status"] == "cancelled"
