@@ -1,5 +1,6 @@
 # OntoRun 后端依赖（安装：python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple）
 pydantic>=2.0
+openai>=1.0  # A1 LLM provider（DeepSeek OpenAI 兼容 SDK，本机已装 2.32）
 pytest>=7.0
 pytest-cov>=5.0
 ruff>=0.16
