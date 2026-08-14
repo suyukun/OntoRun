@@ -103,11 +103,16 @@ class Registry:
     def _check_links(self) -> list[Issue]:
         issues: list[Issue] = []
         seen_names: set[str] = set()
+        seen_inverse: set[str] = set()
         for link in self._links:
             if link.name in seen_names:
                 issues.append(Issue(severity="error", code="LINK_NAME_DUPLICATE",
                                     message=f"链接名重复: {link.name}"))
             seen_names.add(link.name)
+            if link.inverse_name in seen_inverse:
+                issues.append(Issue(severity="error", code="LINK_INVERSE_DUPLICATE",
+                                    message=f"反向名重复: {link.inverse_name}"))
+            seen_inverse.add(link.inverse_name)
             if link.source_type not in self._objects:
                 issues.append(Issue(severity="error", code="LINK_UNKNOWN_SOURCE",
                                     message=f"{link.name}: 源类型 {link.source_type} 未注册"))
