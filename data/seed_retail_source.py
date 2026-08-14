@@ -422,7 +422,8 @@ def build_database(db_path: str | Path | None = None, seed: int = SEED) -> Path:
     inventory_rows = []
     for (wh, pid), st in sim["inventory"].items():
         inventory_rows.append((f"{wh}|{pid}", wh, pid, st["on_hand"], st["reserved"],
-                               _fmt(datetime(2026, 8, 14, tzinfo=timezone.utc)
+                               _fmt(datetime(ANCHOR_DATE.year, ANCHOR_DATE.month,
+                                    ANCHOR_DATE.day, tzinfo=timezone.utc)
                                     - timedelta(days=rng.randint(0, 7)))))
 
     conn = sqlite3.connect(path)
