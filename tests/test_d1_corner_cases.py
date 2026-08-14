@@ -17,9 +17,13 @@ INTERCEPT_SHIPMENT_ID = "SHP-88"
 
 
 @pytest.fixture(scope="module")
-def conn() -> sqlite3.Connection:
-    """在规范路径生成源系统库（确定性、幂等），并返回只读连接。"""
-    db_path = seed.build_database()
+def conn(tmp_path_factory) -> sqlite3.Connection:
+    """在 tmp 路径生成源系统库（确定性、幂等；不写正式种子库，防并行竞态）。
+
+    参考 test_d1:187 的 tmp 正例（build_database(tmp_path)）与 test_b2/test_b3 的
+    session 级 tmp seed 模式。
+    """
+    db_path = seed.build_database(tmp_path_factory.mktemp("d1") / "source.db")
     assert db_path.exists(), f"源系统库未生成: {db_path}"
     c = sqlite3.connect(db_path)
     c.row_factory = sqlite3.Row

@@ -5,6 +5,7 @@
 - §2.7 derived 字段（available_qty / line_total_cents）计算态永不写。
 """
 
+import shutil
 import sqlite3
 
 import pytest
@@ -25,10 +26,16 @@ ORD_1001 = "ORD-1001"  # confirmed：SKU-003×3 + SKU-004×2（seed 预置，可
 
 
 @pytest.fixture(scope="module")
-def index() -> ObjectIndex:
+def seed_db_path(tmp_path_factory):
+    """临时源系统库（不写正式种子库，防并行竞态；参考 test_b2 的 tmp 正例）。"""
+    return seed.build_database(tmp_path_factory.mktemp("b1") / "source.db")
+
+
+@pytest.fixture(scope="module")
+def index(seed_db_path) -> ObjectIndex:
     reg = build_registry()
     idx = ObjectIndex(reg)
-    conn = sqlite3.connect(seed.build_database())
+    conn = sqlite3.connect(seed_db_path)
     conn.row_factory = sqlite3.Row
     idx.load_all(conn)
     conn.close()
@@ -41,8 +48,8 @@ def query(index: ObjectIndex) -> ObjectQuery:
 
 
 @pytest.fixture(scope="module")
-def source_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(seed.build_database())
+def source_conn(seed_db_path) -> sqlite3.Connection:
+    conn = sqlite3.connect(seed_db_path)
     conn.row_factory = sqlite3.Row
     yield conn
     conn.close()
@@ -249,9 +256,13 @@ def test_traverse_wrong_endpoint_raises(query):
 # ---------- 增量更新（动作后同步，§3.3 ⑦） ----------
 
 
-def test_refresh_updates_row_and_links(index):
-    """refresh：源库行变更后增量更新对象与链接（不重建全索引）。"""
-    db_path = seed.build_database()
+def test_refresh_updates_row_and_links(index, seed_db_path, tmp_path):
+    """refresh：源库行变更后增量更新对象与链接（不重建全索引）。
+
+    在 tmp 拷贝上改行（不碰模块级 index 与种子库，防污染后续测试）。
+    """
+    db_path = tmp_path / "refresh.db"
+    shutil.copy(seed_db_path, db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     # 用一个新索引避免污染 module 级 index
