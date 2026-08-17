@@ -78,11 +78,12 @@ def test_agent_chat_cancel_order_live_llm(tmp_path, seed_db_path, monkeypatch):
         # 那也是合法状态（只是 LLM 行为偏差，不视为失败）
         if body.get("need_confirm"):
             # 这种情况不常见但非错误，确认即可
+            need = body["need_confirm"]
             resp2 = client.post(
                 "/agent/confirm",
                 json={
                     "session_id": body["session_id"],
-                    "call_id": body["need_confirm"]["id"],
+                    "call_id": need.get("call_id", need.get("id", "")),
                     "confirmed": True,
                 },
             )
