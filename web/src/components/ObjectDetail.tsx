@@ -1,11 +1,11 @@
-// 对象详情组件 —— 全属性展示 + 链接导航入口
+// 对象详情组件 —— 全属性展示 + 链接导航入口（out/in 分组）
 import { useEffect, useState } from 'react';
 import { Button, Card, Descriptions, Space, Tag, Typography, message, Spin } from 'antd';
-import { LinkOutlined } from '@ant-design/icons';
+import { LinkOutlined, ArrowRightOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { fetchObjectDetail } from '../api';
 import type { ObjectDetailData, ObjectTypeMeta } from '../types';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 interface Props {
   meta: ObjectTypeMeta;
@@ -29,6 +29,9 @@ export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />;
   if (!detail) return <Card><Title level={5}>无数据</Title></Card>;
 
+  const outLinks = Object.entries(detail.links.out);
+  const inLinks = Object.entries(detail.links.in);
+
   return (
     <Card
       title={meta.description + ' 详情'}
@@ -45,13 +48,16 @@ export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props
         ))}
       </Descriptions>
 
-      {detail.links && Object.keys(detail.links).length > 0 && (
-        <>
-          <Title level={5} style={{ marginTop: 16 }}>关联链接</Title>
+      {/* 出向链接（本对象出发） */}
+      {outLinks.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Title level={5}>
+            <ArrowRightOutlined /> 出向链接
+          </Title>
           <Space wrap>
-            {Object.entries(detail.links).map(([linkName, count]) => (
+            {outLinks.map(([linkName, count]) => (
               <Button
-                key={linkName}
+                key={'out-' + linkName}
                 icon={<LinkOutlined />}
                 type="dashed"
                 onClick={() => onNavigateLink(meta.api_name, pk, linkName)}
@@ -60,7 +66,28 @@ export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props
               </Button>
             ))}
           </Space>
-        </>
+        </div>
+      )}
+
+      {/* 入向链接（谁引用了我） */}
+      {inLinks.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Title level={5}>
+            <ArrowLeftOutlined /> 入向链接
+          </Title>
+          <Space wrap>
+            {inLinks.map(([linkName, count]) => (
+              <Button
+                key={'in-' + linkName}
+                icon={<LinkOutlined />}
+                type="dashed"
+                onClick={() => onNavigateLink(meta.api_name, pk, linkName)}
+              >
+                {linkName} ({count})
+              </Button>
+            ))}
+          </Space>
+        </div>
       )}
     </Card>
   );

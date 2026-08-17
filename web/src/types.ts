@@ -88,7 +88,11 @@ export interface ObjectDetailData {
   object_type: string;
   pk: string;
   properties: Record<string, unknown>;
-  links: Record<string, number>;
+  // 后端返回 {out: {link_name: count}, in: {link_name: count}}（index.py get_link_counts）
+  links: {
+    out: Record<string, number>;
+    in: Record<string, number>;
+  };
 }
 
 export interface AgentChatRequest {

@@ -1,5 +1,5 @@
 /// <reference types="vitest/globals" />
-// ObjectDetail 组件测试 —— 验证属性渲染 + 链接导航
+// ObjectDetail 组件测试 —— 验证属性渲染 + 出向/入向链接导航
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import ObjectDetail from './ObjectDetail';
@@ -22,6 +22,7 @@ const mockMeta: ObjectTypeMeta = {
   },
 };
 
+// 后端真实格式：links = {out: {link_name: count}, in: {link_name: count}}
 const mockDetail = {
   outcome: 'ok',
   data: {
@@ -34,9 +35,14 @@ const mockDetail = {
       customer_id: 'C001',
     },
     links: {
-      'order.customer': 1,
-      'order.items': 3,
-      'order.shipments': 0,
+      out: {
+        'order.customer': 1,
+        'order.items': 3,
+        'order.shipments': 0,
+      },
+      in: {
+        'customer.orders': 5,
+      },
     },
   },
 };
@@ -63,7 +69,7 @@ describe('ObjectDetail', () => {
     });
   });
 
-  it('renders link navigation buttons', async () => {
+  it('renders outbound link navigation buttons', async () => {
     const onNav = vi.fn();
     const onBack = vi.fn();
     render(
@@ -71,12 +77,26 @@ describe('ObjectDetail', () => {
     );
 
     await waitFor(() => {
+      expect(screen.getByText('出向链接')).toBeTruthy();
       expect(screen.getByText(/order\.customer/)).toBeTruthy();
       expect(screen.getByText(/order\.items/)).toBeTruthy();
     });
   });
 
-  it('calls onNavigateLink when link button clicked', async () => {
+  it('renders inbound link navigation buttons', async () => {
+    const onNav = vi.fn();
+    const onBack = vi.fn();
+    render(
+      <ObjectDetail meta={mockMeta} pk="ORD001" onNavigateLink={onNav} onBack={onBack} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('入向链接')).toBeTruthy();
+      expect(screen.getByText(/customer\.orders/)).toBeTruthy();
+    });
+  });
+
+  it('calls onNavigateLink when outbound link button clicked', async () => {
     const onNav = vi.fn();
     const onBack = vi.fn();
     render(
