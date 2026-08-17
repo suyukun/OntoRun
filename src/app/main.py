@@ -16,10 +16,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from src.agent.agent import Agent, ActionExecutor
+from src.agent.agent import ActionExecutor, Agent
 from src.agent.provider import get_provider
 from src.app.session import SessionManager
-
 
 # ======================================================================
 # 请求/响应模型（与前端共享契约）
@@ -141,7 +140,7 @@ class RestActionExecutor(ActionExecutor):
                     "items": items,
                 },
             ).model_dump()
-        except Exception as exc:
+        except (ValueError, LookupError, RuntimeError) as exc:
             return Envelope(
                 request_id="",
                 outcome="error",
@@ -237,9 +236,9 @@ def _register_agent_routes(app: FastAPI, sessions: SessionManager) -> None:
         if turn.need_confirm:
             tc = turn.need_confirm
             need_confirm_dict = {
-                "action": tc.name,
-                "params": tc.arguments,
-                "call_id": tc.id,
+                "id": tc.id,
+                "name": tc.name,
+                "arguments": tc.arguments,
             }
 
         # 从 tool_results 推断 outcome

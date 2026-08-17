@@ -9,7 +9,6 @@
 """
 
 import json
-import os
 import shutil
 import sqlite3
 
@@ -17,7 +16,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data import seed_retail_source as seed
-from src.agent.agent import Agent
 from src.agent.provider import ChatResponse, MockProvider, ToolCall
 from src.ontology import build_registry
 
@@ -284,8 +282,8 @@ def test_agent_confirm_approve_refund(agent_client, monkeypatch):
     assert resp1.status_code == 200
     body1 = resp1.json()
     assert body1.get("need_confirm") is not None
-    assert body1["need_confirm"]["action"] == "approve_refund"
-    call_id = body1["need_confirm"]["call_id"]
+    assert body1["need_confirm"]["name"] == "approve_refund"
+    call_id = body1["need_confirm"]["id"]
     session_id = body1["session_id"]
 
     # 提议阶段：源库未变
@@ -372,7 +370,7 @@ def test_agent_confirm_reject_refund(agent_client, monkeypatch):
     )
     body1 = resp1.json()
     assert body1.get("need_confirm") is not None
-    call_id = body1["need_confirm"]["call_id"]
+    call_id = body1["need_confirm"]["id"]
     session_id = body1["session_id"]
 
     resp2 = agent_client.post(

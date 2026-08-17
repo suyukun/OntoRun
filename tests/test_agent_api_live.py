@@ -45,7 +45,7 @@ def test_agent_chat_cancel_order_live_llm(tmp_path, seed_db_path, monkeypatch):
 
     try:
         app = create_agent_app(source_db=source, ontology_db=ontology)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (smoke test: catch-all on network/bootstrap)
         pytest.skip(f"创建 app 失败（可能网络不通）: {e}")
 
     with TestClient(app) as client:
@@ -62,7 +62,7 @@ def test_agent_chat_cancel_order_live_llm(tmp_path, seed_db_path, monkeypatch):
                     "message": "请帮我取消订单 ORD-1001，理由是客户改主意了"
                 },
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 (smoke test: catch-all on network/API)
             pytest.skip(f"DeepSeek API 调用失败（网络/限流）: {e}")
 
         # 断言不崩
@@ -83,7 +83,7 @@ def test_agent_chat_cancel_order_live_llm(tmp_path, seed_db_path, monkeypatch):
                 "/agent/confirm",
                 json={
                     "session_id": body["session_id"],
-                    "call_id": need.get("call_id", need.get("id", "")),
+                    "call_id": need["id"],
                     "confirmed": True,
                 },
             )
