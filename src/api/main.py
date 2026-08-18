@@ -55,6 +55,20 @@ def create_app(
 
     store = Store(source_db, ontology_db)
     store.migrate()
+
+    # A1 单向流入（蓝图 v0.3 §10 决策 1 / 补丁 A1）：把本体库 published 行合并进
+    # 内存 Registry。冲突检测 / 动态类生成由 src.builder.registry_loader 完成。
+    # 在 store.migrate 之后跑（要读本体库），在 self_check 之后再跑（让内置段先稳）。
+    from src.builder.registry_loader import load_published_into_registry
+
+    load_result = load_published_into_registry(store.ontology_path, registry)
+    load_errors = [i for i in load_result["issues"] if i["severity"] == "error"]
+    if load_errors:
+        raise RuntimeError(
+            "Builder loader 报 error 级 issue（冲突/未注册端点等）: "
+            + "; ".join(i["message"] for i in load_errors)
+        )
+
     index = ObjectIndex(registry)
     with store.source_conn() as conn:
         index.load_all(conn)

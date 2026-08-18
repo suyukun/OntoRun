@@ -28,6 +28,21 @@ READ_ERROR_MESSAGES: dict[str, str] = {
 }
 ERROR_MESSAGES.update(READ_ERROR_MESSAGES)
 
+# Builder 子系统错误码（蓝图 v0.3 §9-P1 / 补丁 A1）：4xx 表达违规语义
+BUILDER_ERROR_MESSAGES: dict[str, str] = {
+    "BUILDER_OBJECT_TYPE_NOT_FOUND": "对象类型不存在",
+    "BUILDER_LINK_TYPE_NOT_FOUND": "链接类型不存在",
+    "BUILDER_INVALID_PROPERTY_SCHEMA": "property_schema 不合法（缺 PK / 非 JSON Schema / 缺 required）",
+    "BUILDER_INVALID_STATUS_TRANSITION": "非法状态流转（仅 draft→reviewed→published 合法）",
+    "BUILDER_DELETE_NOT_ALLOWED": "仅 draft 可删除",
+    "BUILDER_NAME_CONFLICT": "与内置类型同名（补丁 A1：拒绝 publish / 拒绝注册）",
+    "BUILDER_UNKNOWN_SOURCE_TYPE": "link.source_type_id 不在已发布 object_types 中",
+    "BUILDER_UNKNOWN_TARGET_TYPE": "link.target_type_id 不在已发布 object_types 中",
+    "BUILDER_LINK_ENDPOINT_UNRESOLVED": "link 两端类型未注册",
+    "BUILDER_INVALID_REQUEST": "请求参数不合法（category/cardinality 等枚举越界）",
+}
+ERROR_MESSAGES.update(BUILDER_ERROR_MESSAGES)
+
 # 业务错误码（§4.3 全集）→ 200（信封内表达语义）；读侧错误 → 4xx
 ERROR_CODE_HTTP_STATUS: dict[str, int] = {code: 200 for code in RUNTIME_ERROR_MESSAGES}
 ERROR_CODE_HTTP_STATUS.update(
@@ -39,6 +54,17 @@ ERROR_CODE_HTTP_STATUS.update(
         "UNKNOWN_FILTER_FIELD": 400,
         "INVALID_REQUEST": 400,
         "INVALID_ACTOR": 400,
+        # Builder 错误码 HTTP 状态映射（业务类非法流转/校验失败 → 4xx）
+        "BUILDER_OBJECT_TYPE_NOT_FOUND": 404,
+        "BUILDER_LINK_TYPE_NOT_FOUND": 404,
+        "BUILDER_INVALID_PROPERTY_SCHEMA": 400,
+        "BUILDER_INVALID_STATUS_TRANSITION": 400,
+        "BUILDER_DELETE_NOT_ALLOWED": 400,
+        "BUILDER_NAME_CONFLICT": 400,
+        "BUILDER_UNKNOWN_SOURCE_TYPE": 400,
+        "BUILDER_UNKNOWN_TARGET_TYPE": 400,
+        "BUILDER_LINK_ENDPOINT_UNRESOLVED": 400,
+        "BUILDER_INVALID_REQUEST": 400,
     }
 )
 

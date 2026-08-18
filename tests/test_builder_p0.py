@@ -304,19 +304,99 @@ def builder_client(tmp_path: Path, seed_db_path_p0: Path):
 
 
 def test_builder_health_endpoint(builder_client: TestClient) -> None:
-    """builder 健康端点：信封 ok，含 builder 子系统状态字段。"""
+    """builder 健康端点：返回 builder 子系统状态字段（ready / degraded 之一）。"""
+    from src.runtime.store import BUILDER_SCHEMA_VERSION, BUILDER_TABLES
+
     resp = builder_client.get("/api/v1/builder/health")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["outcome"] == "ok", body
     assert "status" in body["data"]
-    assert body["data"]["status"] in {"ok", "ready"}
+    # red-team E3 修复：API 实际仅返 ready/degraded，去除「ok」永真可达的伪成员
+    assert body["data"]["status"] in {"ready", "degraded"}
+    # 健康路径下必须 ready（builder 表都建好）
+    assert body["data"]["status"] == "ready"
+    # tables_present 覆盖全部 10 张表
+    assert set(body["data"]["tables_missing"]) == set()
+    assert set(body["data"]["tables_present"]) >= set(BUILDER_TABLES)
+    # 封口：schema_version 与 BUILDER_SCHEMA_VERSION 一致
+    assert body["data"]["schema_version"] == BUILDER_SCHEMA_VERSION
 
 
 def test_builder_health_reports_schema_version(builder_client: TestClient) -> None:
     """健康端点应回报 builder schema 版本号（便于运维核对）。"""
     resp = builder_client.get("/api/v1/builder/health")
     body = resp.json()
-    from src.builder import BUILDER_SCHEMA_VERSION
+    from src.runtime.store import BUILDER_SCHEMA_VERSION
 
     assert body["data"]["schema_version"] == BUILDER_SCHEMA_VERSION
+
+
+def test_builder_health_reports_degraded_when_table_missing(
+    builder_client: TestClient,
+) -> None:
+    """red-team E3 负向测试：删一张 builder 表后 status 应为 degraded。"""
+    store = builder_client.app.state.runtime.store
+    # 删一张 builder 表（datasets），模拟迁移不完整 / 手动 DROP 场景
+    with store.ontology_conn() as conn:
+        conn.execute("DROP TABLE IF EXISTS datasets")
+        conn.commit()
+    resp = builder_client.get("/api/v1/builder/health")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["data"]["status"] == "degraded", body
+    assert "datasets" in body["data"]["tables_missing"]
+    # 其余表仍在
+    assert "object_types" in body["data"]["tables_present"]
+
+
+# ---------- red-team 封口断言 ----------
+
+
+def test_builder_schema_version_is_single_source() -> None:
+    """red-team E1 封口：跨模块版本号一致性——不允许双轨重定义。"""
+    import src.builder as builder_pkg
+    from src.runtime import store as store_mod
+
+    assert builder_pkg.BUILDER_SCHEMA_VERSION == store_mod.BUILDER_SCHEMA_VERSION
+    # __module__ 必须来自 runtime.store（证明是透传）
+    assert (
+        builder_pkg.BUILDER_SCHEMA_VERSION.__class__.__module__
+        == "src.runtime.store"
+        or builder_pkg.BUILDER_SCHEMA_VERSION is store_mod.BUILDER_SCHEMA_VERSION
+    )
+
+
+def test_schema_version_note_contains_both_segments() -> None:
+    """red-team E2 封口：v1 行 note 必须含运行时 + builder 两段（red-team E2）。"""
+    import os
+    import tempfile
+
+    from src.runtime.store import Store
+
+    with tempfile.TemporaryDirectory() as td:
+        s = Store(ontology_path=os.path.join(td, "ont.db"))
+        s.migrate()
+        with s.ontology_conn() as conn:
+            row = conn.execute(
+                "SELECT note FROM schema_version WHERE version=1"
+            ).fetchone()
+        note = row["note"]
+        # 两段都必须在（red-team E2 修复：合并而非覆盖）
+        assert "audit_log" in note, f"运行时段缺失: {note!r}"
+        assert "builder" in note, f"builder 段缺失: {note!r}"
+
+
+def test_degraded_status_when_health_endpoint_reports_degraded(
+    builder_client: TestClient,
+) -> None:
+    """red-team E3 封口：degraded 路径独立断言（与 E3 负向测试互补）。"""
+    store = builder_client.app.state.runtime.store
+    with store.ontology_conn() as conn:
+        conn.execute("DROP TABLE IF EXISTS action_runs")
+        conn.execute("DROP TABLE IF EXISTS pipelines")
+        conn.commit()
+    resp = builder_client.get("/api/v1/builder/health")
+    body = resp.json()
+    assert body["data"]["status"] == "degraded"
+    miss = set(body["data"]["tables_missing"])
+    assert {"action_runs", "pipelines"} <= miss

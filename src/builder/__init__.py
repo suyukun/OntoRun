@@ -20,13 +20,9 @@ P0 交付：仅子包骨架与表结构（BUILDER_SCHEMA_V1 见 runtime.store）
 """
 
 from src.builder import connectors, curated, extraction, logic, mapping, pipeline
-
-BUILDER_SCHEMA_VERSION: int = 2
-"""本体构建 schema 版本号（写入本体库 schema_version 表）。
-
-当前 v2 = 蓝图 §4 全 10 张表 + 补丁修正（extraction_tasks 删 progress、
-datasets.kind 扩展 pdf/docx、link_types 加 semantic_name 等）。
-"""
+from src.runtime.store import (
+    BUILDER_SCHEMA_VERSION,  # 透传（red-team E1：版本号单一来源）
+)
 
 __all__ = [
     "BUILDER_SCHEMA_VERSION",

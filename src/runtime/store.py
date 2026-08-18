@@ -59,18 +59,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_log(outcome);
 
 BUILDER_SCHEMA_VERSION = 1
 
-BUILDER_TABLES: tuple[str, ...] = (
-    "object_types",
-    "link_types",
-    "datasets",
-    "pipelines",
-    "curated_datasets",
-    "mappings",
-    "extraction_tasks",
-    "logic_rules",
-    "action_types",
-    "action_runs",
-)
+# BUILDER_TABLES 单一来源（red-team I3）：从下方 BUILDER_SCHEMA DDL 自动解析。
+# 任何增删 CREATE TABLE 都会自动反映到 BUILDER_TABLES，避免双轨漂移。
+# （实际赋值在 BUILDER_SCHEMA 定义之后，见文件底部 I3 hook。）
 
 BUILDER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS object_types (
@@ -164,6 +155,7 @@ CREATE TABLE IF NOT EXISTS extraction_tasks (
   status              TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','rejected')),
   result_summary_json TEXT NOT NULL DEFAULT '{}',
   validation_report_json TEXT NOT NULL DEFAULT '{}',
+  -- P3 提取器溯源字段（QA 备注 W1）：source_path 记原始数据路径，provider 记 LLM provider 名
   source_path         TEXT NOT NULL DEFAULT '',
   provider            TEXT NOT NULL DEFAULT '',
   created_at          TEXT NOT NULL,
@@ -216,10 +208,13 @@ CREATE INDEX IF NOT EXISTS idx_action_runs_status ON action_runs(status);
 def init_builder_schema(conn: sqlite3.Connection) -> None:
     """建 builder 10 张表（幂等，CREATE TABLE IF NOT EXISTS 风格）。
 
-    与 schema_version 共用本体库单版本号表（v1），注脚追加 builder 段标识。
+    与 schema_version 共用本体库单版本号表（v1），注脚合并运行时 + builder 两段。
     后续阶段引入破坏性变更时升 version（蓝图 §10 schema_version 演进）。
     裸调用场景下若 schema_version 尚未建，本函数自包含建表（不依赖 ONTOLOGY_SCHEMA
     已先执行），避免调用方耦合。
+
+    note 字段含运行时 + builder 两段（与 Store.migrate 一致；red-team E2 修复：
+    即便独立调用也保持 schema_version note 完整）。
     """
     # schema_version 在 BUILDER_SCHEMA 内被 INSERT 引用，先确保它存在
     conn.execute(
@@ -227,12 +222,16 @@ def init_builder_schema(conn: sqlite3.Connection) -> None:
         "version INTEGER PRIMARY KEY, note TEXT NOT NULL, applied_at TEXT NOT NULL)"
     )
     conn.executescript(BUILDER_SCHEMA)
+    runtime_note = (
+        "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
+    )
+    builder_note = "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）"
     conn.execute(
         "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
         "VALUES (?,?,?)",
         (
             BUILDER_SCHEMA_VERSION,
-            "MVP 本体运行时 v1：含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）",
+            f"{runtime_note}；{builder_note}",
             _now(),
         ),
     )
@@ -286,30 +285,25 @@ class Store:
         """建表 + 记录 schema 版本（幂等）。
 
         一次 migrate 同时落运行时段（audit_log / ontology_state / schema_version）
-        与 builder 段（10 张表 + BUILDER_SCHEMA_VERSION）。get_schema_version
-        返回 MAX(version)，因 v1 行被两段共享，行为不变。
+        与 builder 段（10 张表 + BUILDER_SCHEMA_VERSION）。两段共用 v1 行，note 用
+        分号拼接两段说明，避免前次 INSERT 被覆盖导致丢失运行时段说明（red-team E2）。
         """
+        runtime_note = (
+            "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
+        )
+        builder_note = (
+            "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）"
+        )
+        merged_note = f"{runtime_note}；{builder_note}"
         conn = self.ontology_conn()
         try:
             conn.executescript(ONTOLOGY_SCHEMA)
-            conn.execute(
-                "INSERT OR REPLACE INTO schema_version (version, note, applied_at) VALUES (?,?,?)",
-                (
-                    version,
-                    "MVP 本体运行时 v1：audit_log / ontology_state / schema_version",
-                    _now(),
-                ),
-            )
-            # builder 段在 v1 行追加标识（共用版本号，note 标记子系统）
             conn.executescript(BUILDER_SCHEMA)
+            # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
                 "VALUES (?,?,?)",
-                (
-                    BUILDER_SCHEMA_VERSION,
-                    "MVP 本体运行时 v1：含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）",
-                    _now(),
-                ),
+                (version, merged_note, _now()),
             )
             conn.commit()
         finally:
@@ -324,3 +318,15 @@ class Store:
             return row["v"] if row else None
         finally:
             conn.close()
+
+
+# ----------------------------------------------------------------------
+# I3 hook：BUILDER_TABLES 从 BUILDER_SCHEMA DDL 解析（单一来源，red-team I3）
+# 必须在 BUILDER_SCHEMA 定义之后执行。
+# ----------------------------------------------------------------------
+import re as _re
+
+BUILDER_TABLES = tuple(
+    _re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", BUILDER_SCHEMA)
+)
+del _re  # 局部别名，不污染模块命名空间
