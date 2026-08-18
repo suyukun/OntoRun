@@ -1,0 +1,67 @@
+来源: https://palantir.com/docs/zh/foundry/integrate-models/language-models-transforms-inputs/
+
+# 语言模型类
+
+注意：以下翻译的准确性尚未经过验证。这是使用AIP ↗从原始英文文本进行的机器翻译。
+
+# 语言模型类
+
+palantir_models提供了一组用于 Python 变换的类。
+
+| 类 | 描述 |
+| --- | --- |
+| OpenAiGptChatLanguageModelInput | 一个 FoundryInputParam，与语言模型服务中的 OpenAiGptChatLanguageModel API 绑定。在 Python 变换装饰器中使用。 |
+| GenericCompletionLanguageModelInput | 一个 FoundryInputParam，与语言模型服务中的 GenericCompletionLanguageModel API 绑定。在 Python 变换装饰器中使用。 |
+| GenericEmbeddingModelInput | 一个 FoundryInputParam，暴露语言模型服务中的 GenericEmbeddingsModel API。在 Python 变换装饰器中使用。 |
+| OpenAiGptChatLanguageModel | 提供一个 OpenAI 聊天完成模型的客户端。 |
+| GenericCompletionLanguageModel | 提供一个客户端，以执行 AIP 中可用的任何聊天完成模型。 |
+| GenericEmbeddingModel | 提供一个客户端，以执行 AIP 中可用的任何嵌入模型。 |
+
+## OpenAiGptChatLanguageModelInput
+
+classpalantir_models.transforms.OpenAiGptChatLanguageModelInput(rid)
+
+- rid标识语言模型的资源标识符。
+- 标识语言模型的资源标识符。
+## GenericCompletionLanguageModelInput
+
+classpalantir_models.transforms.GenericCompletionLanguageModelInput(rid)
+
+- rid标识语言模型的资源标识符。
+- 标识语言模型的资源标识符。
+## GenericEmbeddingModelInput
+
+classpalantir_models.transforms.GenericEmbeddingModelInput(rid)
+
+- rid标识嵌入模型的资源标识符。
+- 标识嵌入模型的资源标识符。
+## OpenAiGptChatLanguageModel
+
+classpalantir_models.models.OpenAiGptChatLanguageModel
+
+- create_chat_completion(completion_request)执行提供的聊天完成请求。参数completion_request:language_model_service_api.languagemodelservice_api_completion_v3.GptChatCompletionRequest返回类型language_model_service_api.languagemodelservice_api_completion_v3.GptChatCompletionResponse
+- 执行提供的聊天完成请求。
+- 参数completion_request:language_model_service_api.languagemodelservice_api_completion_v3.GptChatCompletionRequest
+- completion_request:language_model_service_api.languagemodelservice_api_completion_v3.GptChatCompletionRequest
+- 返回类型language_model_service_api.languagemodelservice_api_completion_v3.GptChatCompletionResponse
+- language_model_service_api.languagemodelservice_api_completion_v3.GptChatCompletionResponse
+## GenericCompletionLanguageModel
+
+classpalantir_models.models.GenericCompletionLanguageModel
+
+- create_completion(completion_request)执行提供的完成请求。参数completion_request:language_model_service_api.languagemodelservice_api_completion_v3.GenericCompletionRequest返回类型language_model_service_api.languagemodelservice_api_completion_v3.GenericCompletionResponse
+- 执行提供的完成请求。
+- 参数completion_request:language_model_service_api.languagemodelservice_api_completion_v3.GenericCompletionRequest
+- completion_request:language_model_service_api.languagemodelservice_api_completion_v3.GenericCompletionRequest
+- 返回类型language_model_service_api.languagemodelservice_api_completion_v3.GenericCompletionResponse
+- language_model_service_api.languagemodelservice_api_completion_v3.GenericCompletionResponse
+## GenericEmbeddingModel
+
+classpalantir_models.models.GenericEmbeddingModel
+
+- create_embeddings(embeddings_request)为embeddings_request中提供的所有输入计算嵌入参数embeddings_request:language_model_service_api.languagemodelservice_api_embeddings_v3.GenericEmbeddingsRequest返回类型language_model_service_api.languagemodelservice_api_embeddings_v3.GenericEmbeddingsResponse
+- 为embeddings_request中提供的所有输入计算嵌入
+- 参数embeddings_request:language_model_service_api.languagemodelservice_api_embeddings_v3.GenericEmbeddingsRequest
+- embeddings_request:language_model_service_api.languagemodelservice_api_embeddings_v3.GenericEmbeddingsRequest
+- 返回类型language_model_service_api.languagemodelservice_api_embeddings_v3.GenericEmbeddingsResponse
+- language_model_service_api.languagemodelservice_api_embeddings_v3.GenericEmbeddingsResponse
