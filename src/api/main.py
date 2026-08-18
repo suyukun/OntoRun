@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from src.api import routes
+from src.api.builder_routes import builder_router
 from src.ontology import build_registry
 from src.runtime.action_engine import ActionEngine
 from src.runtime.audit import AuditLog
@@ -80,6 +81,7 @@ def create_app(
     app.include_router(routes.objects_router)
     app.include_router(routes.actions_router)
     app.include_router(routes.audit_router)
+    app.include_router(builder_router)
     _inject_schema_into_openapi(app, registry)
     return app
 
