@@ -17,12 +17,14 @@
 | `catalog.xml` | B 路径·属性+子元素混合 | 12 products / 33 specs / 12 certs | UTF-8 | 6.5 KB |
 | `supplier_memo.md` | C 路径·非结构化·LLM 提取 | 661 中文字 / 1261 总字符 | UTF-8 | 3.8 KB |
 | `wide_table_purchases.csv` | E7 宽表拆分最小用例 | 25 行（14 头 + 14 supplier + 25 明细） | UTF-8 | 5.3 KB |
+| `partner_aliases.md` | E2 备用键匹配（自然语言名称 → 实体） | 642 中文字 / 1137 总字符 | UTF-8 | 3.5 KB |
 | `expected/schema_inferred.json` | A 路径 schema 推断预期 | — | UTF-8 | 4.5 KB |
 | `expected/fk_detection.json` | E2 FK 检测 + 基数推断预期 | — | UTF-8 | 4.2 KB |
 | `expected/flatten.json` | B 路径 JSON 拍平预期 | — | UTF-8 | 4.0 KB |
 | `expected/parse.json` | B 路径 XML 解析预期 | — | UTF-8 | 4.8 KB |
 | `expected/extraction_targets.json` | E3 LLM 提取黄金集 + 问题项 | — | UTF-8 | 8.5 KB |
 | `expected/wide_split.json` | E7 宽表拆分预期 | — | UTF-8 | 3.0 KB |
+| `expected/alias_matching.json` | E2 备用键匹配黄金集 + no-match 清单 | — | UTF-8 | 6.0 KB |
 
 ---
 
@@ -38,6 +40,7 @@
 | `catalog.xml` | §6 B 路径 XML 解析 | 属性 → 列；子元素 → 子表；空 certifications 不产行 | TDD：读 parse.json 断言 products=12 / specs=33 / certs=12；断言 X-9003/X-9004/X-9006 certs=[] 不产行 |
 | `supplier_memo.md` | §6 C 路径 MD→结构化 + §8 E3 七道校验 | 黄金集对照；故意问题项触发 V3/V4/V5 | TDD：跑 LLM 提取 → 对照 extraction_targets.golden_entities/relations/logic_rules/actions；断言 V3 捕到 LR-999 引用缺失（fatal）；断言 V4 捕到 "陈志强" 重复（error）；断言 V5 输出 marketing_artifact 警告 |
 | `wide_table_purchases.csv` | §7 E7 宽表拆分（最小实现） | 一表三实体 → 三张表 + FK | TDD：读 wide_split.json 断言 purchase_orders=14 / supplier_info=14 / purchase_order_lines=25；断言 FK 链 purchase_orders→supplier_info (N:1) 与 purchase_orders→lines (1:N) |
+| `partner_aliases.md` | §7 E2 备用键匹配（文档提及 → 实体） | 全称/简称/别称混合提及 suppliers_dirty；含 2 处歧义（"金辉"/"长江冷链"）走上下文消歧；含 2 家 no-match 公司 | TDD：读 alias_matching.json 断言 22 个 alias 命中 10 个 supplier；6 个 no_match 全部进入待补录队列；歧义按文档消歧声明解析正确 |
 
 ---
 

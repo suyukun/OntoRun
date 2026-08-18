@@ -1,0 +1,264 @@
+{
+  "source_path": "partner_aliases.md",
+  "source_chars_total": 1137,
+  "source_chars_chinese": 642,
+  "source_target_table": "suppliers_dirty",
+  "source_target_row_count": 20,
+  "matching_strategy": "name_token_overlap_with_alias_dictionary_then_fuzzy_match",
+  "alias_to_entity_map": [
+    {
+      "alias": "深圳市华联电子科技有限公司",
+      "matched_supplier_id": "SUP-001",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "正文首段全称"
+    },
+    {
+      "alias": "华联电子",
+      "matched_supplier_id": "SUP-001",
+      "match_type": "abbreviation_stripped",
+      "confidence": 0.95,
+      "context": "首段'华联电子的 9W 与 12W 球泡灯为常用 SKU'"
+    },
+    {
+      "alias": "华联",
+      "matched_supplier_id": "SUP-001",
+      "match_type": "short_alias",
+      "confidence": 0.85,
+      "context": "正文'简称华联'"
+    },
+    {
+      "alias": "广州骏达",
+      "matched_supplier_id": "SUP-002",
+      "match_type": "abbreviation_with_city",
+      "confidence": 0.95,
+      "context": "首段'广州骏达'"
+    },
+    {
+      "alias": "骏达物流",
+      "matched_supplier_id": "SUP-002",
+      "match_type": "abbreviation_with_industry",
+      "confidence": 0.9,
+      "context": "首段'骏达物流'"
+    },
+    {
+      "alias": "佛山顺德永盛包装制品厂",
+      "matched_supplier_id": "SUP003",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "首段'全称'"
+    },
+    {
+      "alias": "顺德永盛包装",
+      "matched_supplier_id": "SUP003",
+      "match_type": "abbreviation_stripped",
+      "confidence": 0.95,
+      "context": "首段'顺德永盛包装'"
+    },
+    {
+      "alias": "永盛包装",
+      "matched_supplier_id": "SUP003",
+      "match_type": "short_alias",
+      "confidence": 0.9,
+      "context": "首段'别称永盛包装'"
+    },
+    {
+      "alias": "东莞恒辉塑胶",
+      "matched_supplier_id": "SUP-004",
+      "match_type": "abbreviation_stripped",
+      "confidence": 0.95,
+      "context": "首段'东莞恒辉塑胶'"
+    },
+    {
+      "alias": "恒辉",
+      "matched_supplier_id": "SUP-004",
+      "match_type": "short_alias",
+      "confidence": 0.85,
+      "context": "首段'与中山金辉... 恒辉'"
+    },
+    {
+      "alias": "中山金辉",
+      "matched_supplier_id": "SUP-005",
+      "match_type": "abbreviation_stripped",
+      "confidence": 0.95,
+      "context": "首段'中山金辉'"
+    },
+    {
+      "alias": "金辉照明",
+      "matched_supplier_id": "SUP-005",
+      "match_type": "abbreviation_with_industry",
+      "confidence": 0.92,
+      "context": "首段'简称金辉照明'"
+    },
+    {
+      "alias": "金辉",
+      "matched_supplier_id": "SUP-005",
+      "match_type": "ambiguous_short_alias_resolved",
+      "confidence": 0.75,
+      "context": "首段'与中山金辉 ... 的灯具出库共用同一档期' — 决断：同段上文已出现'中山金辉'，故简写'金辉'回指 SUP-005；备选歧义实体'金辉国际货运'在第四段明确说明不在本季度合作名单，匹配器应优先上下文同段指代",
+      "disambiguation_note": "V2 §7 备用键匹配要求歧义实体按上下文消歧；本样本中'金辉'在本备忘上下文中均指向 SUP-005"
+    },
+    {
+      "alias": "杭州华诺",
+      "matched_supplier_id": "SUP006",
+      "match_type": "abbreviation_stripped",
+      "confidence": 0.95,
+      "context": "首段'杭州华诺'"
+    },
+    {
+      "alias": "华诺纺织",
+      "matched_supplier_id": "SUP006",
+      "match_type": "abbreviation_with_industry",
+      "confidence": 0.9,
+      "context": "首段'华诺纺织'"
+    },
+    {
+      "alias": "天津北方化工原料有限公司",
+      "matched_supplier_id": "SUP-0011",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "二段'全称'"
+    },
+    {
+      "alias": "北方化工",
+      "matched_supplier_id": "SUP-0011",
+      "match_type": "abbreviation_stripped",
+      "confidence": 0.95,
+      "context": "二段'简称北方化工'"
+    },
+    {
+      "alias": "北京京诚物流股份有限公司",
+      "matched_supplier_id": "SUP-012",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "二段'全称'"
+    },
+    {
+      "alias": "京诚物流",
+      "matched_supplier_id": "SUP-012",
+      "match_type": "abbreviation_with_industry",
+      "confidence": 0.9,
+      "context": "二段'简称京诚物流'"
+    },
+    {
+      "alias": "上海明远食品贸易有限公司",
+      "matched_supplier_id": "SUP-009",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "三段'全称'"
+    },
+    {
+      "alias": "明远食品",
+      "matched_supplier_id": "SUP-009",
+      "match_type": "abbreviation_with_industry",
+      "confidence": 0.9,
+      "context": "三段'简称明远食品'"
+    },
+    {
+      "alias": "武汉长江冷链设备有限公司",
+      "matched_supplier_id": "SUP-0013",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "三段'全称'"
+    },
+    {
+      "alias": "长江冷链",
+      "matched_supplier_id": "SUP-0013",
+      "match_type": "ambiguous_short_alias_resolved",
+      "confidence": 0.78,
+      "context": "三段'长江冷链的 4.2 米冷藏车'；四段明确'简称长江冷链的实体在本备忘中均指 SUP-0013，与长江冷链科技园无关'",
+      "disambiguation_note": "文档作者已显式消歧；匹配器应优先采纳文档内自带的消歧声明"
+    },
+    {
+      "alias": "成都川西物流有限公司",
+      "matched_supplier_id": "SUP016",
+      "match_type": "exact_full_name",
+      "confidence": 1,
+      "context": "三段'全称'"
+    },
+    {
+      "alias": "川西物流",
+      "matched_supplier_id": "SUP016",
+      "match_type": "abbreviation_with_industry",
+      "confidence": 0.9,
+      "context": "三段'简称川西物流'"
+    }
+  ],
+  "no_match_entities": [
+    {
+      "alias": "深圳前海新汇通贸易有限公司",
+      "matched_supplier_id": null,
+      "reason": "no_match_company_not_in_supplier_master",
+      "context": "三段'前海新汇通，仅做小额临时采购'",
+      "expected_action": "返回 no_match 标记 + 进入'待补录'队列；不强制建实体"
+    },
+    {
+      "alias": "前海新汇通",
+      "matched_supplier_id": null,
+      "reason": "no_match_short_alias_of_unlisted_company",
+      "context": "三段'前海新汇通'",
+      "expected_action": "no_match，与全称合并入待补录队列"
+    },
+    {
+      "alias": "上海元初冷链科技股份有限公司",
+      "matched_supplier_id": null,
+      "reason": "no_match_company_not_in_supplier_master",
+      "context": "三段'元初冷链，正在资质审核中'",
+      "expected_action": "返回 no_match + 资质审核 pending 状态"
+    },
+    {
+      "alias": "元初冷链",
+      "matched_supplier_id": null,
+      "reason": "no_match_short_alias_of_unlisted_company",
+      "context": "三段'元初冷链'",
+      "expected_action": "no_match"
+    },
+    {
+      "alias": "金辉国际货运",
+      "matched_supplier_id": null,
+      "reason": "no_match_company_not_in_supplier_master_even_though_ambiguous",
+      "context": "四段'若与金辉国际货运混淆，应以 SUP-005 为准（注：后者不在本季度合作名单）'",
+      "expected_action": "no_match；与'金辉'消歧，匹配器应按文档消歧声明跳过该候选"
+    },
+    {
+      "alias": "长江冷链科技园",
+      "matched_supplier_id": null,
+      "reason": "no_match_place_name_not_company",
+      "context": "四段'与长江冷链科技园无关'",
+      "expected_action": "no_match；属于地点名而非公司名"
+    }
+  ],
+  "summary_counts": {
+    "total_alias_mentions": 28,
+    "matched_to_existing_supplier": 22,
+    "no_match": 6,
+    "matched_supplier_ids_count": 10,
+    "ambiguous_resolved_via_context": 2
+  },
+  "ambiguous_resolution_rules_used": [
+    {
+      "rule": "context_local_co_reference",
+      "applied_to": [
+        "金辉",
+        "长江冷链"
+      ],
+      "note": "同一段中前文已出现全称，简写回指前文实体"
+    },
+    {
+      "rule": "document_author_disambiguation_statement",
+      "applied_to": [
+        "金辉",
+        "长江冷链"
+      ],
+      "note": "作者在第四段显式声明本备忘中的简写指代对象"
+    },
+    {
+      "rule": "exclude_place_names_and_compound_nouns",
+      "applied_to": [
+        "长江冷链科技园"
+      ],
+      "note": "'科技园'为地点后缀，应排除"
+    }
+  ],
+  "tdd_recommendation": "TDD 用例：(a) 22 个 alias 成功匹配 10 个 supplier；(b) '华联电子'/'华联' 两种简写都能命中 SUP-001；(c) 6 个 no_match 全部正确进入待补录队列；(d) '金辉'/'长江冷链' 歧义按文档消歧声明解析到正确实体；(e) '金辉国际货运'/'长江冷链科技园' 即便在文档中出现也应被识别为 no_match；(f) 备用键匹配成功率指标 22/28 = 78.6%"
+}
