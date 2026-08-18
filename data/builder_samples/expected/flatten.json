@@ -1,0 +1,273 @@
+{
+  "source_path": "orders_nested.json",
+  "explode_strategy": "per_array_explode_with_foreign_key_propagation",
+  "result_tables": [
+    {
+      "table_name": "orders",
+      "row_count": 16,
+      "primary_key": "order_id",
+      "columns": [
+        "order_id",
+        "customer_id",
+        "customer_name",
+        "order_date",
+        "status",
+        "total_amount",
+        "currency",
+        "cancel_reason"
+      ],
+      "notes": "shipping 与 notes 被下沉为独立子表；null 字段保留；ORD-0007 cancelled 的 cancel_reason 保留"
+    },
+    {
+      "table_name": "order_items",
+      "row_count": 29,
+      "primary_key": [
+        "order_id",
+        "line_no"
+      ],
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "orders.order_id",
+          "cardinality": "N:1"
+        }
+      ],
+      "columns": [
+        "order_id",
+        "line_no",
+        "product_id",
+        "sku",
+        "qty",
+        "unit_price",
+        "line_amount"
+      ],
+      "notes": "每订单 items 数组 Explode 为多行；ORD-0007 因 items=[] 产生 0 行（cancelled 订单可保留空 items）"
+    },
+    {
+      "table_name": "order_shippings",
+      "row_count": 12,
+      "primary_key": "order_id",
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "orders.order_id",
+          "cardinality": "1:1"
+        }
+      ],
+      "columns": [
+        "order_id",
+        "carrier_id",
+        "carrier_name",
+        "vehicle_type",
+        "planned_pickup",
+        "planned_delivery",
+        "tracking_no",
+        "cost"
+      ],
+      "notes": "1:1 关系；4 个订单（ORD-0005/0007/0010/0015）无 shipping 不入表；shipping.carrier_id 期望做 FK 检测（参考 suppliers_supplier_id），部分 carrier_id 含无连字符格式（SUP012/SUP008/SUP-013 等）"
+    },
+    {
+      "table_name": "order_notes",
+      "row_count": 3,
+      "primary_key": [
+        "order_id",
+        "note_seq"
+      ],
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "orders.order_id",
+          "cardinality": "N:1"
+        }
+      ],
+      "columns": [
+        "order_id",
+        "note_seq",
+        "timestamp",
+        "author",
+        "text",
+        "has_replies"
+      ],
+      "notes": "本订单（ORD-0005）3 条顶层 note，含 1 条带 replies 的 note，replies 字段被替换为 has_replies 布尔标记；双层嵌套在第二阶段 Explode 为 order_note_replies"
+    },
+    {
+      "table_name": "order_note_replies",
+      "row_count": 2,
+      "primary_key": [
+        "order_id",
+        "note_seq",
+        "timestamp"
+      ],
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references": "orders.order_id",
+          "cardinality": "N:1"
+        },
+        {
+          "column": [
+            "order_id",
+            "note_seq"
+          ],
+          "references": "order_notes.[order_id,note_seq]",
+          "cardinality": "N:1"
+        }
+      ],
+      "columns": [
+        "order_id",
+        "note_seq",
+        "timestamp",
+        "author",
+        "text"
+      ],
+      "notes": "Explode 双层嵌套数组的输出；当前数据集仅 ORD-0005 含 replies 数组 → 2 行"
+    }
+  ],
+  "expected_sample_rows": {
+    "orders_first_3": [
+      {
+        "order_id": "ORD-20250801-0001",
+        "customer_id": "C-2001",
+        "status": "delivered",
+        "item_count": 3,
+        "has_shipping": true
+      },
+      {
+        "order_id": "ORD-20250802-0002",
+        "customer_id": "C-2002",
+        "status": "delivered",
+        "item_count": 3,
+        "has_shipping": true
+      },
+      {
+        "order_id": "ORD-20250803-0003",
+        "customer_id": "C-2003",
+        "status": "in_transit",
+        "item_count": 3,
+        "has_shipping": true
+      }
+    ],
+    "order_items_first_5": [
+      {
+        "order_id": "ORD-20250801-0001",
+        "line_no": 1,
+        "product_id": "P-1001",
+        "sku": "SKU-LED-9W",
+        "qty": 600,
+        "unit_price": 4.5,
+        "line_amount": 2700
+      },
+      {
+        "order_id": "ORD-20250801-0001",
+        "line_no": 2,
+        "product_id": "P-1004",
+        "sku": "SKU-BOX-30",
+        "qty": 2000,
+        "unit_price": 1.2,
+        "line_amount": 2400
+      },
+      {
+        "order_id": "ORD-20250801-0001",
+        "line_no": 3,
+        "product_id": "P-1016",
+        "sku": "SKU-PVC-FM",
+        "qty": 600,
+        "unit_price": 22,
+        "line_amount": 13200
+      },
+      {
+        "order_id": "ORD-20250802-0002",
+        "line_no": 1,
+        "product_id": "P-1002",
+        "sku": "SKU-LED-12W",
+        "qty": 500,
+        "unit_price": 5.8,
+        "line_amount": 2900
+      },
+      {
+        "order_id": "ORD-20250802-0002",
+        "line_no": 2,
+        "product_id": "P-1005",
+        "sku": "SKU-BOX-50",
+        "qty": 1000,
+        "unit_price": 2.8,
+        "line_amount": 2800
+      }
+    ],
+    "order_shippings_first_3": [
+      {
+        "order_id": "ORD-20250801-0001",
+        "carrier_id": "SUP-007",
+        "carrier_name": "宁波港盛国际货运代理有限公司",
+        "vehicle_type": "truck_42_cold",
+        "planned_pickup": "2025-08-02T08:00:00Z",
+        "planned_delivery": "2025-08-04T18:00:00Z",
+        "tracking_no": "CNS-20250804-0001",
+        "cost": 120
+      },
+      {
+        "order_id": "ORD-20250802-0002",
+        "carrier_id": "SUP-010",
+        "carrier_name": "青岛海通冷链运输股份有限公司",
+        "vehicle_type": "truck_68_cold",
+        "planned_pickup": "2025-08-03T08:00:00Z",
+        "planned_delivery": "2025-08-05T20:00:00Z",
+        "tracking_no": "CNS-20250805-0002",
+        "cost": 450
+      },
+      {
+        "order_id": "ORD-20250803-0003",
+        "carrier_id": "SUP-016",
+        "carrier_name": "成都川西物流有限公司",
+        "vehicle_type": "truck_96_dry",
+        "planned_pickup": "2025-08-04T06:00:00Z",
+        "planned_delivery": "2025-08-07T22:00:00Z",
+        "tracking_no": "CD-20250807-0003",
+        "cost": 1400
+      }
+    ],
+    "order_notes_for_ord_0005": [
+      {
+        "order_id": "ORD-20250807-0005",
+        "note_seq": 1,
+        "timestamp": "2025-08-07T16:00:00Z",
+        "author": "sales_王",
+        "text": "客户确认液氮速冻隧道设备为大件，需协调 SUP-007 港盛国际货代的吊装服务",
+        "has_replies": false
+      },
+      {
+        "order_id": "ORD-20250807-0005",
+        "note_seq": 2,
+        "timestamp": "2025-08-08T09:30:00Z",
+        "author": "ops_李",
+        "text": "已联系 SUP-007 报价，预计冷链干线运费 4200 元",
+        "has_replies": false
+      },
+      {
+        "order_id": "ORD-20250807-0005",
+        "note_seq": 3,
+        "timestamp": "2025-08-09T10:00:00Z",
+        "author": "ops_李",
+        "text": null,
+        "has_replies": true
+      }
+    ],
+    "order_note_replies_for_ord_0005": [
+      {
+        "order_id": "ORD-20250807-0005",
+        "note_seq": 3,
+        "timestamp": "2025-08-09T11:00:00Z",
+        "author": "ops_陈",
+        "text": "SUP-007 回复 9 月 5 日可派车，已预留"
+      },
+      {
+        "order_id": "ORD-20250807-0005",
+        "note_seq": 3,
+        "timestamp": "2025-08-09T14:30:00Z",
+        "author": "ops_李",
+        "text": "已锁定档期并通知客户"
+      }
+    ]
+  },
+  "tdd_recommendation": "TDD 用例：(a) 主表 orders 16 行；(b) order_items 31 行；(c) order_shippings 12 行；(d) order_notes 3 行；(e) order_note_replies 2 行；(f) ORD-0007 取消订单 items=[] 不入 order_items；(g) 4 个无 shipping 订单不产生 shipping 行；(h) 双层嵌套 Explode 后 FK 链完整"
+}

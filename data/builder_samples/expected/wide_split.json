@@ -1,0 +1,137 @@
+{
+  "source_path": "wide_table_purchases.csv",
+  "source_row_count": 25,
+  "split_strategy": "wide_table_to_three_normalized_tables_by_business_entity",
+  "target_tables": [
+    {
+      "table_name": "purchase_orders",
+      "row_count": 14,
+      "primary_key": "purchase_order_id",
+      "columns": [
+        "purchase_order_id",
+        "po_date",
+        "po_status",
+        "po_total_amount",
+        "supplier_id",
+        "buyer",
+        "warehouse_code"
+      ],
+      "split_rule": "取每 PO 首行的订单头字段；supplier_id 保留作 FK；po_total_amount 字段名与原宽表一致，不分摊到明细",
+      "expected_keys": [
+        "PO-20250801-001",
+        "PO-20250803-002",
+        "PO-20250805-003",
+        "PO-20250807-004",
+        "PO-20250810-005",
+        "PO-20250812-006",
+        "PO-20250814-007",
+        "PO-20250816-008",
+        "PO-20250818-009",
+        "PO-20250820-010",
+        "PO-20250822-011",
+        "PO-20250825-012",
+        "PO-20250828-013",
+        "PO-20250830-014"
+      ]
+    },
+    {
+      "table_name": "supplier_info",
+      "row_count": 14,
+      "primary_key": "supplier_id",
+      "columns": [
+        "supplier_id",
+        "supplier_name",
+        "supplier_contact",
+        "supplier_phone",
+        "supplier_region",
+        "supplier_category"
+      ],
+      "split_rule": "冗余列去重；每 supplier_id 取首行非空字段；null 字段保留（如 SUP003/SUP-0014/SUP-020 的 supplier_phone 为空）",
+      "expected_keys_count": 14,
+      "expected_keys": [
+        "SUP-001",
+        "SUP-0011",
+        "SUP-0014",
+        "SUP-004",
+        "SUP-007",
+        "SUP-008",
+        "SUP-012",
+        "SUP-013",
+        "SUP-015",
+        "SUP-017",
+        "SUP-019",
+        "SUP-020",
+        "SUP003",
+        "SUP006"
+      ]
+    },
+    {
+      "table_name": "purchase_order_lines",
+      "row_count": 25,
+      "primary_key": [
+        "purchase_order_id",
+        "po_line_no"
+      ],
+      "foreign_keys": [
+        {
+          "column": "purchase_order_id",
+          "references": "purchase_orders.purchase_order_id",
+          "cardinality": "N:1"
+        },
+        {
+          "column": "product_id",
+          "references": "products_ref_suppliers.product_id",
+          "cardinality": "N:1"
+        }
+      ],
+      "columns": [
+        "purchase_order_id",
+        "po_line_no",
+        "product_id",
+        "product_name",
+        "product_category",
+        "unit",
+        "unit_price",
+        "qty",
+        "line_amount",
+        "line_eta_date",
+        "line_received_qty"
+      ],
+      "split_rule": "行项目明细（每行 = 一行项目）；line_received_qty > 0 表示部分到货"
+    }
+  ],
+  "fk_links_after_split": [
+    {
+      "from": "purchase_orders.supplier_id",
+      "to": "supplier_info.supplier_id",
+      "cardinality": "N:1"
+    },
+    {
+      "from": "purchase_orders.purchase_order_id",
+      "to": "purchase_order_lines.purchase_order_id",
+      "cardinality": "1:N"
+    }
+  ],
+  "denormalization_removed": {
+    "supplier_columns_removed_from_purchase_orders": [
+      "supplier_name",
+      "supplier_contact",
+      "supplier_phone",
+      "supplier_region",
+      "supplier_category"
+    ],
+    "product_columns_removed_from_purchase_orders": [
+      "product_id",
+      "product_name",
+      "product_category",
+      "unit",
+      "unit_price",
+      "qty",
+      "line_amount",
+      "line_eta_date",
+      "line_received_qty"
+    ],
+    "rationale": "原宽表每行 22 列含 3 实体字段；拆分后 purchase_orders 8 列 / supplier_info 6 列 / purchase_order_lines 11 列；每行数据冗余消除"
+  },
+  "tdd_recommendation": "TDD 用例：(a) 25 行宽表拆为 14 头 + 13 supplier + 25 明细；(b) 14 个 PO 主键与原表去重一致；(c) 13 个 supplier 主键去重一致；(d) supplier_info 中 SUP003/SUP-0014/SUP-020 的 phone=null 保留；(e) purchase_order_lines 行数 = 原表行数；(f) FK 链 purchase_order→supplier 与 purchase_order→lines 完整"
+}

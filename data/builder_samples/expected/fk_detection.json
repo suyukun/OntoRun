@@ -1,0 +1,187 @@
+{
+  "source_table": "products_ref_suppliers",
+  "source_path": "products_ref_suppliers.csv",
+  "source_row_count": 34,
+  "target_table": "suppliers_dirty",
+  "target_path": "suppliers_dirty.csv",
+  "target_row_count_after_dedup": 20,
+  "detected_links": [
+    {
+      "link_id": "lnk_product_supplier",
+      "source_field": "supplier_id",
+      "target_field": "supplier_id",
+      "cardinality": "N:1",
+      "detection_method": "column_name_match_with_value_format_normalization",
+      "match_summary": {
+        "direct_match_rows": 26,
+        "format_normalized_match_rows": 5,
+        "unmatched_rows": 3,
+        "total_rows": 34
+      },
+      "unmatched_samples": [
+        {
+          "product_id": "P-1003",
+          "raw_supplier_id": "SUP-0051",
+          "closest_target": "SUP-005",
+          "reason": "typo_5_digit_suffix"
+        },
+        {
+          "product_id": "P-1015",
+          "raw_supplier_id": "SUP-0014",
+          "closest_target": "SUP-0013 or SUP-014",
+          "reason": "typo_zero_one_prefix"
+        },
+        {
+          "product_id": "P-1021",
+          "raw_supplier_id": "SUP-0018",
+          "closest_target": "SUP-018",
+          "reason": "typo_zero_one_prefix"
+        }
+      ],
+      "format_normalization_samples": [
+        {
+          "product_id": "P-1004",
+          "raw_supplier_id": "SUP-003",
+          "normalized_to": "SUP003",
+          "matched_target": "SUP003"
+        },
+        {
+          "product_id": "P-1005",
+          "raw_supplier_id": "SUP003",
+          "normalized_to": "SUP003",
+          "matched_target": "SUP003"
+        },
+        {
+          "product_id": "P-1008",
+          "raw_supplier_id": "SUP-006",
+          "normalized_to": "SUP006",
+          "matched_target": "SUP006"
+        },
+        {
+          "product_id": "P-1009",
+          "raw_supplier_id": "SUP006",
+          "normalized_to": "SUP006",
+          "matched_target": "SUP006"
+        },
+        {
+          "product_id": "P-1010",
+          "raw_supplier_id": "SUP-008",
+          "normalized_to": "SUP008",
+          "matched_target": "SUP008"
+        },
+        {
+          "product_id": "P-1023",
+          "raw_supplier_id": "SUP-016",
+          "normalized_to": "SUP016",
+          "matched_target": "SUP016"
+        },
+        {
+          "product_id": "P-1024",
+          "raw_supplier_id": "SUP016",
+          "normalized_to": "SUP016",
+          "matched_target": "SUP016"
+        },
+        {
+          "product_id": "P-1028",
+          "raw_supplier_id": "SUP-016",
+          "normalized_to": "SUP016",
+          "matched_target": "SUP016"
+        }
+      ],
+      "cardinality_inference": {
+        "products_per_supplier_distribution": {
+          "SUP-001": 3,
+          "SUP-004": 3,
+          "SUP-007": 2,
+          "SUP-009": 2,
+          "SUP-010": 2,
+          "SUP-012": 2,
+          "SUP-015": 2,
+          "SUP-019": 2,
+          "SUP003": 1,
+          "SUP006": 1,
+          "SUP-014": 1,
+          "SUP-0011": 1,
+          "SUP-017": 1,
+          "SUP016": 1,
+          "SUP-020": 1,
+          "SUP-018": 1
+        },
+        "suppliers_per_product": "always 1 -> N:1 confirmed",
+        "cardinality_final": "N:1"
+      },
+      "format_normalized_samples": [
+        {
+          "product_id": "P-1004",
+          "raw_supplier_id": "SUP-003",
+          "normalized_to": "SUP003",
+          "matched_target": "SUP003"
+        },
+        {
+          "product_id": "P-1008",
+          "raw_supplier_id": "SUP-006",
+          "normalized_to": "SUP006",
+          "matched_target": "SUP006"
+        },
+        {
+          "product_id": "P-1010",
+          "raw_supplier_id": "SUP-008",
+          "normalized_to": "SUP008",
+          "matched_target": "SUP008"
+        },
+        {
+          "product_id": "P-1023",
+          "raw_supplier_id": "SUP-016",
+          "normalized_to": "SUP016",
+          "matched_target": "SUP016"
+        },
+        {
+          "product_id": "P-1028",
+          "raw_supplier_id": "SUP-016",
+          "normalized_to": "SUP016",
+          "matched_target": "SUP016"
+        }
+      ]
+    }
+  ],
+  "duplicate_supplier_ids_in_source_indicating_format_variants": [
+    {
+      "value": "SUP003",
+      "occurrences_in_source": [
+        "P-1005"
+      ],
+      "normalized_occurrences": [
+        "P-1004"
+      ]
+    },
+    {
+      "value": "SUP006",
+      "occurrences_in_source": [
+        "P-1009"
+      ],
+      "normalized_occurrences": [
+        "P-1008"
+      ]
+    },
+    {
+      "value": "SUP008",
+      "occurrences_in_source": [],
+      "normalized_occurrences": [
+        "P-1010"
+      ]
+    },
+    {
+      "value": "SUP016",
+      "occurrences_in_source": [
+        "P-1024"
+      ],
+      "normalized_occurrences": [
+        "P-1023",
+        "P-1028"
+      ]
+    }
+  ],
+  "expected_unmatched_count_for_qa": 3,
+  "expected_format_normalized_match_count_for_qa": 5,
+  "tdd_recommendation": "TDD 用例：3 个 unmatched 必须被 FK 检测器报告为 error；5 个 format_normalized 匹配（SUP-003/SUP-006/SUP-008/SUP-016 形式，归一到 SUP003/SUP006/SUP008/SUP016）必须成功；supplier_name_raw 与 suppliers.supplier_name 一致性应作为辅助验证；N:1 基数从 16 个非 typo unique supplier 推断"
+}

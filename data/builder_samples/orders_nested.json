@@ -1,0 +1,554 @@
+{
+  "exported_at": "2025-09-02T10:00:00Z",
+  "source_system": "oms_v3",
+  "orders": [
+    {
+      "order_id": "ORD-20250801-0001",
+      "customer_id": "C-2001",
+      "customer_name": "广州市天河区鲜品汇超市",
+      "order_date": "2025-08-01T10:15:00Z",
+      "status": "delivered",
+      "total_amount": 18420,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1001",
+          "sku": "SKU-LED-9W",
+          "qty": 600,
+          "unit_price": 4.5,
+          "line_amount": 2700
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1004",
+          "sku": "SKU-BOX-30",
+          "qty": 2000,
+          "unit_price": 1.2,
+          "line_amount": 2400
+        },
+        {
+          "line_no": 3,
+          "product_id": "P-1016",
+          "sku": "SKU-PVC-FM",
+          "qty": 600,
+          "unit_price": 22,
+          "line_amount": 13200
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-007",
+        "carrier_name": "宁波港盛国际货运代理有限公司",
+        "vehicle_type": "truck_42_cold",
+        "planned_pickup": "2025-08-02T08:00:00Z",
+        "planned_delivery": "2025-08-04T18:00:00Z",
+        "tracking_no": "CNS-20250804-0001",
+        "cost": 120
+      }
+    },
+    {
+      "order_id": "ORD-20250802-0002",
+      "customer_id": "C-2002",
+      "customer_name": "深圳市南山区邻里鲜生便利店",
+      "order_date": "2025-08-02T14:20:00Z",
+      "status": "delivered",
+      "total_amount": 9450,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1002",
+          "sku": "SKU-LED-12W",
+          "qty": 500,
+          "unit_price": 5.8,
+          "line_amount": 2900
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1005",
+          "sku": "SKU-BOX-50",
+          "qty": 1000,
+          "unit_price": 2.8,
+          "line_amount": 2800
+        },
+        {
+          "line_no": 3,
+          "product_id": "P-1016",
+          "sku": "SKU-PVC-FM",
+          "qty": 150,
+          "unit_price": 22,
+          "line_amount": 3300
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-010",
+        "carrier_name": "青岛海通冷链运输股份有限公司",
+        "vehicle_type": "truck_68_cold",
+        "planned_pickup": "2025-08-03T08:00:00Z",
+        "planned_delivery": "2025-08-05T20:00:00Z",
+        "tracking_no": "CNS-20250805-0002",
+        "cost": 450
+      }
+    },
+    {
+      "order_id": "ORD-20250803-0003",
+      "customer_id": "C-2003",
+      "customer_name": "东莞市莞城光明食品批发部",
+      "order_date": "2025-08-03T09:00:00Z",
+      "status": "in_transit",
+      "total_amount": 56800,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1017",
+          "sku": "SKU-BF-SHNK",
+          "qty": 500,
+          "unit_price": 68,
+          "line_amount": 34000
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1018",
+          "sku": "SKU-SLM-FLT",
+          "qty": 150,
+          "unit_price": 118,
+          "line_amount": 17700
+        },
+        {
+          "line_no": 3,
+          "product_id": "P-1034",
+          "sku": "SKU-FRY-7MM",
+          "qty": 200,
+          "unit_price": 18.5,
+          "line_amount": 3700
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-016",
+        "carrier_name": "成都川西物流有限公司",
+        "vehicle_type": "truck_96_dry",
+        "planned_pickup": "2025-08-04T06:00:00Z",
+        "planned_delivery": "2025-08-07T22:00:00Z",
+        "tracking_no": "CD-20250807-0003",
+        "cost": 1400
+      }
+    },
+    {
+      "order_id": "ORD-20250805-0004",
+      "customer_id": "C-2004",
+      "customer_name": "佛山市顺德区鸿发食品配送",
+      "order_date": "2025-08-05T11:30:00Z",
+      "status": "shipped",
+      "total_amount": 12680,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1006",
+          "sku": "SKU-PAL-120",
+          "qty": 80,
+          "unit_price": 68,
+          "line_amount": 5440
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1007",
+          "sku": "SKU-PE-IND",
+          "qty": 800,
+          "unit_price": 8.2,
+          "line_amount": 6560
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP012",
+        "carrier_name": "北京京诚物流股份有限公司",
+        "vehicle_type": "truck_96_dry",
+        "planned_pickup": "2025-08-06T08:00:00Z",
+        "planned_delivery": "2025-08-08T18:00:00Z",
+        "tracking_no": "BJ-20250808-0004",
+        "cost": 680
+      }
+    },
+    {
+      "order_id": "ORD-20250807-0005",
+      "customer_id": "C-2005",
+      "customer_name": "杭州市余杭区鲜达冷链批发",
+      "order_date": "2025-08-07T15:45:00Z",
+      "status": "confirmed",
+      "total_amount": 78400,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1015",
+          "sku": "SKU-LN2-TUN",
+          "qty": 1,
+          "unit_price": 158000,
+          "line_amount": 158000
+        }
+      ],
+      "shipping": null,
+      "notes": [
+        {
+          "timestamp": "2025-08-07T16:00:00Z",
+          "author": "sales_王",
+          "text": "客户确认液氮速冻隧道设备为大件，需协调 SUP-007 港盛国际货代的吊装服务"
+        },
+        {
+          "timestamp": "2025-08-08T09:30:00Z",
+          "author": "ops_李",
+          "text": "已联系 SUP-007 报价，预计冷链干线运费 4200 元"
+        },
+        {
+          "timestamp": "2025-08-09T10:00:00Z",
+          "author": "ops_李",
+          "replies": [
+            {
+              "timestamp": "2025-08-09T11:00:00Z",
+              "author": "ops_陈",
+              "text": "SUP-007 回复 9 月 5 日可派车，已预留"
+            },
+            {
+              "timestamp": "2025-08-09T14:30:00Z",
+              "author": "ops_李",
+              "text": "已锁定档期并通知客户"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "order_id": "ORD-20250810-0006",
+      "customer_id": "C-2006",
+      "customer_name": "南京市江宁区锦程食品贸易",
+      "order_date": "2025-08-10T10:00:00Z",
+      "status": "delivered",
+      "total_amount": 3280,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1008",
+          "sku": "SKU-PES-14D",
+          "qty": 200,
+          "unit_price": 12.5,
+          "line_amount": 2500
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1010",
+          "sku": "SKU-HNG-4",
+          "qty": 200,
+          "unit_price": 3.6,
+          "line_amount": 720
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP008",
+        "carrier_name": "苏州精工五金配件有限公司",
+        "vehicle_type": "truck_42_dry",
+        "planned_pickup": "2025-08-11T08:00:00Z",
+        "planned_delivery": "2025-08-12T18:00:00Z",
+        "tracking_no": "GZ-20250812-0006",
+        "cost": 60
+      }
+    },
+    {
+      "order_id": "ORD-20250812-0007",
+      "customer_id": "C-2007",
+      "customer_name": "苏州市姑苏区老牌食品商行",
+      "order_date": "2025-08-12T08:30:00Z",
+      "status": "cancelled",
+      "total_amount": 0,
+      "currency": "CNY",
+      "items": [],
+      "shipping": null,
+      "cancel_reason": "客户临时变更采购计划"
+    },
+    {
+      "order_id": "ORD-20250813-0008",
+      "customer_id": "C-2008",
+      "customer_name": "武汉市洪山区楚材食品批发",
+      "order_date": "2025-08-13T13:20:00Z",
+      "status": "in_transit",
+      "total_amount": 24600,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1011",
+          "sku": "SKU-CLM-4G",
+          "qty": 25,
+          "unit_price": 980,
+          "line_amount": 24500
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-013",
+        "carrier_name": "武汉长江冷链设备有限公司",
+        "vehicle_type": "truck_42_dry",
+        "planned_pickup": "2025-08-14T09:00:00Z",
+        "planned_delivery": "2025-08-15T20:00:00Z",
+        "tracking_no": "WH-20250815-0008",
+        "cost": 100
+      }
+    },
+    {
+      "order_id": "ORD-20250815-0009",
+      "customer_id": "C-2009",
+      "customer_name": "长沙市雨花区湘西食品城",
+      "order_date": "2025-08-15T11:00:00Z",
+      "status": "shipped",
+      "total_amount": 11700,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1018",
+          "sku": "SKU-SLM-FLT",
+          "qty": 60,
+          "unit_price": 118,
+          "line_amount": 7080
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1009",
+          "sku": "SKU-CTN-21S",
+          "qty": 250,
+          "unit_price": 18,
+          "line_amount": 4500
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-019",
+        "carrier_name": "兰州西北物流有限公司",
+        "vehicle_type": "truck_42_dry",
+        "planned_pickup": "2025-08-16T08:00:00Z",
+        "planned_delivery": "2025-08-18T18:00:00Z",
+        "tracking_no": "XA-20250818-0009",
+        "cost": 120
+      }
+    },
+    {
+      "order_id": "ORD-20250818-0010",
+      "customer_id": "C-2010",
+      "customer_name": "重庆市渝北区山城连锁超市",
+      "order_date": "2025-08-18T09:45:00Z",
+      "status": "confirmed",
+      "total_amount": 4250,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1021",
+          "sku": "SKU-LSR-25",
+          "qty": 30,
+          "unit_price": 35,
+          "line_amount": 1050
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1022",
+          "sku": "SKU-VAC-2535",
+          "qty": 8000,
+          "unit_price": 0.18,
+          "line_amount": 1440
+        },
+        {
+          "line_no": 3,
+          "product_id": "P-1032",
+          "sku": "SKU-CHP-2835",
+          "qty": 12,
+          "unit_price": 120,
+          "line_amount": 1440
+        }
+      ],
+      "shipping": null
+    },
+    {
+      "order_id": "ORD-20250820-0011",
+      "customer_id": "C-2011",
+      "customer_name": "西安市未央区西咸食品城",
+      "order_date": "2025-08-20T14:00:00Z",
+      "status": "delivered",
+      "total_amount": 8700,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1019",
+          "sku": "SKU-NH-99",
+          "qty": 3,
+          "unit_price": 2800,
+          "line_amount": 8400
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-019",
+        "carrier_name": "兰州西北物流有限公司",
+        "vehicle_type": "truck_42_dry",
+        "planned_pickup": "2025-08-21T08:00:00Z",
+        "planned_delivery": "2025-08-22T18:00:00Z",
+        "tracking_no": "XA-20250822-0011",
+        "cost": 300
+      }
+    },
+    {
+      "order_id": "ORD-20250822-0012",
+      "customer_id": "C-2012",
+      "customer_name": "昆明市官渡区云岭连锁超市",
+      "order_date": "2025-08-22T10:30:00Z",
+      "status": "in_transit",
+      "total_amount": 32000,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1030",
+          "sku": "SKU-YN-42C",
+          "qty": 4,
+          "unit_price": 1860,
+          "line_amount": 7440
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1018",
+          "sku": "SKU-SLM-FLT",
+          "qty": 200,
+          "unit_price": 118,
+          "line_amount": 23600
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-020",
+        "carrier_name": "昆明云岭冷链运输有限公司",
+        "vehicle_type": "truck_42_cold",
+        "planned_pickup": "2025-08-23T07:00:00Z",
+        "planned_delivery": "2025-08-25T20:00:00Z",
+        "tracking_no": "KM-20250825-0012",
+        "cost": 960
+      }
+    },
+    {
+      "order_id": "ORD-20250824-0013",
+      "customer_id": "C-2013",
+      "customer_name": "合肥市庐阳区徽商食品批发",
+      "order_date": "2025-08-24T16:20:00Z",
+      "status": "shipped",
+      "total_amount": 5420,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1020",
+          "sku": "SKU-K9-OP",
+          "qty": 12,
+          "unit_price": 420,
+          "line_amount": 5040
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-015",
+        "carrier_name": "合肥科晶光电材料有限公司",
+        "vehicle_type": "truck_42_dry",
+        "planned_pickup": "2025-08-25T08:00:00Z",
+        "planned_delivery": "2025-08-26T18:00:00Z",
+        "tracking_no": "HF-20250826-0013",
+        "cost": 380
+      }
+    },
+    {
+      "order_id": "ORD-20250826-0014",
+      "customer_id": "C-2014",
+      "customer_name": "北京市朝阳区京华连锁超市",
+      "order_date": "2025-08-26T09:00:00Z",
+      "status": "delivered",
+      "total_amount": 23600,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1013",
+          "sku": "SKU-TRK-68",
+          "qty": 2,
+          "unit_price": 1280,
+          "line_amount": 2560
+        },
+        {
+          "line_no": 2,
+          "product_id": "P-1014",
+          "sku": "SKU-TRK-96",
+          "qty": 1,
+          "unit_price": 1580,
+          "line_amount": 1580
+        },
+        {
+          "line_no": 3,
+          "product_id": "P-1026",
+          "sku": "SKU-CLD-5T",
+          "qty": 8,
+          "unit_price": 2400,
+          "line_amount": 19200
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-012",
+        "carrier_name": "北京京诚物流股份有限公司",
+        "vehicle_type": "truck_96_cold",
+        "planned_pickup": "2025-08-27T08:00:00Z",
+        "planned_delivery": "2025-08-28T18:00:00Z",
+        "tracking_no": "BJ-20250828-0014",
+        "cost": 260
+      }
+    },
+    {
+      "order_id": "ORD-20250828-0015",
+      "customer_id": "C-2015",
+      "customer_name": "天津市南开区北方工业品批发",
+      "order_date": "2025-08-28T11:15:00Z",
+      "status": "confirmed",
+      "total_amount": 16800,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1019",
+          "sku": "SKU-NH-99",
+          "qty": 6,
+          "unit_price": 2800,
+          "line_amount": 16800
+        }
+      ],
+      "shipping": null
+    },
+    {
+      "order_id": "ORD-20250830-0016",
+      "customer_id": "C-2016",
+      "customer_name": "济南市历下区鲁中食品城",
+      "order_date": "2025-08-30T15:00:00Z",
+      "status": "in_transit",
+      "total_amount": 7840,
+      "currency": "CNY",
+      "items": [
+        {
+          "line_no": 1,
+          "product_id": "P-1011",
+          "sku": "SKU-CLM-4G",
+          "qty": 8,
+          "unit_price": 980,
+          "line_amount": 7840
+        }
+      ],
+      "shipping": {
+        "carrier_id": "SUP-013",
+        "carrier_name": "武汉长江冷链设备有限公司",
+        "vehicle_type": "truck_42_dry",
+        "planned_pickup": "2025-08-31T08:00:00Z",
+        "planned_delivery": "2025-09-01T20:00:00Z",
+        "tracking_no": "WH-20250901-0016",
+        "cost": 0
+      }
+    }
+  ]
+}

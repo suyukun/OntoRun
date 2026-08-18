@@ -1,0 +1,169 @@
+{
+  "dataset_id": "suppliers_dirty_csv",
+  "source_path": "suppliers_dirty.csv",
+  "kind": "csv",
+  "row_count_raw": 22,
+  "row_count_after_dedup": 20,
+  "duplicate_rows_detected": [
+    {
+      "row_index": 21,
+      "duplicate_of_row": 1,
+      "key": "SUP-001"
+    },
+    {
+      "row_index": 22,
+      "duplicate_of_row": 1,
+      "key": "SUP-001"
+    }
+  ],
+  "inferred_schema": [
+    {
+      "column": "supplier_id",
+      "inferred_type": "string",
+      "role": "primary_key",
+      "non_null_ratio": 1,
+      "distinct_count": 20,
+      "is_technical": false,
+      "notes": "主键；存在 SUP-001 与 SUP001 两种格式（去重后 SUP-001 与 SUP-0011 格式区分）"
+    },
+    {
+      "column": "supplier_name",
+      "inferred_type": "string",
+      "role": "display_name",
+      "non_null_ratio": 1,
+      "distinct_count": 20,
+      "is_technical": false
+    },
+    {
+      "column": "contact_person",
+      "inferred_type": "string",
+      "role": "attribute",
+      "non_null_ratio": 1,
+      "distinct_count": 20,
+      "is_technical": false
+    },
+    {
+      "column": "contact_phone",
+      "inferred_type": "string",
+      "role": "attribute",
+      "non_null_ratio": 0.8,
+      "distinct_count": 16,
+      "is_technical": false,
+      "null_strategy": "keep_null",
+      "notes": "4/20 行为空，触达 20% 阈值；保留空值供下游实体建模区分"
+    },
+    {
+      "column": "contact_email",
+      "inferred_type": "string",
+      "role": "attribute",
+      "non_null_ratio": 1,
+      "distinct_count": 20,
+      "is_technical": false
+    },
+    {
+      "column": "category",
+      "inferred_type": "enum",
+      "role": "classifier",
+      "non_null_ratio": 1,
+      "distinct_count": 6,
+      "distinct_values": [
+        "electronics",
+        "logistics",
+        "packaging",
+        "raw_material",
+        "textile",
+        "hardware",
+        "equipment",
+        "food"
+      ],
+      "is_technical": false
+    },
+    {
+      "column": "rating",
+      "inferred_type": "float",
+      "role": "metric",
+      "non_null_ratio": 0.85,
+      "is_technical": false,
+      "dirty_data_count": 3,
+      "dirty_samples": [
+        {
+          "row": 4,
+          "raw": "4.5分",
+          "expected_type": "float",
+          "cleanse_rule": "strip_unit_chars_then_to_float"
+        },
+        {
+          "row": 3,
+          "raw": "N/A",
+          "expected_type": "float",
+          "cleanse_rule": "treat_as_null"
+        },
+        {
+          "row": 11,
+          "raw": "N/A",
+          "expected_type": "float",
+          "cleanse_rule": "treat_as_null"
+        }
+      ],
+      "notes": "17/20 有效数值；3 条脏数据需在 schema 推断后做类型清洗"
+    },
+    {
+      "column": "region",
+      "inferred_type": "enum",
+      "role": "classifier",
+      "non_null_ratio": 1,
+      "distinct_count": 7,
+      "distinct_values": [
+        "华南",
+        "华东",
+        "华北",
+        "华中",
+        "西南",
+        "西北",
+        "东北"
+      ],
+      "is_technical": false
+    },
+    {
+      "column": "etl_loaded_at",
+      "inferred_type": "datetime",
+      "role": "technical",
+      "non_null_ratio": 1,
+      "is_technical": true,
+      "notes": "技术列；E2 is_technical=true 应在本体建模时隐藏，不暴露给 LLM 与前端"
+    },
+    {
+      "column": "source_system",
+      "inferred_type": "string",
+      "role": "technical",
+      "non_null_ratio": 1,
+      "is_technical": true,
+      "notes": "技术列；所有行均为 erp；is_technical=true 隐藏"
+    }
+  ],
+  "format_normalization_pairs": {
+    "supplier_id": [
+      {
+        "raw_pattern": "SUP-(\\d+)",
+        "normalized": "SUP-{n}",
+        "examples": [
+          "SUP-001",
+          "SUP-002",
+          "SUP-0011",
+          "SUP-0013"
+        ]
+      },
+      {
+        "raw_pattern": "SUP0*(\\d+)",
+        "normalized": "SUP0{n}",
+        "examples": [
+          "SUP003",
+          "SUP006",
+          "SUP008",
+          "SUP016"
+        ]
+      }
+    ],
+    "notes": "归一后 SUP-001 ↔ SUP001 类匹配；SUP-0011 ↔ SUP0011 类匹配；本数据中 SUP003/SUP006/SUP008/SUP016 等 4 行使用 SUP0 前缀"
+  }
+}

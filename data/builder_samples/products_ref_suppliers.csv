@@ -1,0 +1,35 @@
+product_id,product_name,supplier_id,supplier_name_raw,category,unit,unit_price,moq,lead_time_days,sku,active
+P-1001,LED 节能灯泡 9W E27,SUP-001,深圳市华联电子,electronics,个,4.50,500,7,SKU-LED-9W,1
+P-1002,LED 节能灯泡 12W E27,SUP-001,深圳市华联电子,electronics,个,5.80,500,7,SKU-LED-12W,1
+P-1003,智能 LED 吸顶灯 36W,SUP-0051,中山金辉照明,electronics,套,128.00,50,15,SKU-CEIL-36W,1
+P-1004,防潮牛皮纸包装箱 30cm,SUP-003,佛山顺德永盛包装,packaging,个,1.20,2000,5,SKU-BOX-30,1
+P-1005,防潮牛皮纸包装箱 50cm,SUP003,佛山顺德永盛包装,packaging,个,2.80,1000,5,SKU-BOX-50,1
+P-1006,塑料托盘 1200x1000mm,SUP-004,东莞恒辉塑胶,packaging,块,68.00,100,10,SKU-PAL-120,1
+P-1007,聚乙烯 PE 原料颗粒 工业级,SUP-004,东莞恒辉塑胶,raw_material,千克,8.20,1000,7,SKU-PE-IND,1
+P-1008,涤纶短纤 1.4D 38mm,SUP-006,杭州华诺纺织,textile,千克,12.50,500,12,SKU-PES-14D,1
+P-1009,纯棉梭织布 21S,SUP006,杭州华诺纺织,textile,米,18.00,300,15,SKU-CTN-21S,1
+P-1010,五金铰链 不锈钢 4 寸,SUP-008,苏州精工五金,hardware,个,3.60,2000,8,SKU-HNG-4,1
+P-1011,冷链温控记录仪 4G 联网,SUP-007,宁波港盛国际货代,equipment,台,980.00,10,20,SKU-CLM-4G,1
+P-1012,-18℃ 冷链厢式货车 4.2 米,SUP-007,宁波港盛国际货代,logistics,趟,820.00,1,1,SKU-TRK-42,1
+P-1013,-18℃ 冷链厢式货车 6.8 米,SUP-010,青岛海通冷链,logistics,趟,1280.00,1,1,SKU-TRK-68,1
+P-1014,常温厢式货车 9.6 米,SUP-010,青岛海通冷链,logistics,趟,1580.00,1,1,SKU-TRK-96,1
+P-1015,液氮速冻隧道设备,SUP-0014,武汉长江冷链设备,equipment,套,158000.00,1,45,SKU-LN2-TUN,1
+P-1016,食品级 PVC 保鲜膜,SUP-009,上海明远食品,food,卷,22.00,100,10,SKU-PVC-FM,1
+P-1017,进口冷冻牛肉 牛腱子,SUP-009,上海明远食品,food,千克,68.00,50,3,SKU-BF-SHNK,1
+P-1018,进口冷冻三文鱼柳,SUP-014,长沙湘江食品,food,千克,118.00,30,3,SKU-SLM-FLT,1
+P-1019,工业级片碱 NaOH 99%,SUP-0011,天津北方化工,raw_material,吨,2800.00,1,5,SKU-NH-99,1
+P-1020,光学级 K9 玻璃基板,SUP-015,合肥科晶光电,raw_material,片,420.00,20,25,SKU-K9-OP,1
+P-1021,镭射防伪标签 25mm,SUP-0018,重庆山城包装,packaging,万个,35.00,5,7,SKU-LSR-25,1
+P-1022,真空包装袋 25x35cm,SUP-017,重庆山城包装,packaging,个,0.18,10000,5,SKU-VAC-2535,1
+P-1023,恒温恒湿仓 100㎡ 库位,SUP-016,成都川西物流,logistics,月,12000.00,1,1,SKU-WH-100,1
+P-1024,普通仓 200㎡ 库位,SUP016,成都川西物流,logistics,月,6500.00,1,1,SKU-WH-200,1
+P-1025,普通仓 500㎡ 库位,SUP-019,兰州西北物流,logistics,月,14000.00,1,1,SKU-WH-500,1
+P-1026,冷藏配送 城际 5 吨,SUP-012,北京京诚物流,logistics,趟,2400.00,1,1,SKU-CLD-5T,1
+P-1027,常温城际整车 9.6 米,SUP-012,北京京诚物流,logistics,趟,1980.00,1,1,SKU-DRY-96,1
+P-1028,川渝干线配送 6.8 米,SUP-016,成都川西物流,logistics,趟,1380.00,1,1,SKU-CQ-68,1
+P-1029,西北冷链干线 13 米,SUP-019,兰州西北物流,logistics,趟,4280.00,1,1,SKU-NW-13C,1
+P-1030,云南鲜花冷链 4.2 米,SUP-020,昆明云岭冷链,logistics,趟,1860.00,1,1,SKU-YN-42C,1
+P-1031,光学镜片 K9 25.4mm,SUP-015,合肥科晶光电,raw_material,片,68.00,50,20,SKU-LNS-K9,1
+P-1032,LED 灯珠 2835 0.2W,SUP-001,深圳市华联电子,electronics,万个,120.00,10,7,SKU-CHP-2835,1
+P-1033,防锈 VCI 气相防锈袋,SUP-004,东莞恒辉塑胶,packaging,个,0.85,5000,7,SKU-VCI-BAG,1
+P-1034,速冻薯条 7mm 2.5kg 装,SUP-018,西安西都食品,food,袋,18.50,100,5,SKU-FRY-7MM,0

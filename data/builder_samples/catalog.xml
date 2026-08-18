@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog version="2025-09-01" exported_at="2025-09-02T10:00:00Z" source_system="pim_v2">
+  <metadata>
+    <vendor>云汉零售供应链有限公司</vendor>
+    <region_coverage>全国</region_coverage>
+    <last_sync>2025-09-02T09:30:00Z</last_sync>
+  </metadata>
+  <products>
+    <product id="X-9001" sku="XSKU-LED-A19-9W" status="active">
+      <name lang="zh-CN">LED 球泡灯 9W E27 6500K</name>
+      <category path="electronics/lighting/led-bulb">LED 球泡灯</category>
+      <brand>华联</brand>
+      <unit>个</unit>
+      <list_price currency="CNY">4.80</list_price>
+      <specs>
+        <spec key="wattage" unit="W">9</spec>
+        <spec key="color_temp" unit="K">6500</spec>
+        <spec key="lifespan" unit="h">25000</spec>
+      </specs>
+      <origin>广东深圳</origin>
+      <certifications>
+        <cert id="CCC-2023-1234">中国强制性产品认证</cert>
+        <cert id="CE-EU-2024-5678">CE 欧盟认证</cert>
+      </certifications>
+    </product>
+    <product id="X-9002" sku="XSKU-LED-CDL-36W" status="active">
+      <name lang="zh-CN">LED 吸顶灯 36W 圆形</name>
+      <category path="electronics/lighting/ceiling">LED 吸顶灯</category>
+      <brand>金辉</brand>
+      <unit>套</unit>
+      <list_price currency="CNY">138.00</list_price>
+      <specs>
+        <spec key="wattage" unit="W">36</spec>
+        <spec key="diameter" unit="mm">420</spec>
+      </specs>
+      <origin>广东中山</origin>
+      <certifications>
+        <cert id="CCC-2023-2345">中国强制性产品认证</cert>
+      </certifications>
+    </product>
+    <product id="X-9003" sku="XSKU-BOX-30" status="active">
+      <name lang="zh-CN">防潮牛皮纸包装箱 30cm</name>
+      <category path="packaging/box/kraft">牛皮纸箱</category>
+      <brand>永盛</brand>
+      <unit>个</unit>
+      <list_price currency="CNY">1.20</list_price>
+      <specs>
+        <spec key="length" unit="cm">30</spec>
+        <spec key="material">kraft_paper</spec>
+        <spec key="load_kg">15</spec>
+      </specs>
+      <origin>广东佛山</origin>
+      <certifications/>
+    </product>
+    <product id="X-9004" sku="XSKU-PAL-120" status="active">
+      <name lang="zh-CN">塑料托盘 1200x1000mm</name>
+      <category path="packaging/pallet/plastic">塑料托盘</category>
+      <brand>恒辉</brand>
+      <unit>块</unit>
+      <list_price currency="CNY">68.00</list_price>
+      <specs>
+        <spec key="load_kg" unit="kg">1500</spec>
+        <spec key="material">HDPE</spec>
+      </specs>
+      <origin>广东东莞</origin>
+      <certifications/>
+    </product>
+    <product id="X-9005" sku="XSKU-PES-14D" status="active">
+      <name lang="zh-CN">涤纶短纤 1.4D 38mm</name>
+      <category path="textile/fiber/polyester">涤纶短纤</category>
+      <brand>华诺</brand>
+      <unit>千克</unit>
+      <list_price currency="CNY">12.50</list_price>
+      <specs>
+        <spec key="denier" unit="D">1.4</spec>
+        <spec key="length" unit="mm">38</spec>
+        <spec key="material">PET</spec>
+      </specs>
+      <origin>浙江杭州</origin>
+      <certifications>
+        <cert id="OEKO-TEX-2024-100">OEKO-TEX Standard 100</cert>
+      </certifications>
+    </product>
+    <product id="X-9006" sku="XSKU-HNG-4" status="active">
+      <name lang="zh-CN">不锈钢铰链 4 寸</name>
+      <category path="hardware/hinge/steel">铰链</category>
+      <brand>精工</brand>
+      <unit>个</unit>
+      <list_price currency="CNY">3.60</list_price>
+      <specs>
+        <spec key="size" unit="inch">4</spec>
+        <spec key="material">304SS</spec>
+      </specs>
+      <origin>江苏苏州</origin>
+      <certifications/>
+    </product>
+    <product id="X-9007" sku="XSKU-CLM-4G" status="active">
+      <name lang="zh-CN">冷链温控记录仪 4G 联网</name>
+      <category path="equipment/coldchain/monitor">冷链监控</category>
+      <brand>长江冷链</brand>
+      <unit>台</unit>
+      <list_price currency="CNY">980.00</list_price>
+      <specs>
+        <spec key="connectivity">4G</spec>
+        <spec key="battery" unit="h">72</spec>
+        <spec key="temp_range_c">-30~70</spec>
+      </specs>
+      <origin>湖北武汉</origin>
+      <certifications>
+        <cert id="CCC-2024-9001">中国强制性产品认证</cert>
+      </certifications>
+    </product>
+    <product id="X-9008" sku="XSKU-TRK-68" status="active">
+      <name lang="zh-CN">-18℃ 冷链厢式货车 6.8 米</name>
+      <category path="logistics/truck/cold">冷链运输</category>
+      <brand>海通</brand>
+      <unit>趟</unit>
+      <list_price currency="CNY">1280.00</list_price>
+      <specs>
+        <spec key="length" unit="m">6.8</spec>
+        <spec key="temp_c">-18</spec>
+        <spec key="capacity_kg">8000</spec>
+      </specs>
+      <origin>山东青岛</origin>
+      <certifications>
+        <cert id="JT-2024-T-009">道路运输证</cert>
+      </certifications>
+    </product>
+    <product id="X-9009" sku="XSKU-LN2-TUN" status="active">
+      <name lang="zh-CN">液氮速冻隧道设备</name>
+      <category path="equipment/freezing/ln2">液氮速冻</category>
+      <brand>长江冷链</brand>
+      <unit>套</unit>
+      <list_price currency="CNY">158000.00</list_price>
+      <specs>
+        <spec key="throughput_kg_h">500</spec>
+        <spec key="power_kw">85</spec>
+        <spec key="ln2_consumption_kg_h">80</spec>
+      </specs>
+      <origin>湖北武汉</origin>
+      <certifications>
+        <cert id="CE-EU-2024-9012">CE 欧盟认证</cert>
+        <cert id="ISO-9001-2024">ISO 9001</cert>
+      </certifications>
+    </product>
+    <product id="X-9010" sku="XSKU-BF-SHNK" status="active">
+      <name lang="zh-CN">进口冷冻牛肉 牛腱子</name>
+      <category path="food/frozen/beef">冷冻牛肉</category>
+      <brand>明远</brand>
+      <unit>千克</unit>
+      <list_price currency="CNY">68.00</list_price>
+      <specs>
+        <spec key="origin_country">巴西</spec>
+        <spec key="package_kg">2.5</spec>
+        <spec key="storage_temp_c">-18</spec>
+      </specs>
+      <origin>上海</origin>
+      <certifications>
+        <cert id="CIQ-2024-A-111">出入境检验检疫</cert>
+        <cert id="SC-2024-200">食品生产许可证</cert>
+      </certifications>
+    </product>
+    <product id="X-9011" sku="XSKU-SLM-FLT" status="active">
+      <name lang="zh-CN">进口冷冻三文鱼柳</name>
+      <category path="food/frozen/salmon">冷冻水产</category>
+      <brand>湘江</brand>
+      <unit>千克</unit>
+      <list_price currency="CNY">118.00</list_price>
+      <specs>
+        <spec key="origin_country">挪威</spec>
+        <spec key="package_kg">1.0</spec>
+        <spec key="storage_temp_c">-18</spec>
+      </specs>
+      <origin>湖南长沙</origin>
+      <certifications>
+        <cert id="CIQ-2024-B-222">出入境检验检疫</cert>
+      </certifications>
+    </product>
+    <product id="X-9012" sku="XSKU-NH-99" status="active">
+      <name lang="zh-CN">工业级片碱 NaOH 99%</name>
+      <category path="raw_material/chemical/alkali">化工原料</category>
+      <brand>北方化工</brand>
+      <unit>吨</unit>
+      <list_price currency="CNY">2800.00</list_price>
+      <specs>
+        <spec key="purity">99%</spec>
+        <spec key="package_kg">25</spec>
+        <spec key="hazard_class">8</spec>
+      </specs>
+      <origin>天津</origin>
+      <certifications>
+        <cert id="SDS-2024-NH99">安全数据表</cert>
+      </certifications>
+    </product>
+  </products>
+</catalog>

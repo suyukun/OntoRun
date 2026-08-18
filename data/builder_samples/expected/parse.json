@@ -1,0 +1,196 @@
+{
+  "source_path": "catalog.xml",
+  "parse_strategy": "nested_element_to_child_table_with_attribute_and_text",
+  "result_tables": [
+    {
+      "table_name": "products",
+      "row_count": 12,
+      "primary_key": "product_id",
+      "columns": [
+        "product_id",
+        "sku",
+        "name",
+        "category_path",
+        "category_label",
+        "brand",
+        "unit",
+        "list_price",
+        "currency",
+        "origin",
+        "status"
+      ]
+    },
+    {
+      "table_name": "product_specs",
+      "row_count": 33,
+      "primary_key": [
+        "product_id",
+        "spec_seq"
+      ],
+      "foreign_keys": [
+        {
+          "column": "product_id",
+          "references": "products.product_id",
+          "cardinality": "N:1"
+        }
+      ],
+      "columns": [
+        "product_id",
+        "spec_seq",
+        "spec_key",
+        "spec_value",
+        "spec_unit"
+      ],
+      "notes": "specs 子元素 Explode；空 unit 处理为 null"
+    },
+    {
+      "table_name": "product_certifications",
+      "row_count": 12,
+      "primary_key": [
+        "product_id",
+        "cert_seq"
+      ],
+      "foreign_keys": [
+        {
+          "column": "product_id",
+          "references": "products.product_id",
+          "cardinality": "N:1"
+        }
+      ],
+      "columns": [
+        "product_id",
+        "cert_seq",
+        "cert_id",
+        "cert_text"
+      ],
+      "notes": "空 certifications 节点（X-9003/X-9004/X-9006）不产生 cert 行"
+    }
+  ],
+  "metadata_table": {
+    "table_name": "catalog_metadata",
+    "row_count": 1,
+    "primary_key": "vendor",
+    "columns": [
+      "vendor",
+      "region_coverage",
+      "last_sync",
+      "version",
+      "exported_at",
+      "source_system"
+    ],
+    "notes": "根节点属性与 metadata 子元素提取；不参与下游对象建模"
+  },
+  "expected_sample_rows": {
+    "products_first_3": [
+      {
+        "product_id": "X-9001",
+        "sku": "XSKU-LED-A19-9W",
+        "name": "LED 球泡灯 9W E27 6500K",
+        "category_path": "electronics/lighting/led-bulb",
+        "category_label": "LED 球泡灯",
+        "brand": "华联",
+        "unit": "个",
+        "list_price": 4.8,
+        "currency": "CNY",
+        "origin": "广东深圳",
+        "status": "active"
+      },
+      {
+        "product_id": "X-9002",
+        "sku": "XSKU-LED-CDL-36W",
+        "name": "LED 吸顶灯 36W 圆形",
+        "category_path": "electronics/lighting/ceiling",
+        "category_label": "LED 吸顶灯",
+        "brand": "金辉",
+        "unit": "套",
+        "list_price": 138,
+        "currency": "CNY",
+        "origin": "广东中山",
+        "status": "active"
+      },
+      {
+        "product_id": "X-9003",
+        "sku": "XSKU-BOX-30",
+        "name": "防潮牛皮纸包装箱 30cm",
+        "category_path": "packaging/box/kraft",
+        "category_label": "牛皮纸箱",
+        "brand": "永盛",
+        "unit": "个",
+        "list_price": 1.2,
+        "currency": "CNY",
+        "origin": "广东佛山",
+        "status": "active"
+      }
+    ],
+    "product_specs_first_5": [
+      {
+        "product_id": "X-9001",
+        "spec_seq": 1,
+        "spec_key": "wattage",
+        "spec_value": "9",
+        "spec_unit": "W"
+      },
+      {
+        "product_id": "X-9001",
+        "spec_seq": 2,
+        "spec_key": "color_temp",
+        "spec_value": "6500",
+        "spec_unit": "K"
+      },
+      {
+        "product_id": "X-9001",
+        "spec_seq": 3,
+        "spec_key": "lifespan",
+        "spec_value": "25000",
+        "spec_unit": "h"
+      },
+      {
+        "product_id": "X-9002",
+        "spec_seq": 1,
+        "spec_key": "wattage",
+        "spec_value": "36",
+        "spec_unit": "W"
+      },
+      {
+        "product_id": "X-9002",
+        "spec_seq": 2,
+        "spec_key": "diameter",
+        "spec_value": "420",
+        "spec_unit": "mm"
+      }
+    ],
+    "product_certifications_first_5": [
+      {
+        "product_id": "X-9001",
+        "cert_seq": 1,
+        "cert_id": "CCC-2023-1234",
+        "cert_text": "中国强制性产品认证"
+      },
+      {
+        "product_id": "X-9001",
+        "cert_seq": 2,
+        "cert_id": "CE-EU-2024-5678",
+        "cert_text": "CE 欧盟认证"
+      },
+      {
+        "product_id": "X-9002",
+        "cert_seq": 1,
+        "cert_id": "CCC-2023-2345",
+        "cert_text": "中国强制性产品认证"
+      },
+      {
+        "product_id": "X-9005",
+        "cert_seq": 1,
+        "cert_id": "OEKO-TEX-2024-100",
+        "cert_text": "OEKO-TEX Standard 100"
+      },
+      {
+        "product_id": "X-9007",
+        "cert_seq": 1,
+        "cert_id": "CCC-2024-9001",
+        "cert_text": "中国强制性产品认证"
+      }
+    ]
+  },
+  "tdd_recommendation": "TDD 用例：(a) products 12 行；(b) product_specs 32 行；(c) product_certifications 13 行；(d) 3 个空 certifications 节点正确不产行；(e) 属性+子元素混合解析无丢失；(f) 货币/单位/路径属性正确归位"
+}
