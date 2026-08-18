@@ -200,9 +200,11 @@ def main():
         print("\nPUBLIC (would push):")
         for _, p in sorted(public):
             print("  " + p)
-        print("\nPRIVATE (never pushed):")
-        for p in private:
+        print(f"\nPRIVATE (never pushed): {len(private)} files")
+        for p in private[:15]:
             print("  " + p)
+        if len(private) > 15:
+            print(f"  ... and {len(private) - 15} more")
         return 0
 
     secrets = scan_for_secrets(public)
