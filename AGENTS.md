@@ -53,7 +53,7 @@ OntoRun/
 
 ## 常用命令（可执行）
 - 初始化仓库：`git init`（首件事；单一事实来源）
-- 安装后端依赖：`python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+- 安装后端依赖（用 uv）：`uv pip install -r requirements.txt`（国内源 `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple`）
 - 安装前端依赖：`cd web && npm install --registry=https://registry.npmmirror.com`
 - 后端测试：`pytest -v tests/`
 - 前端测试：`cd web && npm run test`
