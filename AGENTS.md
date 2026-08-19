@@ -82,9 +82,9 @@ class Customer(BaseModel):
 - **核心不变量（必须全绿）**：三问测试 E2E（写回回路：LLM->动作->源系统变更->审计落库）+ 每阶段主路径冒烟。
 - **核心算法模块 TDD**（测试即规格）：E2 映射四技法 / E3 七道校验 / E4 状态机 / DAG 引擎。
 - **脚手架/CRUD/路由**：smoke 级（端点通、状态流转对），不写逐字段单测，不凑覆盖率。
-- **反馈回路**：日常 = 增量测试（pytest tests/test_builder_pX.py -q，秒级）+ ruff；全量 pytest 每阶段末由 Rose 跑一次，不进子代理循环。
+- **反馈回路**：日常 = 增量测试（pytest tests/test_builder_pX.py -q，秒级）+ ruff；全量 pytest 每阶段末由 Rose 跑一次，不进子代理循环。 **子代理禁止跑全量 pytest（全量仅 Rose 在阶段末跑一次）；bash 长命令必须显式设 timeoutMs（默认 60s 会截断 3 分钟级测试造成反复重跑）。**
 - **覆盖率 80% 挂起**：P6 收口时只对 mapping/extraction/pipeline/logic 四模块核算。
-- **独立 red-team**：收敛为 P3 末架构审查 + P6 终审。
+- **独立 red-team**：仅 P6 终审一次（额度硬约束下审查边际价值低于主线推进；核心算法靠测试即规格兜底）。
 - 测试失败修实现，不修测试（除非测试本身错）。
 
 ## LLM 调用与限流纪律
