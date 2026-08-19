@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -41,10 +42,14 @@ class ObjectTypeRow:
 
     @property
     def api_name(self) -> str:
-        # 简单 snake_case 化（与 ontology/objects.py 现有 api_name 风格一致）
-        return "".join(
-            ("_" + c.lower() if c.isupper() else c) for c in self.name
-        ).lstrip("_")
+        # snake_case 化：P2_Test_Customer -> p2_test_customer（修复 P2 bug：
+        # 旧实现 "".join(...).lstrip('_') 会让已有下划线变成重复，如 P2_Test_Customer
+        # -> p2__test__customer，被 P3 派生 link 名复用时撞名）。
+        # 算法：先在 小写/数字 后跟 大写 的边界插下划线；再统一小写；最后 collapse 重复下划线。
+        s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", self.name)
+        s = s.lower()
+        s = re.sub(r"_+", "_", s)
+        return s.strip("_")
 
 
 def _now() -> str:

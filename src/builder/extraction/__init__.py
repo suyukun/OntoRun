@@ -13,3 +13,33 @@ extraction_tasks 表**无 progress 字段**（同步执行无进度语义，补�
 
 P0 仅子包骨架；P3 实现提取器 + 七道校验器。
 """
+
+from src.builder.extraction import repo, validators
+from src.builder.extraction.extractor import (
+    EXTRACTION_SYSTEM_PROMPT,
+    EXTRACTION_USER_TEMPLATE,
+    ExtractionPayload,
+    ExtractionResult,
+    extract_from_text,
+)
+from src.builder.extraction.repo import ExtractionTaskRow
+from src.builder.extraction.validators import (
+    Issue,
+    ValidationReport,
+    run_all,
+)
+
+__all__ = [
+    "EXTRACTION_SYSTEM_PROMPT",
+    "EXTRACTION_USER_TEMPLATE",
+    "ExtractionPayload",
+    "ExtractionResult",
+    "ExtractionTaskRow",
+    "Issue",
+    "ValidationReport",
+    "extract_from_text",
+    "extractor",
+    "repo",
+    "run_all",
+    "validators",
+]

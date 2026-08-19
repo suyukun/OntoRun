@@ -99,6 +99,11 @@ def create_app(
     # P2 管道 / datasets / curated 路由
     from src.api.builder_pipeline_routes import builder_pipeline_router
     app.include_router(builder_pipeline_router)
+    # P3 映射 / 提取路由
+    from src.api.builder_mapping_extraction_routes import (
+        builder_mapping_extraction_router,
+    )
+    app.include_router(builder_mapping_extraction_router)
     _inject_schema_into_openapi(app, registry)
     return app
 

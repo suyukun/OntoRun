@@ -1,6 +1,6 @@
 """自动映射子包（重写蓝图 v0.3 §3 / §7 / 补丁 B3）。
 
-E2 自动映射四技法：
+E2 自动映射四技法（核心算法，测透）：
 - 字段推断（列名→属性，snake_case→PascalCase，is_technical 标记）
 - FK 检测（跨表主键/外键同名 + 基数推断 1:1/1:N/M:N）
 - 值格式容错（SUP-001 ↔ SUP001 归一）
@@ -11,3 +11,24 @@ E7 宽表拆分：保留最小实现（一实体一表拆分），增量更新�
 
 P0 仅子包骨架；P3 实现具体算法。
 """
+
+from src.builder.mapping import (
+    alias_matcher,
+    fk_detection,
+    naming,
+    repo,
+    value_format,
+    wide_split,
+)
+from src.builder.mapping.auto_map import AutoMapResult, auto_map_from_inference
+
+__all__ = [
+    "AutoMapResult",
+    "alias_matcher",
+    "auto_map_from_inference",
+    "fk_detection",
+    "naming",
+    "repo",
+    "value_format",
+    "wide_split",
+]

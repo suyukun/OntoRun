@@ -46,6 +46,9 @@ BUILDER_ERROR_MESSAGES: dict[str, str] = {
     "BUILDER_PIPELINE_NOT_FOUND": "管道不存在",
     "BUILDER_INVALID_DAG": "DAG 校验失败（环/重复 id/未知节点/自环）",
     "BUILDER_CURATED_NOT_FOUND": "curated 数据集不存在",
+    # P3 新增
+    "BUILDER_MAPPING_NOT_FOUND": "映射记录不存在",
+    "BUILDER_EXTRACTION_NOT_FOUND": "提取任务不存在",
 }
 ERROR_MESSAGES.update(BUILDER_ERROR_MESSAGES)
 
@@ -77,6 +80,9 @@ ERROR_CODE_HTTP_STATUS.update(
         "BUILDER_PIPELINE_NOT_FOUND": 404,
         "BUILDER_INVALID_DAG": 400,
         "BUILDER_CURATED_NOT_FOUND": 404,
+        # P3
+        "BUILDER_MAPPING_NOT_FOUND": 404,
+        "BUILDER_EXTRACTION_NOT_FOUND": 404,
     }
 )
 
