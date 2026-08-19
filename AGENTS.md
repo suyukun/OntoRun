@@ -87,6 +87,11 @@ class Customer(BaseModel):
 - **独立 red-team**：收敛为 P3 末架构审查 + P6 终审。
 - 测试失败修实现，不修测试（除非测试本身错）。
 
+## LLM 调用与限流纪律
+- 优先使用已付费套餐内模型（当前=火山 Coding Plan Pro），以省费用为目的；自费 API（plan 外 provider）仅兜底，启用前告知 Jack。
+- 子代理并发 ≤2 个长任务（长任务 = 预计 >10 分钟或多轮工具调用的编码/审查任务）；交付即收尾，不让 continuable 长挂（idle 占配额窗口）。
+- 429 应对顺序：① 并发控制（治本）-> ② 退避等待（DSH retryPolicy 长退避，见 ~/.dsh/settings.yaml）-> ③ 套餐内换模型（试验性，账户级限流下不保证有效）-> ④ plan 外 provider（最后手段）。
+
 ## Git 工作流
 - commit 用英文 conventional commits：feat/fix/refactor/docs/test/chore/perf/ci。
 - 本地 git = 单一事实来源；远端/GitHub/Gitee 发布须 Jack 确认（发布阶段定）。
