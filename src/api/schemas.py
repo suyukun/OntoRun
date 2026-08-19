@@ -40,6 +40,12 @@ BUILDER_ERROR_MESSAGES: dict[str, str] = {
     "BUILDER_UNKNOWN_TARGET_TYPE": "link.target_type_id 不在已发布 object_types 中",
     "BUILDER_LINK_ENDPOINT_UNRESOLVED": "link 两端类型未注册",
     "BUILDER_INVALID_REQUEST": "请求参数不合法（category/cardinality 等枚举越界）",
+    # P2 新增
+    "BUILDER_DATASET_NOT_FOUND": "数据集不存在",
+    "BUILDER_DATASET_FILE_MISSING": "数据集源文件丢失",
+    "BUILDER_PIPELINE_NOT_FOUND": "管道不存在",
+    "BUILDER_INVALID_DAG": "DAG 校验失败（环/重复 id/未知节点/自环）",
+    "BUILDER_CURATED_NOT_FOUND": "curated 数据集不存在",
 }
 ERROR_MESSAGES.update(BUILDER_ERROR_MESSAGES)
 
@@ -65,6 +71,12 @@ ERROR_CODE_HTTP_STATUS.update(
         "BUILDER_UNKNOWN_TARGET_TYPE": 400,
         "BUILDER_LINK_ENDPOINT_UNRESOLVED": 400,
         "BUILDER_INVALID_REQUEST": 400,
+        # P2
+        "BUILDER_DATASET_NOT_FOUND": 404,
+        "BUILDER_DATASET_FILE_MISSING": 410,
+        "BUILDER_PIPELINE_NOT_FOUND": 404,
+        "BUILDER_INVALID_DAG": 400,
+        "BUILDER_CURATED_NOT_FOUND": 404,
     }
 )
 

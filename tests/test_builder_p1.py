@@ -295,6 +295,7 @@ def _create_link_payload(source_name: str, target_name: str, **overrides) -> dic
         "source_type_id": source_name,
         "target_type_id": target_name,
         "cardinality": "1:N",
+        "fk_field": "owner_id",  # P2 必填：loader 入 Registry 的 self_check 依赖
     }
     payload.update(overrides)
     return payload

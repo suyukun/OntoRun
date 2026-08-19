@@ -407,12 +407,17 @@ def publish_object_type(ot_id: str, request: Request) -> JSONResponse:
 
 
 def _reload_runtime_registry(request: Request) -> str | None:
-    """重新跑一遍 loader 同步刷内存 Registry。返回 error message 或 None。"""
+    """重新跑一遍 loader 同步刷内存 Registry（reload=True 幂等）。
+
+    返回 error message 或 None。
+    """
     from src.builder.registry_loader import load_published_into_registry
 
     rt = request.app.state.runtime
     try:
-        result = load_published_into_registry(rt.store.ontology_path, rt.registry)
+        result = load_published_into_registry(
+            rt.store.ontology_path, rt.registry, reload=True
+        )
     except Exception as exc:  # noqa: BLE001 —— loader 失败仅警告，不阻断 publish
         return f"loader exception: {exc}"
     errs = [i for i in result["issues"] if i["severity"] == "error"]
@@ -598,6 +603,18 @@ def publish_link_type(lt_id: str, request: Request) -> JSONResponse:
                 "BUILDER_INVALID_STATUS_TRANSITION",
                 {"current": exc.current, "target": exc.target},
             )
+    # P2 同步 reload 内存 Registry（与 publish_object_type 一致：让 /meta/schema 立即可见）
+    reload_err = _reload_runtime_registry(request)
+    if reload_err:
+        return JSONResponse(
+            content=_ok(
+                request_id,
+                {
+                    **_lt_row_to_dict(row),
+                    "_warning": f"已落库但 Registry 同步失败: {reload_err}",
+                },
+            )
+        )
     return JSONResponse(content=_ok(request_id, _lt_row_to_dict(row)))
 
 

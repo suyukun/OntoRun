@@ -96,6 +96,9 @@ def create_app(
     app.include_router(routes.actions_router)
     app.include_router(routes.audit_router)
     app.include_router(builder_router)
+    # P2 管道 / datasets / curated 路由
+    from src.api.builder_pipeline_routes import builder_pipeline_router
+    app.include_router(builder_pipeline_router)
     _inject_schema_into_openapi(app, registry)
     return app
 

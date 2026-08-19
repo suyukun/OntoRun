@@ -57,8 +57,7 @@ def validate_link_type(
 ) -> str | None:
     """校验 link_types 行能否 publish。两端类型必须在 known_object_type_names 中。
 
-    P1 范围：fk_field 暂不强制（任务边界：DDL 无该列，loader 不入 Registry）。
-    P2 映射 apply 阶段会写入并要求 fk_field 必填。
+    P2 范围：fk_field 必填（loader 入 Registry 的 self_check 必查），发布前必校验。
     """
     if not getattr(row, "name", ""):
         return "name 不能为空"
@@ -70,6 +69,12 @@ def validate_link_type(
         return "不允许自环链接（source == target）"
     if row.cardinality not in {"1:1", "1:N", "N:1", "N:M"}:
         return f"cardinality 非法: {row.cardinality}"
+    fk = getattr(row, "fk_field", "") or ""
+    if not fk:
+        return (
+            "fk_field 必填（P2：Registry self_check 要求 fk 字段在 model 中，"
+            "loader 据此动态注册 link）"
+        )
     return None
 
 

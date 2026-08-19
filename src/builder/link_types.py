@@ -46,8 +46,13 @@ def _new_id() -> str:
 
 
 def _row_factory(row: sqlite3.Row) -> LinkTypeRow:
-    # fk_field 不在 BUILDER_SCHEMA（任务边界不改 DDL）。P1 阶段 link 不入 Registry，
-    # self_check 不查 fk_field；P2 映射 apply 阶段再写入。LinkTypeRow 上保留该字段供未来。
+    # fk_field 列在 P2 加入（store.migrate idempotent ALTER TABLE ADD COLUMN）。
+    # 旧库可能缺列，SELECT * 报 KeyError — 用 try/except 兜底，保持向后兼容。
+    fk_value = ""
+    try:
+        fk_value = row["fk_field"] or ""
+    except (IndexError, KeyError):
+        fk_value = ""
     return LinkTypeRow(
         id=row["id"],
         ontology_id=row["ontology_id"],
@@ -57,7 +62,7 @@ def _row_factory(row: sqlite3.Row) -> LinkTypeRow:
         source_type_id=row["source_type_id"],
         target_type_id=row["target_type_id"],
         cardinality=row["cardinality"],
-        fk_field="",
+        fk_field=fk_value,
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -87,9 +92,9 @@ def create(
     now = _now()
     conn.execute(
         "INSERT INTO link_types (id, ontology_id, name, semantic_name, category, "
-        "source_type_id, target_type_id, cardinality, status, "
+        "source_type_id, target_type_id, cardinality, fk_field, status, "
         "created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             new_id,
             ontology_id,
@@ -99,6 +104,7 @@ def create(
             source_type_id,
             target_type_id,
             cardinality,
+            fk_field or "",
             DRAFT,
             now,
             now,
@@ -153,6 +159,7 @@ def update(
         "source_type_id",
         "target_type_id",
         "cardinality",
+        "fk_field",
     }
     sets: list[str] = []
     params: list[Any] = []

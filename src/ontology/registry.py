@@ -55,6 +55,25 @@ class Registry:
             raise ValueError(f"动作重复注册: {defn.name}")
         self._actions[defn.name] = defn
 
+    # ---- 反注册（loader 在 reload 模式清空 builder 加载的 ot/lt） ----
+    def unregister_object_type(self, name: str) -> bool:
+        if name not in self._objects:
+            return False
+        del self._objects[name]
+        return True
+
+    def unregister_link_types_by_endpoint(self, type_name: str) -> int:
+        """删除所有 source/target 为 type_name 的 link。返回删除数。"""
+        before = len(self._links)
+        self._links = [
+            l for l in self._links
+            if l.source_type != type_name and l.target_type != type_name
+        ]
+        return before - len(self._links)
+
+    def has_object_type(self, name: str) -> bool:
+        return name in self._objects
+
     # ---- 查询 ----
     def object_types(self) -> list[ObjectTypeDef]:
         return list(self._objects.values())

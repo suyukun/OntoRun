@@ -222,10 +222,17 @@ def init_builder_schema(conn: sqlite3.Connection) -> None:
         "version INTEGER PRIMARY KEY, note TEXT NOT NULL, applied_at TEXT NOT NULL)"
     )
     conn.executescript(BUILDER_SCHEMA)
+    # v2 patch：link_types 加 fk_field（idempotent）。
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
+    if "fk_field" not in cols:
+        conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
     runtime_note = (
         "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
     )
-    builder_note = "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）"
+    builder_note = (
+        "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；"
+        "v2 patch: link_types.fk_field"
+    )
     conn.execute(
         "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
         "VALUES (?,?,?)",
@@ -287,18 +294,27 @@ class Store:
         一次 migrate 同时落运行时段（audit_log / ontology_state / schema_version）
         与 builder 段（10 张表 + BUILDER_SCHEMA_VERSION）。两段共用 v1 行，note 用
         分号拼接两段说明，避免前次 INSERT 被覆盖导致丢失运行时段说明（red-team E2）。
+
+        v2 patch（P2）：link_types 加 fk_field 列（idempotent ALTER，已建则跳过）。
+        loader 用此列做 link_types 入 Registry 的 fk_field 校验。
         """
         runtime_note = (
             "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
         )
         builder_note = (
-            "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）"
+            "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；v2 patch: link_types.fk_field"
         )
         merged_note = f"{runtime_note}；{builder_note}"
         conn = self.ontology_conn()
         try:
             conn.executescript(ONTOLOGY_SCHEMA)
             conn.executescript(BUILDER_SCHEMA)
+            # v2 patch：link_types 加 fk_field（idempotent）。
+            # PRAGMA table_info 返回列序 [cid, name, type, notnull, dflt_value, pk]，
+            # 不依赖 row_factory；索引 1 = name。
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
+            if "fk_field" not in cols:
+                conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
             # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
