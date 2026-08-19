@@ -43,7 +43,7 @@ from src.builder import (
 )
 from src.builder.extraction import (
     ExtractionResult,
-    extract_from_text,
+    extract_from_text_async,
 )
 from src.builder.extraction import (
     repo as extraction_repo,
@@ -163,9 +163,7 @@ async def mappings_auto(request: Request) -> JSONResponse:
     try:
         payload = MappingAutoRequest(**body)
     except (ValidationError, ValueError) as exc:
-        return _error(
-            request_id, "BUILDER_INVALID_REQUEST", {"detail": str(exc)}
-        )
+        return _error(request_id, "BUILDER_INVALID_REQUEST", {"detail": str(exc)})
     sp = Path(payload.source_path)
     if not sp.is_absolute():
         sp = (Path.cwd() / sp).resolve()
@@ -176,17 +174,21 @@ async def mappings_auto(request: Request) -> JSONResponse:
             {"name": payload.source_table, "source_path": str(sp)},
         )
     try:
-        inference = infer_from_csv_path(sp, dataset_id=payload.source_table, pk_column="auto")
+        inference = infer_from_csv_path(
+            sp, dataset_id=payload.source_table, pk_column="auto"
+        )
     except Exception as exc:  # noqa: BLE001
         return _error(
             request_id,
             "BUILDER_INVALID_REQUEST",
             {"detail": f"schema_infer 失败: {exc}"},
         )
+
     # 读 source_rows（async 函数中避免阻塞 open：用 to_thread）
     def _read_csv_sync(p: Path) -> list[dict[str, str]]:
         with open(p, encoding="utf-8", newline="") as f:
             return list(csv.DictReader(f))
+
     source_rows = await asyncio.to_thread(_read_csv_sync, sp)
     # target 可选
     target_rows: list[dict[str, str]] | None = None
@@ -201,10 +203,12 @@ async def mappings_auto(request: Request) -> JSONResponse:
                 "BUILDER_DATASET_FILE_MISSING",
                 {"name": payload.target_table, "source_path": str(tp)},
             )
+
         def _read_target(p: Path) -> tuple[list[dict], list[str]]:
             with open(p, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
                 return list(reader), list(reader.fieldnames or [])
+
         target_rows, target_columns = await asyncio.to_thread(_read_target, tp)
     # alias 可选
     alias_text: str | None = payload.alias_doc_text
@@ -214,9 +218,11 @@ async def mappings_auto(request: Request) -> JSONResponse:
         if not mp.is_absolute():
             mp = (Path.cwd() / mp).resolve()
         if mp.exists():
+
             def _read_master(p: Path) -> list[dict]:
                 with open(p, encoding="utf-8", newline="") as f:
                     return list(csv.DictReader(f))
+
             master = await asyncio.to_thread(_read_master, mp)
     if alias_text is None and payload.alias_doc_path:
         dp = Path(payload.alias_doc_path)
@@ -318,7 +324,9 @@ def mappings_apply(name: str, request: Request) -> JSONResponse:
     store = request.app.state.runtime.store
     issues: list[dict] = []
     with store.ontology_conn() as conn:
-        mp_items, _ = mapping_repo.list_all(conn, entity_class=name, page=1, page_size=1)
+        mp_items, _ = mapping_repo.list_all(
+            conn, entity_class=name, page=1, page_size=1
+        )
         if not mp_items:
             return _error(request_id, "BUILDER_MAPPING_NOT_FOUND", {"name": name})
         mp = mp_items[0]
@@ -345,10 +353,17 @@ def mappings_apply(name: str, request: Request) -> JSONResponse:
                 "datetime": "string",
                 "enum": "string",
             }.get(t, "string")
-            properties[pname] = {"type": json_type, "description": f"自动从 {f.get('column')} 派生"}
+            properties[pname] = {
+                "type": json_type,
+                "description": f"自动从 {f.get('column')} 派生",
+            }
             if f.get("is_pk"):
                 required.insert(0, pname)
-        property_schema = {"type": "object", "properties": properties, "required": required}
+        property_schema = {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
         # 2) 冲突检测（与内置同名）
         if conflict_mod.check_object_type_name_conflict(conn, name):
             return _error(
@@ -370,14 +385,22 @@ def mappings_apply(name: str, request: Request) -> JSONResponse:
                 property_schema=property_schema,
             )
             ot_id = ot_row.id
-            issues.append({"code": "MAPPING_OT_CREATED", "severity": "info", "message": f"已创建 object_type {name!r}"})
+            issues.append(
+                {
+                    "code": "MAPPING_OT_CREATED",
+                    "severity": "info",
+                    "message": f"已创建 object_type {name!r}",
+                }
+            )
         else:
             ot_id = existing_ot.id
-            issues.append({
-                "code": "MAPPING_OT_REUSED",
-                "severity": "info",
-                "message": f"object_type {name!r} 已存在，复用 id={ot_id}",
-            })
+            issues.append(
+                {
+                    "code": "MAPPING_OT_REUSED",
+                    "severity": "info",
+                    "message": f"object_type {name!r} 已存在，复用 id={ot_id}",
+                }
+            )
         # 4) 为每条 fk 创建 link_type draft
         created_links: list[dict] = []
         skipped_links: list[dict] = []
@@ -393,11 +416,13 @@ def mappings_apply(name: str, request: Request) -> JSONResponse:
                         "type": "string",
                         "description": f"FK 锚点（apply 时未找到 target {target_name}）",
                     }
-                issues.append({
-                    "code": "MAPPING_FK_TARGET_MISSING",
-                    "severity": "warning",
-                    "message": f"fk {fk.get('link_id')!r} 目标 {target_name!r} 不在已发布 object_types，跳过 link 创建",
-                })
+                issues.append(
+                    {
+                        "code": "MAPPING_FK_TARGET_MISSING",
+                        "severity": "warning",
+                        "message": f"fk {fk.get('link_id')!r} 目标 {target_name!r} 不在已发布 object_types，跳过 link 创建",
+                    }
+                )
                 skipped_links.append(fk)
                 continue
             link_id_name = fk.get("link_id", f"lnk_{name}_{target_name}")
@@ -426,18 +451,22 @@ def mappings_apply(name: str, request: Request) -> JSONResponse:
                     cardinality=cardinality,
                     fk_field=fk_pname,
                 )
-                created_links.append({
-                    "link_id": link_id_name,
-                    "status": "created",
-                    "id": lt_row.id,
-                    "cardinality": cardinality,
-                })
+                created_links.append(
+                    {
+                        "link_id": link_id_name,
+                        "status": "created",
+                        "id": lt_row.id,
+                        "cardinality": cardinality,
+                    }
+                )
             except Exception as exc:  # noqa: BLE001
-                issues.append({
-                    "code": "MAPPING_FK_CREATE_FAILED",
-                    "severity": "error",
-                    "message": f"fk {link_id_name!r} 创建失败: {exc}",
-                })
+                issues.append(
+                    {
+                        "code": "MAPPING_FK_CREATE_FAILED",
+                        "severity": "error",
+                        "message": f"fk {link_id_name!r} 创建失败: {exc}",
+                    }
+                )
                 skipped_links.append(fk)
         # 5) 推 mapping 状态到 reviewed（让人工审核 publish）
         try:
@@ -465,21 +494,19 @@ def _snake_to_pascal(s: str) -> str:
     if not s:
         return ""
     parts = [p for p in s.split("_") if p]
-    return "".join((p[0].upper() + p[1:]) if p and not p[0].isdigit() else p for p in parts)
+    return "".join(
+        (p[0].upper() + p[1:]) if p and not p[0].isdigit() else p for p in parts
+    )
 
 
 def _find_ot_by_name(conn, name: str):
     """在 object_types 表按 name 查（任意 status）。"""
-    row = conn.execute(
-        "SELECT * FROM object_types WHERE name = ?", (name,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM object_types WHERE name = ?", (name,)).fetchone()
     return ot_repo._row_factory(row) if row else None
 
 
 def _find_lt_by_name(conn, name: str):
-    row = conn.execute(
-        "SELECT * FROM link_types WHERE name = ?", (name,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM link_types WHERE name = ?", (name,)).fetchone()
     return lt_repo._row_factory(row) if row else None
 
 
@@ -506,9 +533,7 @@ async def extractions_run(request: Request) -> JSONResponse:
     try:
         payload = ExtractionRunRequest(**body)
     except (ValidationError, ValueError) as exc:
-        return _error(
-            request_id, "BUILDER_INVALID_REQUEST", {"detail": str(exc)}
-        )
+        return _error(request_id, "BUILDER_INVALID_REQUEST", {"detail": str(exc)})
     # 拿文本
     text = payload.source_text
     if text is None:
@@ -534,8 +559,8 @@ async def extractions_run(request: Request) -> JSONResponse:
             "logic_rule_patterns": [],
             "action_types": [],
         }
-    # 提取 + 校验
-    result: ExtractionResult = extract_from_text(
+    # 提取 + 校验（TD-6：异步入口，真 DeepSeek 经 achat 走线程池不阻塞事件循环）
+    result: ExtractionResult = await extract_from_text_async(
         text,
         provider=provider,
         source_path=payload.source_path,

@@ -78,6 +78,19 @@ def create_app(
     engine = ActionEngine(registry, store, index, audit)
     query = ObjectQuery(index, registry)
 
+    # P4-T2：把 runtime 内置动作登记进 action_types（单一事实来源 = 运行时引擎，
+    # builder 只登记元数据；幂等 upsert，启动即同步防漂移）
+    from src.builder.logic.action_types import sync_action_types_from_registry
+
+    with store.ontology_conn() as conn:
+        sync_result = sync_action_types_from_registry(conn, registry)
+    sync_errors = [i for i in sync_result["issues"]]
+    if sync_errors:
+        raise RuntimeError(
+            "action_types 同步失败: "
+            + "; ".join(i["message"] for i in sync_errors)
+        )
+
     app = FastAPI(
         title="OntoRun 语义接口",
         description="零售供应链最小语义接口闭环（对象/链接/动作 + 本体运行时写回回路）",
@@ -104,6 +117,10 @@ def create_app(
         builder_mapping_extraction_router,
     )
     app.include_router(builder_mapping_extraction_router)
+    # P4 逻辑规则 / 动作类型 / E6 动作执行路由
+    from src.api.builder_logic_action_routes import builder_logic_action_router
+
+    app.include_router(builder_logic_action_router)
     _inject_schema_into_openapi(app, registry)
     return app
 

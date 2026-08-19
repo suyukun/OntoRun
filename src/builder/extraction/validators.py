@@ -86,9 +86,7 @@ def _count(issues: Iterable[Issue]) -> dict[str, int]:
 def v1_structure(payload: Any) -> list[Issue]:
     issues: list[Issue] = []
     if not isinstance(payload, dict):
-        issues.append(
-            Issue("V1_structure", "fatal", "LLM 输出顶层必须为 JSON object")
-        )
+        issues.append(Issue("V1_structure", "fatal", "LLM 输出顶层必须为 JSON object"))
         return issues
     if "entities" not in payload:
         issues.append(
@@ -100,9 +98,7 @@ def v1_structure(payload: Any) -> list[Issue]:
         )
     for opt in ("relations", "logic_rules", "actions"):
         if opt in payload and not isinstance(payload[opt], list):
-            issues.append(
-                Issue("V1_structure", "fatal", f"{opt} 字段必须为 array")
-            )
+            issues.append(Issue("V1_structure", "fatal", f"{opt} 字段必须为 array"))
     return issues
 
 
@@ -113,9 +109,7 @@ def v2_required_fields(payload: dict) -> list[Issue]:
     issues: list[Issue] = []
     for e in payload.get("entities") or []:
         if not isinstance(e, dict):
-            issues.append(
-                Issue("V2_required_fields", "fatal", "entity 不是 dict")
-            )
+            issues.append(Issue("V2_required_fields", "fatal", "entity 不是 dict"))
             continue
         if not e.get("name") or not e.get("type"):
             issues.append(
@@ -128,9 +122,7 @@ def v2_required_fields(payload: dict) -> list[Issue]:
             )
     for r in payload.get("relations") or []:
         if not isinstance(r, dict):
-            issues.append(
-                Issue("V2_required_fields", "fatal", "relation 不是 dict")
-            )
+            issues.append(Issue("V2_required_fields", "fatal", "relation 不是 dict"))
             continue
         if not (r.get("source") and r.get("target") and r.get("type")):
             issues.append(
@@ -143,9 +135,7 @@ def v2_required_fields(payload: dict) -> list[Issue]:
             )
     for a in payload.get("actions") or []:
         if not isinstance(a, dict):
-            issues.append(
-                Issue("V2_required_fields", "fatal", "action 不是 dict")
-            )
+            issues.append(Issue("V2_required_fields", "fatal", "action 不是 dict"))
             continue
         if not a.get("name"):
             issues.append(
@@ -157,9 +147,7 @@ def v2_required_fields(payload: dict) -> list[Issue]:
             )
     for lr in payload.get("logic_rules") or []:
         if not isinstance(lr, dict):
-            issues.append(
-                Issue("V2_required_fields", "fatal", "logic_rule 不是 dict")
-            )
+            issues.append(Issue("V2_required_fields", "fatal", "logic_rule 不是 dict"))
             continue
         if not lr.get("rule_id") or not lr.get("logic_type"):
             issues.append(
@@ -257,7 +245,9 @@ def v4_dedup(payload: dict) -> list[Issue]:
             )
     r_seen: dict[tuple, int] = {}
     for r in payload.get("relations") or []:
-        if not isinstance(r, dict) or not (r.get("source") and r.get("type") and r.get("target")):
+        if not isinstance(r, dict) or not (
+            r.get("source") and r.get("type") and r.get("target")
+        ):
             continue
         k = (r["source"], r["type"], r["target"])
         r_seen[k] = r_seen.get(k, 0) + 1
@@ -433,8 +423,15 @@ def run_all(
     counts = _count(issues)
     # summary：每道 pass/fail
     summary: dict[str, str] = {}
-    for v in ("V1_structure", "V2_required_fields", "V3_referential_integrity",
-              "V4_dedup", "V5_type_whitelist", "V6_syntax", "V7_semantic_reference"):
+    for v in (
+        "V1_structure",
+        "V2_required_fields",
+        "V3_referential_integrity",
+        "V4_dedup",
+        "V5_type_whitelist",
+        "V6_syntax",
+        "V7_semantic_reference",
+    ):
         v_issues = [i for i in issues if i.validator == v]
         if not v_issues:
             summary[v] = "pass"

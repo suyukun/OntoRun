@@ -87,7 +87,9 @@ class ExtractionPayload:
         return cls(
             entities=[e for e in (raw.get("entities") or []) if isinstance(e, dict)],
             relations=[r for r in (raw.get("relations") or []) if isinstance(r, dict)],
-            logic_rules=[lr for lr in (raw.get("logic_rules") or []) if isinstance(lr, dict)],
+            logic_rules=[
+                lr for lr in (raw.get("logic_rules") or []) if isinstance(lr, dict)
+            ],
             actions=[a for a in (raw.get("actions") or []) if isinstance(a, dict)],
         )
 
@@ -128,7 +130,7 @@ def _extract_json(text):
     end = t.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return ""
-    return t[start: end + 1]
+    return t[start : end + 1]
 
 
 def _safe_json_loads(text):
@@ -154,34 +156,32 @@ def _char_counts(text):
 # ----------------------------------------------------------------------
 
 
-def extract_from_text(
-    text,
-    *,
-    provider,
-    source_path="",
-    schema=None,
-):
+def _build_messages(text, *, source_path, schema):
+    """构造 system+user 消息与白名单（同步/异步入口共用）。"""
     schema = schema or {}
-    entity_types_whitelist = schema.get("entity_types_whitelist", [])
-    relation_types_whitelist = schema.get("relation_types_whitelist", [])
-    logic_rule_patterns = schema.get("logic_rule_patterns", [])
-    action_types = schema.get("action_types", [])
     char_count, zh_count = _char_counts(text)
     user_text = EXTRACTION_USER_TEMPLATE.format(
         source_path=source_path or "(inline)",
         char_count=char_count,
         zh_count=zh_count,
-        entity_types_whitelist=", ".join(entity_types_whitelist) or "(无)",
-        relation_types_whitelist=", ".join(relation_types_whitelist) or "(无)",
-        logic_rule_patterns=", ".join(logic_rule_patterns) or "(无)",
-        action_types=", ".join(action_types) or "(无)",
+        entity_types_whitelist=", ".join(schema.get("entity_types_whitelist", []))
+        or "(无)",
+        relation_types_whitelist=", ".join(schema.get("relation_types_whitelist", []))
+        or "(无)",
+        logic_rule_patterns=", ".join(schema.get("logic_rule_patterns", [])) or "(无)",
+        action_types=", ".join(schema.get("action_types", [])) or "(无)",
         body=text[:8000],
     )
     messages = [
         ChatMessage(role="system", content=EXTRACTION_SYSTEM_PROMPT),
         ChatMessage(role="user", content=user_text),
     ]
-    response = provider.chat(messages)
+    return messages
+
+
+def _parse_response(response, *, provider, source_path, schema):
+    """解析 ChatResponse -> ExtractionResult（同步/异步入口共用）。"""
+    entity_types_whitelist = (schema or {}).get("entity_types_whitelist", [])
     raw_text = response.content or ""
     json_text = _extract_json(raw_text)
     payload_obj = _safe_json_loads(json_text) if json_text else None
@@ -209,10 +209,43 @@ def extract_from_text(
     )
 
 
+def extract_from_text(
+    text,
+    *,
+    provider,
+    source_path="",
+    schema=None,
+):
+    """同步入口（存量调用方；MockProvider 即时，DeepSeek 阻塞调用线程）。"""
+    messages = _build_messages(text, source_path=source_path, schema=schema)
+    response = provider.chat(messages)
+    return _parse_response(
+        response, provider=provider, source_path=source_path, schema=schema
+    )
+
+
+async def extract_from_text_async(
+    text,
+    *,
+    provider,
+    source_path="",
+    schema=None,
+):
+    """异步入口（TD-6）：LLM 调用走 achat，真 DeepSeek 不阻塞事件循环。"""
+    from src.agent.provider import achat
+
+    messages = _build_messages(text, source_path=source_path, schema=schema)
+    response = await achat(provider, messages)
+    return _parse_response(
+        response, provider=provider, source_path=source_path, schema=schema
+    )
+
+
 __all__ = [
     "EXTRACTION_SYSTEM_PROMPT",
     "EXTRACTION_USER_TEMPLATE",
     "ExtractionPayload",
     "ExtractionResult",
     "extract_from_text",
+    "extract_from_text_async",
 ]

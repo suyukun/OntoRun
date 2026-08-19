@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -223,7 +224,9 @@ def _register_agent_routes(app: FastAPI, sessions: SessionManager) -> None:
         else:
             agent = state.agent
 
-        turn = agent.run_turn(body.message)
+        # TD-6：Agent 编排环是同步（内部多次 provider.chat）；整体扔线程池，
+        # 真 DeepSeek 路径不阻塞事件循环（MockProvider 路径开销可忽略）。
+        turn = await asyncio.to_thread(agent.run_turn, body.message)
 
         # 记录待确认提议
         if turn.need_confirm:
@@ -313,7 +316,10 @@ def _register_agent_routes(app: FastAPI, sessions: SessionManager) -> None:
         sessions.set_pending(body.session_id, None)
 
         try:
-            turn = state.agent.confirm_pending(body.confirmed)
+            # TD-6：与 /agent/chat 同理，同步编排环扔线程池（真 LLM 不阻塞事件循环）
+            turn = await asyncio.to_thread(
+                state.agent.confirm_pending, body.confirmed
+            )
         except ValueError as exc:
             return JSONResponse(
                 status_code=400,

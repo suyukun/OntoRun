@@ -21,6 +21,7 @@ from src.builder.extraction.extractor import (
     ExtractionPayload,
     ExtractionResult,
     extract_from_text,
+    extract_from_text_async,
 )
 from src.builder.extraction.repo import ExtractionTaskRow
 from src.builder.extraction.validators import (
@@ -38,6 +39,7 @@ __all__ = [
     "Issue",
     "ValidationReport",
     "extract_from_text",
+    "extract_from_text_async",
     "extractor",
     "repo",
     "run_all",

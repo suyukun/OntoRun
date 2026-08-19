@@ -44,3 +44,42 @@ def _load_dotenv_for_live_tests(request: pytest.FixtureRequest) -> None:
     for key, value in dotenv.items():
         if key not in os.environ:
             os.environ[key] = value
+
+
+# ======================================================================
+# TD-3 偿还（P4）：extraction MockProvider 响应 fixture 化
+# ======================================================================
+
+GOLDEN_DIR = ROOT / "tests" / "golden"
+
+
+@pytest.fixture
+def extraction_mock_responses() -> dict:
+    """加载冻结的 MockProvider 响应场景（tests/golden/extraction_mock_responses.json）。
+
+    LLM"说过什么"由 fixture 固定：E2E 断言对响应内容精确可控，不再内联拼 payload。
+    """
+    import json
+
+    path = GOLDEN_DIR / "extraction_mock_responses.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data["scenarios"]
+
+
+@pytest.fixture
+def make_mock_provider(extraction_mock_responses):
+    """工厂 fixture：按场景名构造 MockProvider（响应内容来自 golden 文件）。"""
+
+    import json as _json
+
+    from src.agent.provider import ChatResponse, MockProvider
+
+    def _make(scenario: str) -> MockProvider:
+        spec = extraction_mock_responses[scenario]
+        if "raw_content" in spec:
+            content = spec["raw_content"]
+        else:
+            content = _json.dumps(spec["content_json"], ensure_ascii=False)
+        return MockProvider(responses=[ChatResponse(content=content)])
+
+    return _make

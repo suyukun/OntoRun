@@ -198,6 +198,9 @@ CREATE TABLE IF NOT EXISTS action_runs (
   status          TEXT NOT NULL CHECK (status IN ('applied','rejected','failed','dry_run')),
   error           TEXT NOT NULL DEFAULT '',
   executed_by     TEXT NOT NULL DEFAULT 'api',
+  -- v3 patch（P4/E6）：audit_ref 引用 audit_log.audit_id（对账锚点）。
+  -- audit_log 仍是运行时审计权威；action_runs 只引用不复制（单一真相，不双轨漂移）。
+  audit_ref       TEXT NOT NULL DEFAULT '',
   created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_action_runs_type ON action_runs(action_type_id);
@@ -226,12 +229,16 @@ def init_builder_schema(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
     if "fk_field" not in cols:
         conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
+    # v3 patch（P4/E6）：action_runs 加 audit_ref（idempotent）。
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(action_runs)").fetchall()}
+    if "audit_ref" not in cols:
+        conn.execute("ALTER TABLE action_runs ADD COLUMN audit_ref TEXT NOT NULL DEFAULT ''")
     runtime_note = (
         "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
     )
     builder_note = (
         "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；"
-        "v2 patch: link_types.fk_field"
+        "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref"
     )
     conn.execute(
         "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
@@ -297,12 +304,15 @@ class Store:
 
         v2 patch（P2）：link_types 加 fk_field 列（idempotent ALTER，已建则跳过）。
         loader 用此列做 link_types 入 Registry 的 fk_field 校验。
+        v3 patch（P4/E6）：action_runs 加 audit_ref 列（idempotent ALTER）。
+        action_runs 引用 audit_log.audit_id 对账，不复制审计真相。
         """
         runtime_note = (
             "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
         )
         builder_note = (
-            "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；v2 patch: link_types.fk_field"
+            "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；"
+            "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref"
         )
         merged_note = f"{runtime_note}；{builder_note}"
         conn = self.ontology_conn()
@@ -315,6 +325,12 @@ class Store:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
             if "fk_field" not in cols:
                 conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
+            # v3 patch（P4/E6）：action_runs 加 audit_ref（idempotent）。
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(action_runs)").fetchall()}
+            if "audit_ref" not in cols:
+                conn.execute(
+                    "ALTER TABLE action_runs ADD COLUMN audit_ref TEXT NOT NULL DEFAULT ''"
+                )
             # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "

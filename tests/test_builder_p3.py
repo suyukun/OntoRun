@@ -590,25 +590,16 @@ class TestValidators:
 
 
 class TestExtractionEndToEnd:
-    """E3 LLM 提取 + 七道校验端到端（MockProvider，不烧 token）。"""
+    """E3 LLM 提取 + 七道校验端到端（MockProvider，不烧 token）。
 
-    def test_extractor_with_mock_clean(self) -> None:
-        from src.agent.provider import ChatResponse, MockProvider
+    TD-3 偿还（P4）：MockProvider 响应统一从 tests/golden/
+    extraction_mock_responses.json 场景加载（make_mock_provider fixture），
+    E2E 断言对 LLM 响应内容精确可控。
+    """
+
+    def test_extractor_with_mock_clean(self, make_mock_provider) -> None:
         from src.builder.extraction.extractor import extract_from_text
-        payload = {
-            "entities": [
-                {"name": "ACME", "type": "company"},
-                {"name": "Joe", "type": "person"},
-            ],
-            "relations": [
-                {"source": "Joe", "type": "contact_of", "target": "ACME"},
-            ],
-            "logic_rules": [],
-            "actions": [],
-        }
-        mock = MockProvider(
-            responses=[ChatResponse(content=json.dumps(payload, ensure_ascii=False))]
-        )
+        mock = make_mock_provider("clean_two_entities")
         result = extract_from_text(
             "some doc",
             provider=mock,
@@ -622,18 +613,9 @@ class TestExtractionEndToEnd:
         assert result.validation_report.has_fatal is False
         assert result.provider == "mock"
 
-    def test_extractor_with_mock_bad_linked_logic_fatal(self) -> None:
-        from src.agent.provider import ChatResponse, MockProvider
+    def test_extractor_with_mock_bad_linked_logic_fatal(self, make_mock_provider) -> None:
         from src.builder.extraction.extractor import extract_from_text
-        payload = {
-            "entities": [{"name": "A", "type": "company"}],
-            "relations": [],
-            "logic_rules": [{"rule_id": "LR-001", "logic_type": "threshold", "expression": "x>1", "severity": "fatal"}],
-            "actions": [{"name": "force_demo", "action_type": "op", "parameters": [], "linked_logic": ["LR-999"]}],
-        }
-        mock = MockProvider(
-            responses=[ChatResponse(content=json.dumps(payload, ensure_ascii=False))]
-        )
+        mock = make_mock_provider("bad_linked_logic_fatal")
         result = extract_from_text(
             "x",
             provider=mock,
@@ -643,10 +625,9 @@ class TestExtractionEndToEnd:
         assert result.validation_report.has_fatal is True
         assert any("LR-999" in i.message for i in result.validation_report.issues)
 
-    def test_extractor_with_mock_invalid_json_fatal(self) -> None:
-        from src.agent.provider import ChatResponse, MockProvider
+    def test_extractor_with_mock_invalid_json_fatal(self, make_mock_provider) -> None:
         from src.builder.extraction.extractor import extract_from_text
-        mock = MockProvider(responses=[ChatResponse(content="not a json")])
+        mock = make_mock_provider("invalid_json")
         result = extract_from_text(
             "x", provider=mock, source_path="x.md",
             schema={"entity_types_whitelist": []},
@@ -659,25 +640,13 @@ class TestExtractionEndToEnd:
             for i in result.validation_report.issues
         )
 
-    def test_extractor_real_supplier_memo_with_golden_payload(self) -> None:
-        """对照黄金集：喂入一个含 19 干净 + 3 故意问题的 payload，断言 V1-V5 触发。"""
-        from src.agent.provider import ChatResponse, MockProvider
+    def test_extractor_real_supplier_memo_with_golden_payload(
+        self, make_mock_provider
+    ) -> None:
+        """对照黄金集：冻结响应含 19 干净 + 3 故意问题项，断言 V1-V5 触发。"""
         from src.builder.extraction.extractor import extract_from_text
+        mock = make_mock_provider("golden_with_problems")
         expected = _load_expected("extraction_targets.json")
-        clean = expected["golden_entities"][:19]
-        marketing = expected["golden_entities"][19]
-        dup = expected["golden_entities"][20]
-        entities = list(clean) + [marketing, dup, {"name": "陈志强", "type": "person", "subtype": "internal_consultant"}]
-        actions = list(expected["golden_actions"])
-        payload = {
-            "entities": entities,
-            "relations": expected["golden_relations"],
-            "logic_rules": expected["golden_logic_rules"],
-            "actions": actions,
-        }
-        mock = MockProvider(
-            responses=[ChatResponse(content=json.dumps(payload, ensure_ascii=False))]
-        )
         text = (SAMPLES / "supplier_memo.md").read_text(encoding="utf-8")
         result = extract_from_text(
             text,

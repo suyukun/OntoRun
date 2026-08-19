@@ -49,6 +49,14 @@ BUILDER_ERROR_MESSAGES: dict[str, str] = {
     # P3 新增
     "BUILDER_MAPPING_NOT_FOUND": "映射记录不存在",
     "BUILDER_EXTRACTION_NOT_FOUND": "提取任务不存在",
+    # P4 新增（逻辑规则 / 动作类型 / E6 动作执行）
+    "BUILDER_LOGIC_RULE_NOT_FOUND": "逻辑规则不存在",
+    "BUILDER_OBJECT_TYPE_NOT_PUBLISHED": "对象类型未发布（逻辑推导只接受已发布 object_types）",
+    "BUILDER_LOGIC_EXPRESSION_INVALID": "逻辑规则表达式不合法（结构化可机器执行的 JSON）",
+    "BUILDER_LOGIC_RULE_NOT_PUBLISHED": "submission_criteria 引用的逻辑规则不存在或未发布",
+    "BUILDER_ACTION_TYPE_NOT_FOUND": "动作类型不存在",
+    "BUILDER_ACTION_NOT_PUBLISHED": "动作类型未发布，不可执行",
+    "BUILDER_ACTION_NOT_EXECUTABLE": "动态对象类型动作的写回执行列发布期 TODO（补丁 A2）",
 }
 ERROR_MESSAGES.update(BUILDER_ERROR_MESSAGES)
 
@@ -83,6 +91,14 @@ ERROR_CODE_HTTP_STATUS.update(
         # P3
         "BUILDER_MAPPING_NOT_FOUND": 404,
         "BUILDER_EXTRACTION_NOT_FOUND": 404,
+        # P4
+        "BUILDER_LOGIC_RULE_NOT_FOUND": 404,
+        "BUILDER_OBJECT_TYPE_NOT_PUBLISHED": 400,
+        "BUILDER_LOGIC_EXPRESSION_INVALID": 400,
+        "BUILDER_LOGIC_RULE_NOT_PUBLISHED": 400,
+        "BUILDER_ACTION_TYPE_NOT_FOUND": 404,
+        "BUILDER_ACTION_NOT_PUBLISHED": 400,
+        "BUILDER_ACTION_NOT_EXECUTABLE": 400,
     }
 )
 

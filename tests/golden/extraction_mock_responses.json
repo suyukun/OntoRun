@@ -1,0 +1,708 @@
+{
+  "_meta": {
+    "source": "data/builder_samples/expected/extraction_targets.json",
+    "purpose": "TD-3: extraction MockProvider 冻结响应（E2E 断言精确可控）",
+    "scenarios": {
+      "clean_two_entities": "2 干净实体 + 1 关系（V1-V7 全过）",
+      "bad_linked_logic_fatal": "动作 linked_logic 引用不存在的 LR-999（V3/V7 fatal）",
+      "invalid_json": "非 JSON 正文（V1 fatal）",
+      "golden_with_problems": "黄金集 19 干净实体 + marketing_artifact（V5 warning）+ 陈志强重复（V4 error）+ 动作 linked LR-999（V3 fatal）"
+    }
+  },
+  "scenarios": {
+    "clean_two_entities": {
+      "description": "2 干净实体 + 1 关系（V1-V7 全过）",
+      "content_json": {
+        "entities": [
+          {
+            "name": "ACME",
+            "type": "company"
+          },
+          {
+            "name": "Joe",
+            "type": "person"
+          }
+        ],
+        "relations": [
+          {
+            "source": "Joe",
+            "type": "contact_of",
+            "target": "ACME"
+          }
+        ],
+        "logic_rules": [],
+        "actions": []
+      }
+    },
+    "bad_linked_logic_fatal": {
+      "description": "动作 linked_logic 引用不存在的 LR-999（V3/V7 fatal）",
+      "content_json": {
+        "entities": [
+          {
+            "name": "A",
+            "type": "company"
+          }
+        ],
+        "relations": [],
+        "logic_rules": [
+          {
+            "rule_id": "LR-001",
+            "logic_type": "threshold",
+            "expression": "x>1",
+            "severity": "fatal"
+          }
+        ],
+        "actions": [
+          {
+            "name": "force_demo",
+            "action_type": "op",
+            "parameters": [],
+            "linked_logic": [
+              "LR-999"
+            ]
+          }
+        ]
+      }
+    },
+    "invalid_json": {
+      "description": "非 JSON 正文（V1 fatal）",
+      "raw_content": "not a json"
+    },
+    "golden_with_problems": {
+      "description": "黄金集 19 干净实体 + marketing_artifact（V5 warning）+ 陈志强重复（V4 error）+ 动作 linked LR-999（V3 fatal）",
+      "content_json": {
+        "entities": [
+          {
+            "name": "云汉零售",
+            "type": "company",
+            "subtype": "buyer",
+            "mentions": [
+              "云汉零售"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "广州远洋冷链运输有限公司",
+            "type": "logistics_provider",
+            "subtype": "cold_chain",
+            "mentions": [
+              "广州远洋冷链运输有限公司",
+              "远洋冷链"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "昆明云岭冷链运输有限公司",
+            "type": "logistics_provider",
+            "subtype": "cold_chain",
+            "mentions": [
+              "昆明云岭冷链运输有限公司",
+              "云岭冷链"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "顺丰冷运",
+            "type": "logistics_provider",
+            "subtype": "cold_chain",
+            "mentions": [
+              "顺丰冷运"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "武汉长江冷链设备有限公司",
+            "type": "company",
+            "subtype": "supplier",
+            "mentions": [
+              "武汉长江冷链设备有限公司"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "中山金辉照明",
+            "type": "company",
+            "subtype": "supplier",
+            "mentions": [
+              "中山金辉照明"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "鲜品汇",
+            "type": "company",
+            "subtype": "internal_brand",
+            "mentions": [
+              "鲜品汇"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "王晓燕",
+            "type": "person",
+            "subtype": "procurement_ops",
+            "mentions": [
+              "王晓燕"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "蔡晓东",
+            "type": "person",
+            "subtype": "ops_dispatcher",
+            "mentions": [
+              "蔡晓东"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "周大鹏",
+            "type": "person",
+            "subtype": "bd",
+            "mentions": [
+              "周大鹏"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "陈志强",
+            "type": "person",
+            "subtype": "internal_consultant",
+            "mentions": [
+              "陈志强"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "Jack",
+            "type": "person",
+            "subtype": "procurement_director",
+            "mentions": [
+              "Jack"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "Rose",
+            "type": "person",
+            "subtype": "procurement_ops",
+            "mentions": [
+              "Rose"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "SKU-LN2-TUN",
+            "type": "sku",
+            "subtype": "product",
+            "mentions": [
+              "SKU-LN2-TUN"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "液氮速冻隧道设备",
+            "type": "product",
+            "subtype": "equipment",
+            "mentions": [
+              "液氮速冻隧道设备"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "采购总监",
+            "type": "approval_role",
+            "mentions": [
+              "采购总监"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "CFO",
+            "type": "approval_role",
+            "mentions": [
+              "CFO"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "单笔大额合同",
+            "type": "order_amount_band",
+            "threshold_cny": 500000,
+            "mentions": [
+              "单笔采购金额超过 50 万元"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "单笔中额合同",
+            "type": "order_amount_band",
+            "threshold_cny": 100000,
+            "mentions": [
+              "单笔采购金额超过 10 万元、不足 50 万元"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4",
+              "V5"
+            ]
+          },
+          {
+            "name": "远洋冷链2025Q3报价单",
+            "type": "marketing_artifact",
+            "subtype": "quote_sheet",
+            "mentions": [
+              "报价"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ],
+            "expected_violation": {
+              "validator": "V5_type_whitelist",
+              "severity": "warning",
+              "message": "实体类型 'marketing_artifact' 不在预设白名单 entity_types_whitelist 中；属自定义类型，>50% 自定义阈值检查：当前自定义率 1/21 = 4.76%，不触发 fatal，但应输出 warning"
+            }
+          },
+          {
+            "name": "陈志强",
+            "type": "person",
+            "subtype": "supplier_contact",
+            "mentions": [
+              "陈志强"
+            ],
+            "duplicate_of": "陈志强 (subtype=internal_consultant)",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3"
+            ],
+            "expected_violation": {
+              "validator": "V4_dedup",
+              "severity": "error",
+              "message": "实体 (陈志强, person) 出现 2 次，必须按 (name,type) 去重保留首条"
+            }
+          },
+          {
+            "name": "陈志强",
+            "type": "person",
+            "subtype": "internal_consultant"
+          }
+        ],
+        "relations": [
+          {
+            "source": "广州远洋冷链运输有限公司",
+            "type": "co_carrier_with",
+            "target": "昆明云岭冷链运输有限公司",
+            "context": "广州-昆明干线",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "广州远洋冷链运输有限公司",
+            "type": "exclusive_supplier_of",
+            "target": "鲜品汇",
+            "context": "广州-昆明干线",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "昆明云岭冷链运输有限公司",
+            "type": "backup_supplier_of",
+            "target": "鲜品汇",
+            "context": "广州-昆明干线",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "武汉长江冷链设备有限公司",
+            "type": "provides_cold_chain_for",
+            "target": "SKU-LN2-TUN",
+            "context": "整机出库冷链配套",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "王晓燕",
+            "type": "contact_of",
+            "target": "广州远洋冷链运输有限公司",
+            "role": "采购运营接口",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "蔡晓东",
+            "type": "contact_of",
+            "target": "昆明云岭冷链运输有限公司",
+            "role": "运营调度接口",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "周大鹏",
+            "type": "contact_of",
+            "target": "顺丰冷运",
+            "role": "保留窗口联系人",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "陈志强",
+            "type": "contact_of",
+            "target": "中山金辉照明",
+            "role": "供应商联系人",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          },
+          {
+            "source": "陈志强",
+            "type": "employed_by",
+            "target": "云汉零售",
+            "role": "内部冷链顾问",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V4"
+            ]
+          }
+        ],
+        "logic_rules": [
+          {
+            "rule_id": "LR-001",
+            "name": "单笔大额合同双重审批",
+            "logic_type": "approval_threshold",
+            "expression": "if order_amount_cny > 500000 then required_approvers = ['采购总监', 'CFO']",
+            "severity": "fatal",
+            "source_quote": "单笔采购金额超过 50 万元的合同，必须经采购总监 Jack 与 CFO 双重审批方可生效",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V7"
+            ]
+          },
+          {
+            "rule_id": "LR-002",
+            "name": "单笔中额合同单级审批",
+            "logic_type": "approval_threshold",
+            "expression": "if 100000 < order_amount_cny <= 500000 then required_approvers = ['采购总监']",
+            "severity": "fatal",
+            "source_quote": "单笔采购金额超过 10 万元、不足 50 万元的合同，由采购总监 Jack 单级审批即可",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V7"
+            ]
+          },
+          {
+            "rule_id": "LR-003",
+            "name": "冷链温控失效赔付倍数",
+            "logic_type": "compensation_multiplier",
+            "expression": "if cold_chain_temp_lost then compensation = product_sale_price * 1.5",
+            "severity": "error",
+            "source_quote": "冷链干线运输一旦发生温控失效导致商品损耗，承运商须按商品售价的 1.5 倍赔付",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V7"
+            ]
+          },
+          {
+            "rule_id": "LR-004",
+            "name": "远洋冷链混装范围约束",
+            "logic_type": "scope_constraint",
+            "expression": "if carrier = '广州远洋冷链运输有限公司' and product_category = 'raw_material' then allow_mixed_load = true; else allow_mixed_load = false",
+            "severity": "warning",
+            "source_quote": "远洋冷链 提供的 -18℃ 冷藏车，仅限 装载 category=raw_material 的商品时允许与常温商品混装",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V7"
+            ]
+          },
+          {
+            "rule_id": "LR-005",
+            "name": "备份供应商启用条件",
+            "logic_type": "triggers",
+            "expression": "if (primary_no_response_in_4h) or (consecutive_temp_lost_count >= 2) then activate_backup_supplier = true",
+            "severity": "error",
+            "source_quote": "备份供应商（云岭冷链）启用条件：主供应商在 4 小时内未响应调度，或连续 2 次温控不达标",
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V7"
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "name": "approve_large_contract",
+            "action_type": "approve_contract",
+            "description": "审批大额合同",
+            "parameters": [
+              {
+                "name": "contract_id",
+                "type": "string"
+              },
+              {
+                "name": "amount_cny",
+                "type": "number"
+              },
+              {
+                "name": "approver_1",
+                "type": "string",
+                "linked_role": "采购总监"
+              },
+              {
+                "name": "approver_2",
+                "type": "string",
+                "linked_role": "CFO"
+              }
+            ],
+            "linked_logic": [
+              "LR-001"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V6"
+            ]
+          },
+          {
+            "name": "activate_backup_supplier",
+            "action_type": "activate_backup_supplier",
+            "description": "启用备份承运商",
+            "parameters": [
+              {
+                "name": "primary_supplier_id",
+                "type": "string"
+              },
+              {
+                "name": "backup_supplier_id",
+                "type": "string"
+              },
+              {
+                "name": "trigger_reason",
+                "type": "string",
+                "enum": [
+                  "no_response_4h",
+                  "consecutive_temp_lost_2"
+                ]
+              }
+            ],
+            "linked_logic": [
+              "LR-005"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V6"
+            ]
+          },
+          {
+            "name": "file_compensation_claim",
+            "action_type": "file_compensation_claim",
+            "description": "提交温控失效赔付工单",
+            "parameters": [
+              {
+                "name": "shipment_id",
+                "type": "string"
+              },
+              {
+                "name": "product_sku",
+                "type": "string"
+              },
+              {
+                "name": "loss_amount_cny",
+                "type": "number"
+              }
+            ],
+            "linked_logic": [
+              "LR-003"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2",
+              "V3",
+              "V6"
+            ]
+          },
+          {
+            "name": "force_approve_for_demo",
+            "action_type": "approve_contract",
+            "description": "强制审批（仅演示）",
+            "parameters": [
+              {
+                "name": "contract_id",
+                "type": "string"
+              }
+            ],
+            "linked_logic": [
+              "LR-999"
+            ],
+            "validators_pass": [
+              "V1",
+              "V2"
+            ],
+            "expected_violation": {
+              "validator": "V3_referential_integrity",
+              "severity": "fatal",
+              "message": "linked_logic 引用了不存在的 LR-999；本数据集 LR 集合为 [LR-001..LR-005]"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

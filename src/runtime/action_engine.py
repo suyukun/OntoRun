@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
@@ -197,7 +198,20 @@ class ActionEngine:
         actor: str = "api",
         actor_detail: str = "",
         request_id: str = "",
+        *,
+        dry_run: bool = False,
+        snapshot_observer: Callable[[dict], None] | None = None,
     ) -> ActionResult:
+        """执行动作管道（§3.3）。
+
+        P4/E6 扩展（向后兼容，缺省关闭）：
+        - dry_run=True：管道全走（参数校验/事务内快照/前置规则/效果计算），
+          但写回不执行、事务回滚、索引不更新、不落 audit_log（audit CHECK
+          无 dry_run 语义；构建侧 action_runs 是 dry_run 的证据面）；
+          前置不满足时仍走 rejected（拒绝路径早退语义不变）。
+        - snapshot_observer：load_snapshot 之后回调一次，接收 handler 快照
+          （相关源记录执行前状态），供调用方记录 before_snapshot（E6）。
+        """
         t0 = time.monotonic()
         # 审计完整性底线：非法 actor 无法落审计（audit_log CHECK），拒绝执行、源库零变更；
         # API 层另有 400 白名单校验（routes.py），此处为绕过 API 直调 runtime 的兜底。
@@ -252,6 +266,9 @@ class ActionEngine:
         try:
             snapshot_reader = Snapshot(conn, self.registry)
             snapshot = handler.load_snapshot(snapshot_reader, validated)
+            # E6 before_snapshot 钩子：拒绝/失败路径也已拿到快照（早退前回调）
+            if snapshot_observer is not None:
+                snapshot_observer(snapshot)
 
             # 语义级参数校验（在事务内、前置规则之前）
             violation = handler.validate_semantics(snapshot, validated)
@@ -299,6 +316,17 @@ class ActionEngine:
 
             # ⑤ 计算变更（纯函数）+ ⑥ 写回源库
             effects, writebacks = handler.compute_effects(conn, snapshot, validated)
+            if dry_run:
+                # E6 dry_run：效果已算出（含将执行的 SQL），但零写回零提交。
+                conn.rollback()
+                return ActionResult(
+                    action_name=action_name,
+                    outcome="dry_run",
+                    request_id=request_id,
+                    duration_ms=int((time.monotonic() - t0) * 1000),
+                    effects=effects,
+                    writebacks=writebacks,
+                )
             for wb in writebacks:
                 cur = conn.execute(wb.sql, wb.params)
                 wb.rows = cur.rowcount

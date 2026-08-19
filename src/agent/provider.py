@@ -10,10 +10,18 @@
   tool_calls 模拟、可挂 on_chat 回调供 guard 测试断言；
 - 工厂注册表 PROVIDERS + get_provider()：.env LLM_PROVIDER=deepseek|mock 切换，
   切换只改环境变量不动业务代码（AGENTS.md 决策 4）。
+
+TD-6 偿还（P4）：async 化采用 achat 双轨接口--
+- chat 保持同步（存量调用方与测试零改动，不破坏兼容）；
+- achat 为异步入口：DeepSeek 用 asyncio.to_thread 包装同步 SDK 调用
+  （真 DeepSeek 路径不阻塞事件循环），MockProvider 内存即时返回（无线程开销）；
+- 模块级 achat(provider, ...) 分发器：优先 provider.achat，缺省回退
+  to_thread(provider.chat)（第三方仅实现同步 chat 的 provider 也兼容）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Callable
@@ -58,9 +66,18 @@ class ChatResponse(BaseModel):
 
 
 class LLMProvider(Protocol):
-    """Provider 协议（§5.1）：chat 一次完整对话往返。"""
+    """Provider 协议（§5.1）：chat 一次完整对话往返。
+
+    chat = 同步语义（存量调用方）；achat = 异步入口（TD-6：FastAPI 异步
+    路由用 achat，真 DeepSeek 不阻塞事件循环）。实现方至少提供 chat；
+    achat 缺省由模块级 achat() 分发器以 to_thread 包装。
+    """
 
     def chat(
+        self, messages: list[ChatMessage], tools: list[dict] | None = None
+    ) -> ChatResponse: ...
+
+    async def achat(
         self, messages: list[ChatMessage], tools: list[dict] | None = None
     ) -> ChatResponse: ...
 
@@ -108,6 +125,12 @@ class DeepSeekProvider:
                 args = {}
             tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
         return ChatResponse(content=choice.content, tool_calls=tool_calls)
+
+    async def achat(
+        self, messages: list[ChatMessage], tools: list[dict] | None = None
+    ) -> ChatResponse:
+        """异步入口（TD-6）：同步 SDK 调用扔线程池，事件循环不被阻塞。"""
+        return await asyncio.to_thread(self.chat, messages, tools)
 
 
 def _to_openai_message(m: ChatMessage) -> dict:
@@ -159,6 +182,24 @@ class MockProvider:
             return self._responses.pop(0)
         return self._default
 
+    async def achat(
+        self, messages: list[ChatMessage], tools: list[dict] | None = None
+    ) -> ChatResponse:
+        """异步入口（TD-6）：内存脚本化响应即时返回，无线程开销。"""
+        return self.chat(messages, tools)
+
+
+async def achat(
+    provider: LLMProvider,
+    messages: list[ChatMessage],
+    tools: list[dict] | None = None,
+) -> ChatResponse:
+    """异步分发器：优先 provider.achat；仅实现同步 chat 的回退 to_thread。"""
+    method = getattr(provider, "achat", None)
+    if method is not None:
+        return await method(messages, tools)
+    return await asyncio.to_thread(provider.chat, messages, tools)
+
 
 # 工厂注册表：名称 -> 零参工厂（新 provider 在此登记，切换只改环境变量）
 PROVIDERS: dict[str, Callable[[], LLMProvider]] = {
@@ -189,5 +230,6 @@ __all__ = [
     "LLMProvider",
     "MockProvider",
     "ToolCall",
+    "achat",
     "get_provider",
 ]
