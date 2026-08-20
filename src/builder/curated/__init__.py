@@ -1,4 +1,4 @@
-"""Curated 数据集子包（重写蓝图 v0.3 §3 / §4 curated_datasets 表）。
+"""Curated 数据集子包。
 
 职责：把管道产物（curated_datasets 表）从 draft 推到 reviewed / approved；
 质量评分 quality_score JSON（含完整性/一致性/重复率等维度，P2 详细定义）。

@@ -1,4 +1,4 @@
-"""object_types 仓储（重写蓝图 v0.3 §4 + §5）。
+"""object_types 仓储。
 
 直接 SQL 操作本体库 object_types 表；返回 dataclass / dict 给 API 层组装信封。
 状态流转由 src.builder.status_machine 校验。

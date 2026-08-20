@@ -1,4 +1,4 @@
-"""冲突检测（重写蓝图 v0.3 / 补丁 A1）。
+"""冲突检测。
 
 独立模块：检测 builder 表行与内置 OBJECT_TYPES / LINK_TYPES 是否同名。
 返回 issue 列表（dict），由 main.py / API 层聚合。

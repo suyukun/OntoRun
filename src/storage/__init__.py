@@ -1,4 +1,4 @@
-"""存储适配层（重写蓝图 v0.3 §1.3 / 补丁 v0.3.1 B2）。
+"""存储适配层。
 
 按补丁 B2：仅保留 **GraphStore** 抽象接口 + **SQLite 关系表实现**（服务 /graph 端点）；
 VectorStore / Cache 一律删除（零用例，纯 YAGNI）。

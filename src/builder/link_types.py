@@ -1,4 +1,4 @@
-"""link_types 仓储（重写蓝图 v0.3 §4 + §5）。
+"""link_types 仓储。
 
 与 object_types 同构：直接 SQL、frozen dataclass、E4 状态机由 status_machine 校验。
 """

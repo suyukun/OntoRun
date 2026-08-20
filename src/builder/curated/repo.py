@@ -1,4 +1,4 @@
-"""curated_datasets 仓储（重写蓝图 v0.3 §3 curated / 补丁 B4）。
+"""curated_datasets 仓储。
 
 状态机：draft -> reviewed -> approved（与 object_types/link_types 独立，
 ALL_STATUSES_REVIEW = (DRAFT, REVIEWED, APPROVED)）。

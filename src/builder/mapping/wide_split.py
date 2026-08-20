@@ -227,7 +227,7 @@ def split_wide_table_from_path(path: str) -> WideSplitResult:
 
 
 # TODO 补丁 B3：增量更新三层（同步/处理/索引）本窗口不实现；
-#      发布期由 P5/P6 增量同步子系统负责（见 docs/重写蓝图_v0.3 §7 / 补丁 B3）。
+#      发布期由 P5/P6 增量同步子系统负责。
 
 
 __all__ = ["SplitTable", "WideSplitResult", "split_wide_table", "split_wide_table_from_path"]

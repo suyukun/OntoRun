@@ -1,4 +1,4 @@
-"""转换管道子包（重写蓝图 v0.3 §3 / §6 / 补丁 B6）。
+"""转换管道子包。
 
 DAG 执行器 + E1 三路径处理步骤：
 - 节点类型：connector → storage → transform → output（蓝图 §6）；

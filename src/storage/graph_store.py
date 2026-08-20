@@ -1,4 +1,4 @@
-"""GraphStore 抽象接口（重写蓝图 v0.3 §1.3 / 补丁 v0.3.1 B2）。
+"""GraphStore 抽象接口。
 
 最小方法集（业务当前只用到这些，后续按需扩展）：
 - add_node / get_node / remove_node：节点 CRUD；

@@ -1,4 +1,4 @@
-"""A1 单向流入 Registry（重写蓝图 v0.3 §10 决策 1 / 补丁 v0.3.1 A1）。
+"""A1 单向流入 Registry。
 
 启动时：
 - 读本体库 published 状态的 object_types / link_types 行；

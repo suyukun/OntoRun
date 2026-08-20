@@ -1,4 +1,4 @@
-"""数据连接器子包（重写蓝图 v0.3 §3 / §6 路径 A/B/C）。
+"""数据连接器子包。
 
 MVP 范围：本地文件接入（CSV/Excel/JSON/MD/PDF/DOCX），上传后落 datasets 表（蓝图 §4）
 + 文件本体存到 data/builder_samples/。SQL/REST 连接器列发布期 TODO。
