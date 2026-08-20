@@ -41,10 +41,13 @@ EXACT_FILES = {
     "方向与战略_v0.2.md",
     "docs/白皮书_v0.1.md", "docs/技术方案_v0.1.md",
     "docs/演示脚本_v0.1.md", "docs/learn-in-public_v0.1.md",
+    "docs/试用与成果导览_v0.1.md",
     "research/palantir-ontology.md",
     "data/seed_retail_source.py",
     "scripts/gen_agent_tools_golden.py",
     "scripts/publish_to_github.py",
+    "scripts/run_gates.sh",
+    ".github/workflows/ci.yml",
 }
 DIR_PREFIXES = ("src/", "web/", "tests/")
 
