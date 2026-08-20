@@ -1,11 +1,12 @@
 // 对象详情组件 —— 全属性展示 + 链接导航入口（out/in 分组）
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Card, Descriptions, Space, Tag, Typography, message, Spin } from 'antd';
 import { LinkOutlined, ArrowRightOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { fetchObjectDetail } from '../api';
 import type { ObjectDetailData, ObjectTypeMeta } from '../types';
 
-const { Title, Text } = Typography;
+const { Title } = Typography;
 
 interface Props {
   meta: ObjectTypeMeta;
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props) {
+  const { t } = useTranslation();
   const [detail, setDetail] = useState<ObjectDetailData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,28 +24,25 @@ export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props
     setLoading(true);
     fetchObjectDetail(meta.api_name, pk)
       .then(setDetail)
-      .catch((err) => message.error('加载详情失败: ' + (err as Error).message))
+      .catch((err) => message.error(t('common.loadFailed', { msg: (err as Error).message })))
       .finally(() => setLoading(false));
-  }, [meta.api_name, pk]);
+  }, [meta.api_name, pk, t]);
 
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />;
-  if (!detail) return <Card><Title level={5}>无数据</Title></Card>;
+  if (!detail) return <Card><Title level={5}>{t('common.noData')}</Title></Card>;
 
   const outLinks = Object.entries(detail.links.out);
   const inLinks = Object.entries(detail.links.in);
 
   return (
     <Card
-      title={meta.description + ' 详情'}
-      extra={<Button onClick={onBack}>返回列表</Button>}
+      title={t('objects.detailTitle', { title: meta.description })}
+      extra={<Button onClick={onBack}>{t('objects.backToList')}</Button>}
     >
       <Descriptions bordered column={{ xs: 1, sm: 2, md: 3 }} size="small">
         {Object.entries(detail.properties).map(([key, val]) => (
-          <Descriptions.Item
-            key={key}
-            label={meta.properties[key]?.title || key}
-          >
-            {val === null || val === undefined ? <Tag>空</Tag> : String(val)}
+          <Descriptions.Item key={key} label={meta.properties[key]?.title || key}>
+            {val === null || val === undefined ? <Tag>{t('common.empty')}</Tag> : String(val)}
           </Descriptions.Item>
         ))}
       </Descriptions>
@@ -52,7 +51,7 @@ export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props
       {outLinks.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <Title level={5}>
-            <ArrowRightOutlined /> 出向链接
+            <ArrowRightOutlined /> {t('objects.outLinks')}
           </Title>
           <Space wrap>
             {outLinks.map(([linkName, count]) => (
@@ -73,7 +72,7 @@ export default function ObjectDetail({ meta, pk, onNavigateLink, onBack }: Props
       {inLinks.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <Title level={5}>
-            <ArrowLeftOutlined /> 入向链接
+            <ArrowLeftOutlined /> {t('objects.inLinks')}
           </Title>
           <Space wrap>
             {inLinks.map(([linkName, count]) => (

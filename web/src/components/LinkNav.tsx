@@ -1,11 +1,10 @@
 // 链接导航组件 —— 展示链接遍历结果
-import { useEffect, useState } from 'react';
-import { Button, Card, Table, Tag, Typography, message, Spin } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Button, Card, Table, Tag, message, Spin } from 'antd';
 import { RollbackOutlined } from '@ant-design/icons';
 import { fetchLinkTraversal } from '../api';
 import type { LinkTypeMeta, ObjectItem, ObjectTypeMeta } from '../types';
-
-const { Title } = Typography;
 
 interface Props {
   sourceType: ObjectTypeMeta;
@@ -26,56 +25,43 @@ export default function LinkNav({
   onSelectObject,
   onBack,
 }: Props) {
+  const { t } = useTranslation();
   const [objects, setObjects] = useState<ObjectItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [direction, setDirection] = useState<'out' | 'in'>('out');
 
   // 找到链接定义
-  const linkDef = links.find(
-    (l) => l.name === linkName || l.inverse_name === linkName,
-  );
+  const linkDef = links.find((l) => l.name === linkName || l.inverse_name === linkName);
 
-  const load = async (dir: string) => {
+  const load = useCallback(async (dir: string) => {
     setLoading(true);
     try {
-      const data = await fetchLinkTraversal(
-        sourceType.api_name,
-        sourcePk,
-        linkName,
-        dir,
-      );
+      const data = await fetchLinkTraversal(sourceType.api_name, sourcePk, linkName, dir);
       setObjects(data.objects);
     } catch (err) {
-      message.error('链接遍历失败: ' + (err as Error).message);
+      message.error(t('common.loadFailed', { msg: (err as Error).message }));
     } finally {
       setLoading(false);
     }
-  };
+  }, [t, sourcePk, linkName, sourceType.api_name]);
 
-  useEffect(() => { load(direction); }, [linkName, direction]);
+  useEffect(() => { void load(direction); }, [load, linkName, direction]);
 
-  const targetTypeName = linkDef
-    ? direction === 'out'
-      ? linkDef.target_type
-      : linkDef.source_type
-    : '';
-  const targetType = objectTypes.find((t) => t.name === targetTypeName);
+  const targetTypeName = linkDef ? (direction === 'out' ? linkDef.target_type : linkDef.source_type) : '';
+  const targetType = objectTypes.find((x) => x.name === targetTypeName);
 
   const columns = targetType
     ? Object.entries(targetType.properties).map(([key, prop]) => ({
         title: prop.title || key,
         dataIndex: ['properties', key],
         key,
-        render: (val: unknown) => (val === null || val === undefined ? <Tag>空</Tag> : String(val)),
+        render: (val: unknown) => (val === null || val === undefined ? <Tag>{t('common.empty')}</Tag> : String(val)),
       }))
     : [];
 
   return (
     <Card
-      title={
-        '链接: ' + linkName +
-        (linkDef ? ' (' + linkDef.description + ')' : '')
-      }
+      title={t('objects.linkTitle', { linkName }) + (linkDef ? ' (' + linkDef.description + ')' : '')}
       extra={
         <>
           <Button
@@ -84,7 +70,7 @@ export default function LinkNav({
             onClick={() => setDirection('out')}
             style={{ marginRight: 8 }}
           >
-            正向
+            {t('objects.forward')}
           </Button>
           <Button
             type={direction === 'in' ? 'primary' : 'default'}
@@ -92,10 +78,10 @@ export default function LinkNav({
             onClick={() => setDirection('in')}
             style={{ marginRight: 8 }}
           >
-            反向
+            {t('objects.reverse')}
           </Button>
           <Button icon={<RollbackOutlined />} onClick={onBack}>
-            返回
+            {t('common.back')}
           </Button>
         </>
       }

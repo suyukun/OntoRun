@@ -7,6 +7,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // 构建段路由真实前缀为 /api/v1/builder：原样透传（不 rewrite）
+      '/api/v1': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // 运行时语义接口：/api/xxx → /xxx
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

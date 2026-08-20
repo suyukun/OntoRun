@@ -1,5 +1,6 @@
 // LLM 对话面板 —— 对接 /agent/chat 和 /agent/confirm 端点
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Card, Input, Space, Tag, Typography, Spin, Alert } from 'antd';
 import { RobotOutlined, UserOutlined, WarningOutlined } from '@ant-design/icons';
 import { agentChat, agentConfirm } from '../api';
@@ -18,6 +19,7 @@ interface ChatMessage {
 }
 
 export default function ChatPanel() {
+  const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -49,14 +51,10 @@ export default function ChatPanel() {
 
       if (res.need_confirm) {
         const call = res.need_confirm;
-        setPendingConfirm({
-          callId: call.id,
-          name: call.name,
-          args: call.arguments,
-        });
+        setPendingConfirm({ callId: call.id, name: call.name, args: call.arguments });
         const assistantMsg: ChatMessage = {
           role: 'assistant',
-          content: '将执行 ' + call.name + '，参数: ' + JSON.stringify(call.arguments, null, 2),
+          content: t('chat.willExecute', { name: call.name }) + ' ' + JSON.stringify(call.arguments, null, 2),
           confirmCall: call,
         };
         setMessages((prev: ChatMessage[]) => [...prev, assistantMsg]);
@@ -66,7 +64,7 @@ export default function ChatPanel() {
         setMessages((prev: ChatMessage[]) => [...prev, assistantMsg]);
       }
     } catch (err) {
-      const errMsg: ChatMessage = { role: 'system', content: '错误: ' + (err as Error).message };
+      const errMsg: ChatMessage = { role: 'system', content: t('chat.error', { msg: (err as Error).message }) };
       setMessages((prev: ChatMessage[]) => [...prev, errMsg]);
     } finally {
       setLoading(false);
@@ -79,18 +77,14 @@ export default function ChatPanel() {
     setPendingConfirm(null);
 
     try {
-      const res = await agentConfirm({
-        session_id: sessionId,
-        call_id: pc.callId,
-        confirmed,
-      });
+      const res = await agentConfirm({ session_id: sessionId, call_id: pc.callId, confirmed });
       if (res.reply) {
         const reply = res.reply;
         const assistantMsg: ChatMessage = { role: 'assistant', content: reply };
         setMessages((prev: ChatMessage[]) => [...prev, assistantMsg]);
       }
     } catch (err) {
-      const errMsg: ChatMessage = { role: 'system', content: '确认失败: ' + (err as Error).message };
+      const errMsg: ChatMessage = { role: 'system', content: t('chat.confirmFailed', { msg: (err as Error).message }) };
       setMessages((prev: ChatMessage[]) => [...prev, errMsg]);
     }
   };
@@ -100,8 +94,8 @@ export default function ChatPanel() {
       title={
         <Space>
           <RobotOutlined />
-          <span>AI 助手</span>
-          {sessionId && <Tag color="green">会话已建立</Tag>}
+          <span>{t('chat.title')}</span>
+          {sessionId && <Tag color="green">{t('chat.sessionActive')}</Tag>}
         </Space>
       }
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
@@ -111,7 +105,7 @@ export default function ChatPanel() {
       <div style={{ flex: 1, overflowY: 'auto', marginBottom: 12, maxHeight: 400 }}>
         {messages.length === 0 && (
           <Paragraph type="secondary" style={{ textAlign: 'center', marginTop: 40 }}>
-            输入消息开始与 AI 助手对话
+            {t('chat.emptyHint')}
           </Paragraph>
         )}
         {messages.map((msg, i) => (
@@ -127,38 +121,26 @@ export default function ChatPanel() {
           >
             <Space>
               {msg.role === 'user' ? <UserOutlined /> : msg.role === 'system' ? <WarningOutlined /> : <RobotOutlined />}
-              <Text strong>{msg.role === 'user' ? '你' : msg.role === 'system' ? '系统' : 'AI'}</Text>
+              <Text strong>
+                {msg.role === 'user' ? t('chat.you') : msg.role === 'system' ? t('chat.system') : t('chat.ai')}
+              </Text>
             </Space>
-            <Paragraph style={{ margin: '4px 0 0 0', whiteSpace: 'pre-wrap' }}>
-              {msg.content}
-            </Paragraph>
+            <Paragraph style={{ margin: '4px 0 0 0', whiteSpace: 'pre-wrap' }}>{msg.content}</Paragraph>
             {msg.confirmCall && (
               <div style={{ marginTop: 8 }}>
                 <Alert
                   type="warning"
-                  message={'确认执行: ' + msg.confirmCall.name}
+                  message={t('chat.confirmExecute') + ': ' + msg.confirmCall.name}
                   description={
-                    <pre style={{ margin: 0, fontSize: 12 }}>
-                      {JSON.stringify(msg.confirmCall.arguments, null, 2)}
-                    </pre>
+                    <pre style={{ margin: 0, fontSize: 12 }}>{JSON.stringify(msg.confirmCall.arguments, null, 2)}</pre>
                   }
                 />
                 <Space style={{ marginTop: 8 }}>
-                  <Button
-                    type="primary"
-                    size="small"
-                    onClick={() => handleConfirm(true)}
-                    disabled={!pendingConfirm}
-                  >
-                    确认执行
+                  <Button type="primary" size="small" onClick={() => void handleConfirm(true)} disabled={!pendingConfirm}>
+                    {t('chat.confirmExecute')}
                   </Button>
-                  <Button
-                    danger
-                    size="small"
-                    onClick={() => handleConfirm(false)}
-                    disabled={!pendingConfirm}
-                  >
-                    拒绝
+                  <Button danger size="small" onClick={() => void handleConfirm(false)} disabled={!pendingConfirm}>
+                    {t('chat.reject')}
                   </Button>
                 </Space>
               </div>
@@ -174,12 +156,12 @@ export default function ChatPanel() {
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onPressEnter={handleSend}
-          placeholder="输入消息..."
+          onPressEnter={() => void handleSend()}
+          placeholder={t('chat.placeholder')}
           disabled={loading}
         />
-        <Button type="primary" onClick={handleSend} loading={loading}>
-          发送
+        <Button type="primary" onClick={() => void handleSend()} loading={loading}>
+          {t('chat.send')}
         </Button>
       </Space.Compact>
     </Card>

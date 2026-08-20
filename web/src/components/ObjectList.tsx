@@ -1,11 +1,10 @@
 // 对象列表组件 —— 由对象类型 schema 自动生成列，不硬编码
-import { useEffect, useState } from 'react';
-import { Card, Select, Table, Tag, Typography, message } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Card, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { fetchObjectList } from '../api';
-import type { ObjectItem, ObjectTypeMeta } from '../types';
-
-const { Title } = Typography;
+import type { ObjectItem, ObjectTypeMeta, PropertyMeta } from '../types';
 
 interface Props {
   meta: ObjectTypeMeta;
@@ -13,7 +12,7 @@ interface Props {
 }
 
 /** 从 property schema 推断列类型（用于 Tag 渲染与排序） */
-function inferColumnType(prop: import('../types').PropertyMeta): 'text' | 'enum' | 'number' | 'date' {
+function inferColumnType(prop: PropertyMeta): 'text' | 'enum' | 'number' | 'date' {
   if (prop.enum) return 'enum';
   if (prop.type === 'number' || prop.type === 'integer') return 'number';
   if (prop.format === 'date-time' || prop.format === 'date') return 'date';
@@ -21,13 +20,14 @@ function inferColumnType(prop: import('../types').PropertyMeta): 'text' | 'enum'
 }
 
 export default function ObjectList({ meta, onSelectObject }: Props) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<ObjectItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const load = async (p: number) => {
+  const load = useCallback(async (p: number) => {
     setLoading(true);
     try {
       const data = await fetchObjectList(meta.api_name, {
@@ -37,13 +37,13 @@ export default function ObjectList({ meta, onSelectObject }: Props) {
       setItems(data.items);
       setTotal(data.total);
     } catch (err) {
-      message.error('加载失败: ' + (err as Error).message);
+      message.error(t('common.loadFailed', { msg: (err as Error).message }));
     } finally {
       setLoading(false);
     }
-  };
+  }, [t, meta.api_name]);
 
-  useEffect(() => { load(page); }, [meta.api_name, page]);
+  useEffect(() => { void load(page); }, [load, page]);
 
   // 由 schema 自动生成列
   const columns: ColumnsType<ObjectItem> = Object.entries(meta.properties).map(([key, prop]) => {
@@ -58,7 +58,7 @@ export default function ObjectList({ meta, onSelectObject }: Props) {
         return va - vb;
       } : undefined,
       render: (val: unknown) => {
-        if (val === null || val === undefined) return <Tag>空</Tag>;
+        if (val === null || val === undefined) return <Tag>{t('common.empty')}</Tag>;
         if (colType === 'enum') {
           const colors = ['blue', 'green', 'orange', 'purple', 'cyan', 'magenta'];
           const idx = (prop.enum || []).indexOf(String(val));
@@ -86,7 +86,7 @@ export default function ObjectList({ meta, onSelectObject }: Props) {
           pageSize,
           total,
           onChange: (p) => setPage(p),
-          showTotal: (t) => '共 ' + t + ' 条',
+          showTotal: (tot) => t('common.total', { count: tot }),
         }}
         onRow={(record) => ({
           onClick: () => onSelectObject(meta.api_name, record.pk),

@@ -1,139 +1,80 @@
-// 本体驱动 UI 主壳 —— 元数据加载 → 导航 → 组件渲染
-import { useState } from 'react';
-import { Alert, Layout, Menu, Spin, Typography, theme } from 'antd';
-import { AppstoreOutlined, ThunderboltOutlined, RobotOutlined } from '@ant-design/icons';
-import { useMeta } from './hooks/useMeta';
-import ObjectList from './components/ObjectList';
-import ObjectDetail from './components/ObjectDetail';
-import LinkNav from './components/LinkNav';
-import ActionForm from './components/ActionForm';
+// 本体驱动 UI 主壳 —— MetaProvider 加载 /meta/schema，react-router 路由 + AntD Layout
+import { useTranslation } from 'react-i18next';
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
+import { Layout, Menu, Typography, theme } from 'antd';
+import {
+  ApartmentOutlined,
+  AppstoreOutlined,
+  DatabaseOutlined,
+  LinkOutlined,
+  PartitionOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
+import { MetaProvider, useMetaContext } from './context/MetaContext';
+import LanguageSwitcher from './components/LanguageSwitcher';
+import BrowsePage from './pages/BrowsePage';
+import ActionsPage from './pages/ActionsPage';
 import ChatPanel from './components/ChatPanel';
-import type { ActionMeta, ObjectTypeMeta } from './types';
+import ObjectTypesPage from './pages/builder/ObjectTypesPage';
+import LinkTypesPage from './pages/builder/LinkTypesPage';
+import PipelineCanvas from './components/PipelineCanvas';
+import GraphPage from './pages/GraphPage';
 
-const { Sider, Content } = Layout;
-const { Title, Text, Paragraph } = Typography;
+const { Sider, Header, Content } = Layout;
+const { Title, Text } = Typography;
 
-type View =
-  | { kind: 'object-list'; type: ObjectTypeMeta }
-  | { kind: 'object-detail'; type: ObjectTypeMeta; pk: string }
-  | { kind: 'link-nav'; sourceType: ObjectTypeMeta; sourcePk: string; linkName: string }
-  | { kind: 'actions' }
-  | { kind: 'chat' };
+interface MenuGroup {
+  key: string;
+  type: 'group';
+  label: string;
+  children: { key: string; icon: React.ReactNode; label: string }[];
+}
 
-export default function App() {
-  const { meta, loading, error } = useMeta();
+function Shell() {
+  const { t } = useTranslation();
+  const { meta } = useMetaContext();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { token } = theme.useToken();
-  const [view, setView] = useState<View | null>(null);
-  const [selectedType, setSelectedType] = useState<string | null>(null);
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Spin size="large" tip="加载本体元数据..." />
-      </div>
-    );
-  }
+  const menuGroups: MenuGroup[] = [
+    {
+      key: 'runtime',
+      type: 'group',
+      label: t('nav.runtime'),
+      children: [
+        { key: '/', icon: <DatabaseOutlined />, label: t('nav.browse') },
+        {
+          key: '/actions',
+          icon: <ThunderboltOutlined />,
+          label: t('nav.actions') + (meta ? ' (' + meta.actions.length + ')' : ''),
+        },
+        { key: '/chat', icon: <RobotOutlined />, label: t('nav.chat') },
+      ],
+    },
+    {
+      key: 'builder',
+      type: 'group',
+      label: t('nav.builder'),
+      children: [
+        { key: '/builder/object-types', icon: <AppstoreOutlined />, label: t('nav.objectTypes') },
+        { key: '/builder/link-types', icon: <LinkOutlined />, label: t('nav.linkTypes') },
+        { key: '/builder/pipelines', icon: <PartitionOutlined />, label: t('nav.pipelines') },
+        { key: '/builder/graph', icon: <ApartmentOutlined />, label: t('nav.graph') },
+      ],
+    },
+  ];
 
-  if (error || !meta) {
-    return (
-      <div style={{ padding: 40 }}>
-        <Alert type="error" message="无法加载本体元数据" description={error || '未知错误'} />
-      </div>
-    );
-  }
-
-  const handleSelectObject = (type: string, pk: string) => {
-    const objType = meta.objects.find((o) => o.api_name === type || o.name === type);
-    if (objType) setView({ kind: 'object-detail', type: objType, pk });
-  };
-
-  const handleNavigateLink = (type: string, pk: string, linkName: string) => {
-    const objType = meta.objects.find((o) => o.api_name === type || o.name === type);
-    if (objType) setView({ kind: 'link-nav', sourceType: objType, sourcePk: pk, linkName });
-  };
-
-  const renderView = () => {
-    if (!view) {
-      return (
-        <div style={{ textAlign: 'center', padding: 80 }}>
-          <Title level={3}>OntoRun 语义接口</Title>
-          <Paragraph type="secondary">
-            零售供应链最小语义接口闭环 —— 本体驱动 UI
-          </Paragraph>
-          <Paragraph>
-            左侧选择对象类型浏览数据，或选择动作执行操作，或与 AI 助手对话。
-          </Paragraph>
-        </div>
-      );
-    }
-
-    switch (view.kind) {
-      case 'object-list':
-        return (
-          <ObjectList
-            meta={view.type}
-            onSelectObject={handleSelectObject}
-          />
-        );
-      case 'object-detail':
-        return (
-          <ObjectDetail
-            meta={view.type}
-            pk={view.pk}
-            onNavigateLink={handleNavigateLink}
-            onBack={() => setView({ kind: 'object-list', type: view.type })}
-          />
-        );
-      case 'link-nav':
-        return (
-          <LinkNav
-            sourceType={view.sourceType}
-            sourcePk={view.sourcePk}
-            linkName={view.linkName}
-            links={meta.links}
-            objectTypes={meta.objects}
-            onSelectObject={handleSelectObject}
-            onBack={() => {
-              const objType = meta.objects.find(
-                (o) => o.name === view.sourceType.name,
-              );
-              if (objType)
-                setView({
-                  kind: 'object-detail',
-                  type: objType,
-                  pk: view.sourcePk,
-                });
-            }}
-          />
-        );
-      case 'actions':
-        return (
-          <div>
-            <Title level={4}>动作列表（{meta.actions.length}）</Title>
-            {meta.actions.map((action: ActionMeta) => (
-              <div key={action.name} style={{ marginBottom: 16 }}>
-                <ActionForm action={action} onDone={() => {
-                  if (selectedType) {
-                    const objType = meta.objects.find((o) => o.api_name === selectedType || o.name === selectedType);
-                    if (objType) setView({ kind: 'object-list', type: objType });
-                  }
-                }} />
-              </div>
-            ))}
-          </div>
-        );
-      case 'chat':
-        return <ChatPanel />;
-      default:
-        return null;
-    }
-  };
-
-  const objectMenuItems = meta.objects.map((obj) => ({
-    key: obj.api_name,
-    icon: <AppstoreOutlined />,
-    label: obj.description + ' (' + obj.name + ')',
-  }));
+  const flatKeys = menuGroups.flatMap((g) => g.children.map((c) => c.key));
+  const selectedKey = flatKeys.includes(location.pathname) ? location.pathname : '/';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -146,54 +87,52 @@ export default function App() {
       >
         <div style={{ padding: '16px', borderBottom: '1px solid ' + token.colorBorderSecondary }}>
           <Title level={5} style={{ margin: 0 }}>OntoRun</Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            语义接口 · 本体驱动
-          </Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('app.tagline')}</Text>
         </div>
         <Menu
           mode="inline"
-          selectedKeys={selectedType ? [selectedType] : []}
           style={{ borderRight: 0 }}
-          items={[
-            {
-              key: 'objects',
-              icon: <AppstoreOutlined />,
-              label: '对象类型',
-              children: objectMenuItems,
-            },
-            {
-              key: 'actions',
-              icon: <ThunderboltOutlined />,
-              label: '动作 (' + meta.actions.length + ')',
-            },
-            {
-              key: 'chat',
-              icon: <RobotOutlined />,
-              label: 'AI 助手',
-            },
-          ]}
-          onClick={({ key }) => {
-            if (key === 'actions') {
-              setView({ kind: 'actions' });
-              setSelectedType(null);
-            } else if (key === 'chat') {
-              setView({ kind: 'chat' });
-              setSelectedType(null);
-            } else {
-              const objType = meta.objects.find((o) => o.api_name === key);
-              if (objType) {
-                setSelectedType(key);
-                setView({ kind: 'object-list', type: objType });
-              }
-            }
-          }}
+          selectedKeys={[selectedKey]}
+          items={menuGroups}
+          onClick={({ key }) => navigate(key)}
         />
       </Sider>
       <Layout>
+        <Header
+          style={{
+            background: token.colorBgContainer,
+            borderBottom: '1px solid ' + token.colorBorderSecondary,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            padding: '0 24px',
+          }}
+        >
+          <LanguageSwitcher />
+        </Header>
         <Content style={{ padding: 24, background: token.colorBgLayout }}>
-          {renderView()}
+          <Routes>
+            <Route path="/" element={<BrowsePage />} />
+            <Route path="/actions" element={<ActionsPage />} />
+            <Route path="/chat" element={<ChatPanel />} />
+            <Route path="/builder/object-types" element={<ObjectTypesPage />} />
+            <Route path="/builder/link-types" element={<LinkTypesPage />} />
+            <Route path="/builder/pipelines" element={<PipelineCanvas />} />
+            <Route path="/builder/graph" element={<GraphPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </Content>
       </Layout>
     </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <MetaProvider>
+      <BrowserRouter>
+        <Shell />
+      </BrowserRouter>
+    </MetaProvider>
   );
 }
