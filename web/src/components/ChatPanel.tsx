@@ -18,12 +18,34 @@ interface ChatMessage {
   };
 }
 
+// TD-15（MVP 部分）：会话历史本地持久化——刷新页面不丢消息与 session_id。
+// 发布期随用户体系/多进程迁移 Redis/DB（见 docs/tech-debt.md TD-15）。
+const MSGS_KEY = 'ontorun.chat.messages';
+const SESSION_KEY = 'ontorun.chat.sessionId';
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(MSGS_KEY);
+    return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadSessionId(): string | null {
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export default function ChatPanel() {
   const { t } = useTranslation();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(loadMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(loadSessionId);
   const [pendingConfirm, setPendingConfirm] = useState<{
     callId: string;
     name: string;
@@ -34,6 +56,23 @@ export default function ChatPanel() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MSGS_KEY, JSON.stringify(messages));
+    } catch {
+      // localStorage 不可用时忽略
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    try {
+      if (sessionId) localStorage.setItem(SESSION_KEY, sessionId);
+      else localStorage.removeItem(SESSION_KEY);
+    } catch {
+      // ignore
+    }
+  }, [sessionId]);
 
   const handleSend = async () => {
     const text = input.trim();

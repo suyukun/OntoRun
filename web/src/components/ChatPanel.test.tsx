@@ -10,6 +10,7 @@ const mockFetch = vi.fn();
 
 beforeEach(() => {
   mockFetch.mockReset();
+  localStorage.clear();
 });
 
 // Ant Design inserts zero-width spaces in Chinese text buttons
@@ -185,5 +186,21 @@ describe('ChatPanel', () => {
         }),
       );
     });
+  });
+
+  it('restores messages and session from localStorage (TD-15)', () => {
+    localStorage.setItem(
+      'ontorun.chat.messages',
+      JSON.stringify([
+        { role: 'user', content: '之前的消息' },
+        { role: 'assistant', content: '之前的回复' },
+      ]),
+    );
+    localStorage.setItem('ontorun.chat.sessionId', 'sess_prev');
+
+    render(<ChatPanel />);
+
+    expect(screen.getByText('之前的消息')).toBeTruthy();
+    expect(screen.getByText('之前的回复')).toBeTruthy();
   });
 });
