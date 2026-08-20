@@ -12,8 +12,8 @@
 | TD-6 | provider.chat 同步 blocking 未 async 化 | P3 范围 | P4 接真实 DeepSeek 时 | 关闭（P4：chat async 化 + 同步兼容包装，真调用不阻塞事件循环） |
 | TD-7 | 测试制度演进史：P3 全量重跑 18 次教训（60s 超时陷阱） | 已固化进 AGENTS.md | 无需偿还，制度已修 | 关闭 |
 | TD-8 | E6 审查 F2：绕过 API 直调引擎的非法 actor 走 failed 且 audit_ref 空（对账锚点缺失） | 独立审查发现（2026-08-20） | P6 全链路/权限治理时 | 评估完成（S1 收口：维持现状 + 边界说明，见 §偿还记录） |
-| TD-9 | E6 审查 F3：action_runs.executed_by 无 CHECK 白名单（audit_log.actor 有，schema 层不齐，store.py:200 vs :22） | 独立审查发现 | P6 治理 | 已提议待 Jack 拍板（DDL+迁移+风险见 §偿还记录，禁擅改 schema） |
-| TD-10 | E6 审查 F4：audit_ref 无外键约束（store.py:203） | 独立审查发现 | P6 治理 | 已提议待 Jack 拍板（DDL+迁移+风险见 §偿还记录，禁擅改 schema） |
+| TD-9 | E6 审查 F3：action_runs.executed_by 无 CHECK 白名单（audit_log.actor 有，schema 层不齐，store.py:200 vs :22） | 独立审查发现 | P6 治理 | 关闭（executed_by CHECK 已落地 + 存量库迁移，commit c3cea1c，见 §偿还记录） |
+| TD-10 | E6 审查 F4：audit_ref 无外键约束（store.py:203） | 独立审查发现 | P6 治理 | 决策=低风险备选（维持应用层对账 + 发布期 Postgres 原生 FK，不擅改 DDL，见 §偿还记录） |
 | TD-11 | E6 审查 F5：after 快照重读异常冒泡 → action_runs 缺行（对账缺口，action_runs.py:168-182） | 独立审查发现 | P6 收口 | 已修复（S1 收口：降级 failed run 不丢行，见 §偿还记录） |
 | TD-12 | E6 审查 F6-F9（nit）：同秒排序不稳 / GET runs 无鉴权读快照 / dry_run 被拒语义 / 快照明文返回 | 独立审查发现 | P6 终审复核闭环时 | 部分处置（F6 已满足；F7-F9 保留发布期，见 §偿还记录） |
 | TD-13 | E6 审查测试缺口：failed+有 effects 分支（after 重读源库新值）、dry_run+前置被拒组合（status=rejected 且 audit_ref 非空）无测试锁定 | 独立审查发现（E6 核心已被 15 用例锁定，此二为边界覆盖） | P6 全链路 E2E + 三问回归时补 | 已修复（S1 收口：tests/test_builder_p4.py 补 2 用例，见 §偿还记录） |
@@ -23,7 +23,8 @@
 ## S1 收口偿还记录（2026-08-20）
 
 > 偿还触发 = P6 收口（蓝图 §12 验收通过，S1 全链路一条命令 E2E 全绿）。本小节逐条记录
-> 处置结果；TD-9/TD-10 涉及数据库 schema 变更，**已提议待 Jack 拍板，未擅改 DDL**。
+> 处置结果；TD-9 经 Jack 拍板已落地（schema CHECK + 存量库迁移）；TD-10 维持
+> Jack 拍板的低风险备选（应用层对账，外键等 Postgres 发布期原生实现），未擅改 DDL。
 
 ### TD-11（已修复，代码修复）
 
@@ -64,33 +65,36 @@
   （builder_logic_action_routes.py:79-96），直调引擎仅测试/内部代码可达。边界已在本表
   记录 + action_runs 模块 docstring 说明；发布期权限治理时再评估加 actor 告警。
 
-### TD-9（已提议待 Jack 拍板，禁擅改 schema）
+### TD-9（已修复，Jack 已拍板，commit c3cea1c）
 
-- 现状：`action_runs.executed_by` 无 CHECK（store.py:200）；`audit_log.actor` 有
-  `CHECK (actor IN ('human','llm','api'))`（store.py:22）——schema 层不齐。
-- 提议 DDL（新库，直接改 `BUILDER_SCHEMA` 的 action_runs 定义）：
+- 落地 DDL（`src/runtime/store.py`）：`BUILDER_SCHEMA` 的 action_runs 定义改为
   `executed_by TEXT NOT NULL DEFAULT 'api' CHECK (executed_by IN ('human','llm','api'))`
-  白名单值应与 `src/runtime/action_engine.py` 的 `ALLOWED_ACTORS` 常量同源（参照
-  audit_log 的先例：CHECK 字面量与 ALLOWED_ACTORS 手写一致，需在 store.py 加注释防漂移）。
-- 迁移方式（存量库）：SQLite 不支持 `ALTER TABLE ... ADD CONSTRAINT`，须重建表
-  （PRAGMA foreign_keys=OFF → BEGIN → 建新表（含 CHECK）→ INSERT INTO 新表 SELECT 旧表
-  → DROP 旧表 → RENAME → 重建索引 idx_action_runs_type/status → COMMIT）；
-  建议 schema_version 升 v4（builder 段注脚追加）。
-- 风险：重建期间短暂无表（MVP 本地可接受）；存量非法值行会拒绝迁移（当前演示/测试数据
-  均为合法 actor，无实际阻塞）；需配套测试断言非法 executed_by 插入被拒。
+  （列定义抽为 `ACTION_RUNS_COLUMNS` 常量，建表与迁移重建共用单一来源）。
+- 同源收口（防双轨漂移）：`ALLOWED_ACTORS` 收至 `src.runtime.store` 单一来源
+  （`action_engine` 改为从此导入；API 层 X-Actor 白名单引用不变）；CHECK 值经
+  `ACTOR_VALUES_SQL` 派生注入 `audit_log.actor` 与 `action_runs.executed_by`，
+  并由 test_builder_p4.py `TestExecutedByCheck.test_check_values_same_source_as_allowed_actors`
+  做机器断言锁定同源。
+- 存量库迁移（v4 幂等补丁 `_apply_builder_patches` / `_patch_action_runs_executed_by_check`）：
+  SQLite 无 `ALTER ADD CONSTRAINT`，重建表迁移——单事务内建新表（含 CHECK）→
+  INSERT..SELECT 拷数据 → DROP 旧表 → RENAME → 重建索引；失败整体回滚不丢数据；
+  新库/已迁移库经 sqlite_master 检出幂等跳过。本机演示库 data/ontology/ontology.db
+  已执行迁移（action_runs 0 行，数据零损失，schema_version 仍为 1）。
+- schema_version 评估：**不 bump**。理由：v2/v3 先例即「幂等补丁只追加 note 不升号」
+  （link_types.fk_field / action_runs.audit_ref 均如此）；bump 会破坏
+  `get_schema_version()==1` 既有契约（tests/test_b2_action_engine.py:736）。
+  版本历史记于 note 注脚（`v4 patch: action_runs.executed_by CHECK（TD-9）`）。
+- 测试：`TestExecutedByCheck` 四用例——非法直插被拒（IntegrityError）、白名单三值
+  （human/llm/api）可插、DDL 与 ALLOWED_ACTORS 同源机器检查、存量库迁移后数据保留
+  + 约束生效。
 
-### TD-10（已提议待 Jack 拍板，禁擅改 schema）
+### TD-10（Jack 决策：低风险备选，不擅改 DDL）
 
 - 现状：`action_runs.audit_ref` 无外键（store.py:203），仅应用层对账（测试断言
   audit_ref 可对账到 audit_log.audit_id）。
-- 提议 DDL（新库）：
-  `audit_ref TEXT`（由 NOT NULL DEFAULT '' 改为可空）+ `FOREIGN KEY (audit_ref) REFERENCES audit_log(audit_id)`
-  dry_run 无 runtime 审计 → 写 NULL（SQLite 外键对 NULL 放行）而非空串；
-  `action_runs.py` 相应把 audit_ref 默认从空串改为 None，并 `PRAGMA foreign_keys=ON`。
-- 迁移方式：同 TD-9 重建表法；schema_version 升 v4。
-- 风险：**破坏性变更**——现有测试断言 dry_run 的 audit_ref 为空串需改为 `is None`，
-  row_to_dict/API 返回需同步（'' vs null）；外键开启后 audit_log 删除/清理受约束
-  （当前无删除路径，风险低）；SQLite 默认 foreign_keys=OFF，须在 Store 连接层统一开启
-  否则约束形同虚设（这是「外键可落地」的前提，也是主要工作量）。
-- 备选（低风险）：维持空串 + 应用层对账不变，仅补一条对账完整性测试（审计存在性巡检）；
-  外键约束等 Postgres 迁移（发布期）时由 DB 原生实现。
+- **Jack 决策（2026-08-20）= 低风险备选**：维持空串 + 应用层对账不变（不把
+  audit_ref 改可空、不加 SQLite 外键、不开 `PRAGMA foreign_keys`），发布期随
+  Postgres 迁移由 DB 原生外键实现。理由：SQLite 默认 foreign_keys=OFF，外键落地
+  须在 Store 连接层统一开启（主要工作量）且属破坏性变更（dry_run 空串→NULL、
+  API 返回 '' vs null 需同步）；当前对账已有测试锁定，收益 < 成本。
+- 本次未改 TD-10 相关 DDL（保持 `audit_ref TEXT NOT NULL DEFAULT ''` 不变）。
