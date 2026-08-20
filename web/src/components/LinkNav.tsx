@@ -1,5 +1,5 @@
 // 链接导航组件 —— 展示链接遍历结果
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Card, Table, Tag, message, Spin } from 'antd';
 import { RollbackOutlined } from '@ant-design/icons';
@@ -30,20 +30,33 @@ export default function LinkNav({
   const [loading, setLoading] = useState(false);
   const [direction, setDirection] = useState<'out' | 'in'>('out');
 
-  // 找到链接定义
-  const linkDef = links.find((l) => l.name === linkName || l.inverse_name === linkName);
+  // 找到链接定义（name 或 inverse_name 均可定位）
+  const linkDef = useMemo(
+    () => links.find((l) => l.name === linkName || l.inverse_name === linkName),
+    [links, linkName],
+  );
 
-  const load = useCallback(async (dir: string) => {
-    setLoading(true);
-    try {
-      const data = await fetchLinkTraversal(sourceType.api_name, sourcePk, linkName, dir);
-      setObjects(data.objects);
-    } catch (err) {
-      message.error(t('common.loadFailed', { msg: (err as Error).message }));
-    } finally {
-      setLoading(false);
-    }
-  }, [t, sourcePk, linkName, sourceType.api_name]);
+  const load = useCallback(
+    async (dir: string) => {
+      setLoading(true);
+      try {
+        // TD-14 修复：请求名必须与方向匹配——out 用正向名 name、in 用反向名
+        // inverse_name（后端按「名 + 方向 + 端点」严格匹配，传错组合即 404）。
+        const name = linkDef
+          ? dir === 'out'
+            ? linkDef.name
+            : linkDef.inverse_name
+          : linkName;
+        const data = await fetchLinkTraversal(sourceType.api_name, sourcePk, name, dir);
+        setObjects(data.objects);
+      } catch (err) {
+        message.error(t('common.loadFailed', { msg: (err as Error).message }));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t, sourcePk, linkName, sourceType.api_name, linkDef],
+  );
 
   useEffect(() => { void load(direction); }, [load, linkName, direction]);
 

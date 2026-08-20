@@ -155,6 +155,18 @@ def test_link_traversal_in(client):
     assert body["data"]["objects"]
 
 
+def test_link_traversal_in_from_order(client):
+    """TD-14 修复：Order 的入向链接 customer.orders 返回客户（此前 404/空）。"""
+    body = assert_ok(
+        client.get(
+            "/objects/Order/ORD-1001/links/customer.orders", params={"direction": "in"}
+        )
+    )
+    assert body["data"]["direction"] == "in"
+    assert body["data"]["objects"]
+    assert body["data"]["objects"][0]["object_type"] == "Customer"
+
+
 def test_link_traversal_bad_direction(client):
     resp = client.get(
         "/objects/Order/ORD-1001/links/order.items", params={"direction": "up"}

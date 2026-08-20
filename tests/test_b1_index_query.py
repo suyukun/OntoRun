@@ -237,6 +237,17 @@ def test_traverse_in_customer_orders(query, source_conn):
     assert len(objs) == n
 
 
+def test_traverse_in_order_customer(query, source_conn):
+    """TD-14 修复：Order 的入向链接（customer.orders）应返回其客户（此前为空）。"""
+    cus = source_conn.execute(
+        "SELECT customer_id FROM orders WHERE order_id=?", (ORD_1001,)
+    ).fetchone()["customer_id"]
+    objs = query.get_links("Order", ORD_1001, "customer.orders", "in")
+    assert len(objs) == 1
+    assert objs[0]["object_type"] == "Customer"
+    assert objs[0]["pk"] == cus
+
+
 def test_traverse_out_unknown_link_raises(query):
     with pytest.raises(LinkNotFound):
         query.get_links("Order", ORD_1001, "order.ghost", "out")

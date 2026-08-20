@@ -103,6 +103,11 @@ class ObjectIndex:
                         self._out.setdefault((type_name, pk), {}).setdefault(
                             link.name, []
                         ).append(tgt)
+                        # TD-14 修复：source 侧 N:1 补写入向（"谁引用了我"）——
+                        # target 对象经 inverse_name 指向本对象，此前缺此数据路径（入向空）
+                        self._in.setdefault((type_name, pk), {}).setdefault(
+                            link.inverse_name, []
+                        ).append(tgt)
                 else:
                     targets = [
                         t_pk
