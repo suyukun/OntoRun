@@ -1,0 +1,57 @@
+# OntoRun 轻 CI（S1 收口后准备件，按 AGENTS.md「P6 收口后建轻 CI」）。
+#
+# 状态：**准备件（write-ready，GitHub 推送前不触发）**——仓库尚未发布到 GitHub
+# 远端（本地 git 为单一事实来源，发布须 Jack 确认）。推送到 GitHub 后本文件自动生效。
+#
+# 门禁（对齐 scripts/run_gates.sh + 蓝图 §12 验收）：
+#   - lint：ruff check src/ tests/
+#   - 后端全量 pytest（阶段末 Rose 门禁的自动化镜像；含 governance 制度自检）
+#   - 前端 vitest（npm run test）
+# 注：全量 pytest 仅在本 CI 与阶段末 Rose 门禁跑；子代理/日常增量仍走 run_gates.sh。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend deps
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install ruff
+      - name: Ruff check
+        run: ruff check src/ tests/
+
+  backend:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend deps
+        run: python -m pip install -r requirements.txt
+      - name: Pytest (full suite + governance)
+        run: python -m pytest tests/ -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install frontend deps
+        run: cd web && npm ci --registry=https://registry.npmmirror.com
+      - name: Vitest
+        run: cd web && npm run test
