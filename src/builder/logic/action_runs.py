@@ -17,13 +17,20 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from src.runtime.action_engine import ActionResult, Snapshot
+from src.runtime.action_engine import (
+    FAILED_CODE_EXECUTION,
+    ActionResult,
+    Snapshot,
+)
+
+logger = logging.getLogger(__name__)
 
 RUN_STATUSES: tuple[str, ...] = ("applied", "rejected", "failed", "dry_run")
 
@@ -34,6 +41,12 @@ _OUTCOME_TO_STATUS = {
     "failed": "failed",
     "dry_run": "dry_run",
 }
+
+# TD-11：after 快照重读异常时的降级文案（F1 口径安全摘要：不回显原始异常/SQL 细节；
+# 引擎侧审计已落，action_runs 保留 audit_ref 对账锚点，源库状态以直查为准）。
+_FAILED_SNAPSHOT_MESSAGE = (
+    "动作已执行且审计已落库，但 after 快照重读失败（快照降级，源库状态以直查为准）"
+)
 
 
 def _now() -> str:
@@ -166,7 +179,11 @@ def _effect_pairs(result: ActionResult) -> list[tuple[str, str]]:
 
 
 def _reread_records(store, registry, pairs: list[tuple[str, str]]) -> dict:
-    """提交后按 effects 覆盖对象重读源记录（after 快照的权威来源）。"""
+    """提交后按 effects 覆盖对象重读源记录（after 快照的权威来源）。
+
+    只吞 KeyError（对象类型/主键在重读时消失，记录为 None）；其余异常上抛，
+    由 run_action 的兜底降级（TD-11），保证 action_runs 不丢行（对账缺口）。
+    """
     records: dict[str, dict] = {}
     conn = store.source_conn()
     try:
@@ -180,6 +197,42 @@ def _reread_records(store, registry, pairs: list[tuple[str, str]]) -> dict:
     finally:
         conn.close()
     return records
+
+
+def _build_after_snapshot(
+    result: ActionResult,
+    store,
+    registry,
+    before_snapshot: dict,
+) -> dict:
+    """按结局构造 after 快照。
+
+    - applied：按 effects 覆盖对象重读源记录（真实变更）；
+    - dry_run：重读（未变更）+ effects 新值叠加（simulated=true）；
+    - rejected：与 before 完全一致（源库零变更）；
+    - failed：有 effects（源库已提交但本体同步失败等）则重读，否则等于 before。
+    """
+    pairs = _effect_pairs(result)
+    if result.outcome == "applied":
+        return {
+            "records": _reread_records(store, registry, pairs),
+            "effects": [e.model_dump() for e in result.effects],
+        }
+    if result.outcome == "dry_run":
+        return {
+            "simulated": True,
+            "records": _simulate_records(
+                _reread_records(store, registry, pairs), result
+            ),
+            "effects": [e.model_dump() for e in result.effects],
+        }
+    if result.outcome == "failed" and pairs:
+        return {
+            "records": _reread_records(store, registry, pairs),
+            "effects": [e.model_dump() for e in result.effects],
+        }
+    # rejected / 无 effects 的 failed：源库零变更，after == before
+    return copy.deepcopy(before_snapshot)
 
 
 def _simulate_records(records: dict, result: ActionResult) -> dict:
@@ -228,6 +281,8 @@ def run_action(
     - dry_run：重读（未变更）+ effects 新值叠加（simulated=true）；
     - rejected：与 before 完全一致（源库零变更）；
     - failed：有 effects（源库已提交但本体同步失败等）则重读，否则等于 before。
+    重读/快照构造抛异常时不冒泡丢行（TD-11）：降级为 failed run，保留
+    audit_ref 对账锚点，after_snapshot 标记 degraded（源库状态以直查为准）。
     """
     before_objects: dict | None = None
 
@@ -247,28 +302,28 @@ def run_action(
     if before_objects is not None:
         before_snapshot["objects"] = before_objects
 
-    pairs = _effect_pairs(result)
-    if result.outcome == "applied":
-        after_snapshot: dict = {
-            "records": _reread_records(store, registry, pairs),
-            "effects": [e.model_dump() for e in result.effects],
-        }
-    elif result.outcome == "dry_run":
+    try:
+        after_snapshot = _build_after_snapshot(result, store, registry, before_snapshot)
+    except Exception:  # TD-11 兜底：快照构造异常不冒泡丢行
+        # 引擎侧已提交 + 审计已落（applied/rejected/failed 均落 audit_log）；
+        # 此处降级为 failed action_run 并保留 audit_ref 锚点，闭合对账缺口。
+        # 原始异常只进日志（F1 口径：对外 error 用稳定安全摘要，不回显 SQL 细节）。
+        logger.exception(
+            "after 快照重读失败（快照降级为 failed run）: action=%s audit_ref=%s",
+            action_name,
+            result.audit_id or "",
+        )
+        result = result.model_copy(
+            update={
+                "outcome": "failed",
+                "error_code": FAILED_CODE_EXECUTION,
+                "message": _FAILED_SNAPSHOT_MESSAGE,
+            }
+        )
         after_snapshot = {
-            "simulated": True,
-            "records": _simulate_records(
-                _reread_records(store, registry, pairs), result
-            ),
-            "effects": [e.model_dump() for e in result.effects],
+            "degraded": True,
+            "reason": "after-snapshot reread failed; audit already recorded",
         }
-    elif result.outcome == "failed" and pairs:
-        after_snapshot = {
-            "records": _reread_records(store, registry, pairs),
-            "effects": [e.model_dump() for e in result.effects],
-        }
-    else:
-        # rejected / 无 effects 的 failed：源库零变更，after == before
-        after_snapshot = copy.deepcopy(before_snapshot)
 
     run_row = insert(
         ontology_conn,
