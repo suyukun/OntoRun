@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -51,6 +52,15 @@ ERROR_MESSAGES: dict[str, str] = {
     "AMOUNT_EXCEEDS_PAID": "退款金额超过实付（含已批准退款）",
     "REFUND_NOT_ALLOWED": "订单状态不允许退款",
 }
+
+# failed 路径对外稳定错误码/文案（安全摘要，不含原始异常文本——AGENTS.md
+# 「错误信息不泄漏敏感数据」：异常详情只记日志 logger，不进对外 message）
+FAILED_CODE_EXECUTION = "EXECUTION_FAILED"
+FAILED_MESSAGE_EXECUTION = "动作执行失败：内部错误"
+FAILED_CODE_SYNC = "ONTOLOGY_SYNC_FAILED"
+FAILED_MESSAGE_SYNC = "本体库同步失败（源库已变更，需对账）"
+
+logger = logging.getLogger(__name__)
 
 # 合法操作者（与 audit_log 的 CHECK 约束同源，store.py ONTOLOGY_SCHEMA；
 # API 层 X-Actor 白名单引用同一常量，防双轨漂移）
@@ -331,11 +341,17 @@ class ActionEngine:
                 cur = conn.execute(wb.sql, wb.params)
                 wb.rows = cur.rowcount
             conn.commit()
-        except Exception as exc:  # noqa: BLE001 —— 引擎兜底：回滚 + failed 审计
+        except Exception:  # 引擎兜底：回滚 + failed 审计
             try:
                 conn.rollback()
             finally:
                 conn.close()
+            # 原始异常只进日志（含 traceback）；对外 message 用稳定安全摘要（F1 red-team）
+            logger.exception(
+                "动作执行异常（内部错误，不对调用方回显）: action=%s request_id=%s",
+                action_name,
+                request_id,
+            )
             return self._failed(
                 action_name,
                 params,
@@ -343,7 +359,8 @@ class ActionEngine:
                 actor_detail,
                 request_id,
                 t0,
-                f"执行异常: {type(exc).__name__}: {exc}",
+                FAILED_MESSAGE_EXECUTION,
+                error_code=FAILED_CODE_EXECUTION,
             )
         finally:
             # 拒绝路径（return 在 try 内）也会走到这里释放连接（关闭失败可忽略）
@@ -363,7 +380,13 @@ class ActionEngine:
                     self.index.set_ontology_state(
                         eff.object_type, eff.pk, eff.prop, eff.new
                     )
-        except Exception as exc:  # noqa: BLE001 —— 补偿式：审计记 failed + 告警
+        except Exception:  # 补偿式：审计记 failed + 告警
+            # 原始异常只进日志；对外 message 用稳定安全摘要（F1 red-team）
+            logger.exception(
+                "本体库同步失败（源库已变更，需对账）: action=%s request_id=%s",
+                action_name,
+                request_id,
+            )
             return self._failed(
                 action_name,
                 params,
@@ -371,7 +394,8 @@ class ActionEngine:
                 actor_detail,
                 request_id,
                 t0,
-                f"本体库同步失败（源库已变更，需对账）: {exc}",
+                FAILED_MESSAGE_SYNC,
+                error_code=FAILED_CODE_SYNC,
                 effects=effects,
                 writebacks=writebacks,
             )
@@ -501,6 +525,7 @@ class ActionEngine:
         request_id: str,
         t0: float,
         message: str,
+        error_code: str | None = None,
         effects: list[Effect] | None = None,
         writebacks: list[Writeback] | None = None,
     ) -> ActionResult:
@@ -514,12 +539,13 @@ class ActionEngine:
             effects or [],
             writebacks or [],
             "failed",
-            (None, None, message),
+            (error_code, None, message),
             t0,
         )
         return ActionResult(
             action_name=action_name,
             outcome="failed",
+            error_code=error_code,
             message=message,
             audit_id=audit_id,
             request_id=request_id,

@@ -746,6 +746,7 @@ class TestActionRunFailed:
     """failed：引擎异常路径也落 action_runs（error 非空 + 审计可对账）。"""
 
     def test_engine_failure_records_run(self, client, monkeypatch) -> None:
+        """F1：failed 对外 error 只含稳定安全摘要，不回显原始异常文本（SQL/运行时细节）。"""
         rt = client.app.state.runtime
         handler = rt.engine._handlers["cancel_order"]
         monkeypatch.setattr(
@@ -762,9 +763,17 @@ class TestActionRunFailed:
         data = r.json()["data"]
         assert data["status"] == "failed"
         assert data["error"]  # 错误信息非空
+        # F1 red-team：原始异常文本不得泄漏到对外 error/message（含 SQL 等内部细节）
+        assert "boom" not in data["error"]
+        assert "RuntimeError" not in data["error"]
+        assert data["error_code"] == "EXECUTION_FAILED"
+        assert "EXECUTION_FAILED" in data["error"]
         assert data["audit_ref"]  # 引擎失败路径仍审计
         audit = _audit_row(client, data["audit_ref"])
         assert audit is not None and audit["outcome"] == "failed"
+        # audit_log.message 同为安全摘要（/audit 查询同样对外暴露 message 字段）
+        assert "boom" not in (audit["message"] or "")
+        assert "RuntimeError" not in (audit["message"] or "")
         # 源库零变更（引擎回滚）
         row = _source_row(
             client, "SELECT status FROM orders WHERE order_id=?", (ORDER_CONFIRMED,)

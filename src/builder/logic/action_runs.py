@@ -196,10 +196,13 @@ def _simulate_records(records: dict, result: ActionResult) -> dict:
 
 
 def _error_text(result: ActionResult) -> str:
-    """错误文本：业务码 + 消息（与 audit_log 同源；不回显 SQL/参数）。"""
+    """错误文本：业务码 + 消息（与 audit_log 同源；不回显 SQL/参数/原始异常）。"""
     if result.outcome == "rejected" and result.error_code:
         return f"{result.error_code}: {result.message or ''}".strip()
     if result.outcome == "failed":
+        # failed 的 message 已是引擎侧安全摘要（F1：原始异常只进日志）
+        if result.error_code:
+            return f"{result.error_code}: {result.message or ''}".strip()
         return result.message or "failed"
     return ""
 
