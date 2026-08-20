@@ -49,11 +49,11 @@ function okBody(linkName: string, direction: string, objects: unknown[]) {
 
 const noop = () => {};
 
-function renderLinkNav(linkName: string) {
+function renderLinkNav(linkName: string, source = sourceMeta, pk = 'ORD-1') {
   return render(
     <LinkNav
-      sourceType={sourceMeta}
-      sourcePk="ORD-1"
+      sourceType={source}
+      sourcePk={pk}
       linkName={linkName}
       links={links}
       objectTypes={objectTypes}
@@ -100,6 +100,28 @@ describe('LinkNav 链接遍历方向（TD-14）', () => {
     renderLinkNav('customer.orders');
     await waitFor(() => {
       expect(lastUrl()).toContain('/objects/order/ORD-1/links/order.customer?direction=out');
+    });
+  });
+
+  it('Customer（target 侧）出向打开 → 请求反向名 + out（上版盲区，已修复）', async () => {
+    mockFetch.mockResolvedValue(okBody('customer.orders', 'out', []));
+    renderLinkNav('customer.orders', customerMeta, 'CUS-1');
+    await waitFor(() => {
+      expect(lastUrl()).toContain('/objects/customer/CUS-1/links/customer.orders?direction=out');
+    });
+  });
+
+  it('Customer（target 侧）切反向 → 请求正向名 + in', async () => {
+    mockFetch.mockResolvedValue(okBody('customer.orders', 'out', []));
+    renderLinkNav('customer.orders', customerMeta, 'CUS-1');
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    mockFetch.mockResolvedValue(okBody('order.customer', 'in', []));
+    const rev = screen.getByRole('button', { name: /反\s*向/ });
+    rev.click();
+    await waitFor(() => {
+      expect(lastUrl()).toContain('/objects/customer/CUS-1/links/order.customer?direction=in');
     });
   });
 });

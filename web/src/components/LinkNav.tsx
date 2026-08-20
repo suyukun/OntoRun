@@ -35,18 +35,23 @@ export default function LinkNav({
     () => links.find((l) => l.name === linkName || l.inverse_name === linkName),
     [links, linkName],
   );
+  // 当前对象在该链接的哪一侧（决定请求名与另一端类型）：
+  // source 侧：out=name / in=inverse_name；target 侧：out=inverse_name / in=name。
+  const isSource = linkDef ? linkDef.source_type === sourceType.name : null;
 
   const load = useCallback(
     async (dir: string) => {
       setLoading(true);
       try {
-        // TD-14 修复：请求名必须与方向匹配——out 用正向名 name、in 用反向名
-        // inverse_name（后端按「名 + 方向 + 端点」严格匹配，传错组合即 404）。
-        const name = linkDef
-          ? dir === 'out'
-            ? linkDef.name
-            : linkDef.inverse_name
-          : linkName;
+        // TD-14 修复：请求名必须与「方向 + 当前对象所在侧」匹配，否则后端 404
+        // （后端按「名 + 方向 + 端点」严格匹配：out=name+source / inverse+target，
+        //   in=inverse+source / name+target）。
+        let name = linkName;
+        if (linkDef && isSource !== null) {
+          const forward = isSource ? linkDef.name : linkDef.inverse_name;
+          const backward = isSource ? linkDef.inverse_name : linkDef.name;
+          name = dir === 'out' ? forward : backward;
+        }
         const data = await fetchLinkTraversal(sourceType.api_name, sourcePk, name, dir);
         setObjects(data.objects);
       } catch (err) {
@@ -55,12 +60,14 @@ export default function LinkNav({
         setLoading(false);
       }
     },
-    [t, sourcePk, linkName, sourceType.api_name, linkDef],
+    [t, sourcePk, linkName, sourceType.api_name, linkDef, isSource, sourceType.name],
   );
 
   useEffect(() => { void load(direction); }, [load, linkName, direction]);
 
-  const targetTypeName = linkDef ? (direction === 'out' ? linkDef.target_type : linkDef.source_type) : '';
+  // 另一端对象类型：与方向无关，只取决于当前对象在链接的哪一侧
+  const targetTypeName =
+    linkDef && isSource !== null ? (isSource ? linkDef.target_type : linkDef.source_type) : '';
   const targetType = objectTypes.find((x) => x.name === targetTypeName);
 
   const columns = targetType
