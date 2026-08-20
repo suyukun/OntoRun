@@ -12,6 +12,18 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+# ----------------------------------------------------------------------
+# 操作者白名单单一来源（TD-9 / red-team F3）
+# ----------------------------------------------------------------------
+# audit_log.actor 与 action_runs.executed_by 的 CHECK 值、运行时校验
+# （action_engine.ALLOWED_ACTORS 由此导入）、API 层 X-Actor 白名单，全部同源，
+# 防 schema 字面量与运行时校验双轨漂移。DDL 内经 _ACTOR_VALUES_ 占位符替换注入。
+ALLOWED_ACTORS: tuple[str, ...] = ("human", "llm", "api")
+
+# CHECK 值片段：由 ALLOWED_ACTORS 派生（repr 单引号 -> SQL 字面量）。
+# 仅本模块一处可改，改后 audit_log / action_runs 的 CHECK 与运行时校验同步生效。
+ACTOR_VALUES_SQL: str = "(" + ",".join(repr(a) for a in ALLOWED_ACTORS) + ")"
+
 SCHEMA_VERSION = 1
 
 ONTOLOGY_SCHEMA = """
@@ -19,7 +31,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   audit_id          TEXT PRIMARY KEY,
   ts                TEXT NOT NULL,
   action_name       TEXT NOT NULL,
-  actor             TEXT NOT NULL CHECK (actor IN ('human','llm','api')),
+  actor             TEXT NOT NULL CHECK (actor IN _ACTOR_VALUES_),
   actor_detail      TEXT NOT NULL DEFAULT '',
   request_id        TEXT NOT NULL DEFAULT '',
   params_json       TEXT NOT NULL,
@@ -47,7 +59,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action_name);
 CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_log(outcome);
-"""
+""".replace("_ACTOR_VALUES_", ACTOR_VALUES_SQL)
 
 # ======================================================================
 # BUILDER_SCHEMA_V1 —— 本体构建子系统 10 张表（蓝图 v0.3 §4 / 补丁 v0.3.1）
@@ -58,6 +70,29 @@ CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_log(outcome);
 # ======================================================================
 
 BUILDER_SCHEMA_VERSION = 1
+
+# action_runs 表列定义单一来源（TD-9）：BUILDER_SCHEMA 建表与 v4 迁移重建共用，
+# 保证存量库重建后表结构与新库完全一致（不双轨漂移）。CHECK 值经 _ACTOR_VALUES_
+# 占位符由模块顶部 ALLOWED_ACTORS 派生（与 audit_log.actor 同源）。
+ACTION_RUNS_COLUMNS = """  id              TEXT PRIMARY KEY,
+  action_type_id  TEXT NOT NULL,
+  before_snapshot_json TEXT NOT NULL DEFAULT '{}',
+  after_snapshot_json  TEXT NOT NULL DEFAULT '{}',
+  status          TEXT NOT NULL CHECK (status IN ('applied','rejected','failed','dry_run')),
+  error           TEXT NOT NULL DEFAULT '',
+  executed_by     TEXT NOT NULL DEFAULT 'api' CHECK (executed_by IN _ACTOR_VALUES_),
+  -- TD-9（v4 patch）：executed_by 白名单 CHECK，与 audit_log.actor 同源。
+  -- v3 patch（P4/E6）：audit_ref 引用 audit_log.audit_id（对账锚点）。
+  -- audit_log 仍是运行时审计权威；action_runs 只引用不复制（单一真相，不双轨漂移）。
+  audit_ref       TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL
+"""
+
+# 占位符解析后的最终列定义（CHECK 值由 ALLOWED_ACTORS 派生注入）：
+# BUILDER_SCHEMA 建表与 v4 迁移重建共用此单一来源，保证两处 DDL 完全一致。
+ACTION_RUNS_COLUMNS_SQL: str = ACTION_RUNS_COLUMNS.replace(
+    "_ACTOR_VALUES_", ACTOR_VALUES_SQL
+)
 
 # BUILDER_TABLES 单一来源（red-team I3）：从下方 BUILDER_SCHEMA DDL 自动解析。
 # 任何增删 CREATE TABLE 都会自动反映到 BUILDER_TABLES，避免双轨漂移。
@@ -191,21 +226,83 @@ CREATE INDEX IF NOT EXISTS idx_action_types_name ON action_types(name);
 CREATE INDEX IF NOT EXISTS idx_action_types_status ON action_types(status);
 
 CREATE TABLE IF NOT EXISTS action_runs (
-  id              TEXT PRIMARY KEY,
-  action_type_id  TEXT NOT NULL,
-  before_snapshot_json TEXT NOT NULL DEFAULT '{}',
-  after_snapshot_json  TEXT NOT NULL DEFAULT '{}',
-  status          TEXT NOT NULL CHECK (status IN ('applied','rejected','failed','dry_run')),
-  error           TEXT NOT NULL DEFAULT '',
-  executed_by     TEXT NOT NULL DEFAULT 'api',
-  -- v3 patch（P4/E6）：audit_ref 引用 audit_log.audit_id（对账锚点）。
-  -- audit_log 仍是运行时审计权威；action_runs 只引用不复制（单一真相，不双轨漂移）。
-  audit_ref       TEXT NOT NULL DEFAULT '',
-  created_at      TEXT NOT NULL
+__ACTION_RUNS_COLUMNS__
 );
 CREATE INDEX IF NOT EXISTS idx_action_runs_type ON action_runs(action_type_id);
 CREATE INDEX IF NOT EXISTS idx_action_runs_status ON action_runs(status);
-"""
+""".replace("__ACTION_RUNS_COLUMNS__", ACTION_RUNS_COLUMNS_SQL)
+
+
+def _patch_action_runs_executed_by_check(conn: sqlite3.Connection) -> None:
+    """v4 patch（TD-9）：action_runs.executed_by 补 CHECK 白名单。
+
+    SQLite 不支持 ALTER TABLE ... ADD CONSTRAINT，采用重建表迁移：单事务内
+    建新表（含 CHECK）→ 拷数据 → 换名 → 重建索引；失败整体回滚，不丢数据。
+    新库（BUILDER_SCHEMA 已含 CHECK）与已迁移库经 sqlite_master 检出后幂等跳过。
+    存量数据含白名单外 executed_by 时 INSERT..SELECT 触发 CHECK 失败 -> 回滚
+    （不破坏数据；当前演示/测试数据均为合法 actor，无实际阻塞）。
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='action_runs'"
+    ).fetchone()
+    if row is None:
+        return
+    if "CHECK (executed_by IN" in (row[0] or ""):
+        return
+    # 防御性前置：重建列清单依赖 audit_ref 存在（v3 patch 已先执行，此处再兜底）
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(action_runs)").fetchall()}
+    if "audit_ref" not in cols:
+        conn.execute(
+            "ALTER TABLE action_runs ADD COLUMN audit_ref TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DROP INDEX IF EXISTS idx_action_runs_type")
+        conn.execute("DROP INDEX IF EXISTS idx_action_runs_status")
+        conn.execute(
+            f"CREATE TABLE action_runs_new (\n{ACTION_RUNS_COLUMNS_SQL})"
+        )
+        conn.execute(
+            "INSERT INTO action_runs_new (id, action_type_id, before_snapshot_json, "
+            "after_snapshot_json, status, error, executed_by, audit_ref, created_at) "
+            "SELECT id, action_type_id, before_snapshot_json, after_snapshot_json, "
+            "status, error, executed_by, audit_ref, created_at FROM action_runs"
+        )
+        conn.execute("DROP TABLE action_runs")
+        conn.execute("ALTER TABLE action_runs_new RENAME TO action_runs")
+        conn.execute(
+            "CREATE INDEX idx_action_runs_type ON action_runs(action_type_id)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_action_runs_status ON action_runs(status)"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _apply_builder_patches(conn: sqlite3.Connection) -> None:
+    """builder 段幂等补丁（v2/v3/v4）单一实现：migrate 与 init_builder_schema
+    共用，防两处逻辑双轨漂移。
+
+    - v2：link_types.fk_field（idempotent ALTER）；
+    - v3：action_runs.audit_ref（idempotent ALTER）；
+    - v4（TD-9）：action_runs.executed_by CHECK 白名单（重建表迁移）。
+    """
+    # v2 patch：link_types 加 fk_field（idempotent）。
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
+    if "fk_field" not in cols:
+        conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
+    # v3 patch（P4/E6）：action_runs 加 audit_ref（idempotent）。
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(action_runs)").fetchall()}
+    if "audit_ref" not in cols:
+        conn.execute(
+            "ALTER TABLE action_runs ADD COLUMN audit_ref TEXT NOT NULL DEFAULT ''"
+        )
+    # v4 patch（TD-9）：action_runs.executed_by CHECK 白名单。
+    _patch_action_runs_executed_by_check(conn)
 
 
 def init_builder_schema(conn: sqlite3.Connection) -> None:
@@ -225,20 +322,14 @@ def init_builder_schema(conn: sqlite3.Connection) -> None:
         "version INTEGER PRIMARY KEY, note TEXT NOT NULL, applied_at TEXT NOT NULL)"
     )
     conn.executescript(BUILDER_SCHEMA)
-    # v2 patch：link_types 加 fk_field（idempotent）。
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
-    if "fk_field" not in cols:
-        conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
-    # v3 patch（P4/E6）：action_runs 加 audit_ref（idempotent）。
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(action_runs)").fetchall()}
-    if "audit_ref" not in cols:
-        conn.execute("ALTER TABLE action_runs ADD COLUMN audit_ref TEXT NOT NULL DEFAULT ''")
+    _apply_builder_patches(conn)
     runtime_note = (
         "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
     )
     builder_note = (
         "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；"
-        "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref"
+        "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref；"
+        "v4 patch: action_runs.executed_by CHECK（TD-9）"
     )
     conn.execute(
         "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
@@ -306,31 +397,25 @@ class Store:
         loader 用此列做 link_types 入 Registry 的 fk_field 校验。
         v3 patch（P4/E6）：action_runs 加 audit_ref 列（idempotent ALTER）。
         action_runs 引用 audit_log.audit_id 对账，不复制审计真相。
+        v4 patch（TD-9）：action_runs.executed_by 补 CHECK 白名单（重建表迁移，
+        SQLite 无 ALTER ADD CONSTRAINT；单事务保数据，幂等跳过已迁移库）。
         """
         runtime_note = (
             "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
         )
         builder_note = (
             "含 builder 子系统 10 表（蓝图 v0.3 §4 / 补丁 v0.3.1）；"
-            "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref"
+            "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref；"
+            "v4 patch: action_runs.executed_by CHECK（TD-9）"
         )
         merged_note = f"{runtime_note}；{builder_note}"
         conn = self.ontology_conn()
         try:
             conn.executescript(ONTOLOGY_SCHEMA)
             conn.executescript(BUILDER_SCHEMA)
-            # v2 patch：link_types 加 fk_field（idempotent）。
-            # PRAGMA table_info 返回列序 [cid, name, type, notnull, dflt_value, pk]，
-            # 不依赖 row_factory；索引 1 = name。
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(link_types)").fetchall()}
-            if "fk_field" not in cols:
-                conn.execute("ALTER TABLE link_types ADD COLUMN fk_field TEXT NOT NULL DEFAULT ''")
-            # v3 patch（P4/E6）：action_runs 加 audit_ref（idempotent）。
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(action_runs)").fetchall()}
-            if "audit_ref" not in cols:
-                conn.execute(
-                    "ALTER TABLE action_runs ADD COLUMN audit_ref TEXT NOT NULL DEFAULT ''"
-                )
+            # v2/v3/v4 幂等补丁单一实现（PRAGMA table_info 返回列序
+            # [cid, name, type, notnull, dflt_value, pk]，索引 1 = name）。
+            _apply_builder_patches(conn)
             # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "

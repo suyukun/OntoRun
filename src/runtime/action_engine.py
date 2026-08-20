@@ -11,8 +11,9 @@
 - 写回与索引同事务语义：源库提交成功才更新索引；索引/本体库失败 → 审计记 failed + 告警（可对账）；
 - 效果计算是纯函数（可单测、可重放，审计 diff 来源）；
 - 一切写操作只能经 execute()（无泛化 update，D-T3）；
-- 审计完整性：actor 白名单（human/llm/api）与 audit_log CHECK 同源，非法 actor
-  在写源库前拒绝（failed），保证"源库已写则必有审计"（补偿式承诺的底线）。
+- 审计完整性：actor 白名单（human/llm/api）与 audit_log / action_runs 的 CHECK
+  同源（src.runtime.store.ALLOWED_ACTORS 单一来源，TD-9），非法 actor 在写源库前
+  拒绝（failed），保证"源库已写则必有审计"（补偿式承诺的底线）。
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from src.ontology.objects import OWN_ONTOLOGY, field_ownership
 from src.ontology.registry import Registry
 from src.runtime.audit import AuditLog, AuditRecord, _j
 from src.runtime.index import ObjectIndex
-from src.runtime.store import Store
+from src.runtime.store import ALLOWED_ACTORS, Store
 
 # §4.3 错误码 → 中文消息（API 层信封错误也复用）
 ERROR_MESSAGES: dict[str, str] = {
@@ -62,9 +63,9 @@ FAILED_MESSAGE_SYNC = "本体库同步失败（源库已变更，需对账）"
 
 logger = logging.getLogger(__name__)
 
-# 合法操作者（与 audit_log 的 CHECK 约束同源，store.py ONTOLOGY_SCHEMA；
-# API 层 X-Actor 白名单引用同一常量，防双轨漂移）
-ALLOWED_ACTORS: tuple[str, ...] = ("human", "llm", "api")
+# 合法操作者：单一来源 = src.runtime.store.ALLOWED_ACTORS（TD-9 收口）。
+# audit_log.actor / action_runs.executed_by 的 CHECK 与 API 层 X-Actor 白名单
+# 均引用同一常量，防双轨漂移；此处仅导入不重定义。
 
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 

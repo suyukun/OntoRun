@@ -1227,3 +1227,160 @@ class TestEngineExtensionCompat:
             client, "SELECT status FROM orders WHERE order_id=?", (ORDER_SHIPPED,)
         )
         assert row["status"] == "shipped"
+
+
+# ======================================================================
+# TD-9：action_runs.executed_by CHECK 白名单（schema 层收口）
+# ======================================================================
+
+
+class TestExecutedByCheck:
+    """TD-9：executed_by 白名单 CHECK（与 audit_log.actor 同源）在 DDL 层生效。"""
+
+    def test_illegal_executed_by_direct_insert_rejected(self, client) -> None:
+        """绕过应用层直插白名单外 executed_by -> IntegrityError（schema 兜底）。"""
+        import sqlite3
+
+        store = client.app.state.runtime.store
+        with store.ontology_conn() as conn:
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+                conn.execute(
+                    "INSERT INTO action_runs (id, action_type_id, before_snapshot_json, "
+                    "after_snapshot_json, status, error, executed_by, audit_ref, "
+                    "created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        "arun_illegal_actor",
+                        "at_cancel_order",
+                        "{}",
+                        "{}",
+                        "applied",
+                        "",
+                        "robot",
+                        "",
+                        "2026-08-20 00:00:00",
+                    ),
+                )
+            conn.rollback()  # 失败事务回滚，保持连接干净
+
+    def test_legal_executed_by_values_accepted(self, client) -> None:
+        """白名单内三个值均可直插（human/llm/api）。"""
+        store = client.app.state.runtime.store
+        with store.ontology_conn() as conn:
+            for i, actor in enumerate(("human", "llm", "api")):
+                conn.execute(
+                    "INSERT INTO action_runs (id, action_type_id, before_snapshot_json, "
+                    "after_snapshot_json, status, error, executed_by, audit_ref, "
+                    "created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        f"arun_ok_{i}",
+                        "at_cancel_order",
+                        "{}",
+                        "{}",
+                        "dry_run",
+                        "",
+                        actor,
+                        "",
+                        "2026-08-20 00:00:00",
+                    ),
+                )
+            conn.commit()
+        with store.ontology_conn() as conn:
+            got = {
+                r["executed_by"]
+                for r in conn.execute(
+                    "SELECT executed_by FROM action_runs WHERE id LIKE 'arun_ok_%'"
+                ).fetchall()
+            }
+        assert got == {"human", "llm", "api"}
+
+    def test_check_values_same_source_as_allowed_actors(self) -> None:
+        """同源机器检查：audit_log / action_runs 的 CHECK 值 == ALLOWED_ACTORS 派生值。"""
+        from src.runtime import store as store_mod
+        from src.runtime.action_engine import ALLOWED_ACTORS
+
+        assert ALLOWED_ACTORS is store_mod.ALLOWED_ACTORS, "运行时校验必须与 store 单一来源"
+        values_sql = "(" + ",".join(repr(a) for a in ALLOWED_ACTORS) + ")"
+        assert f"CHECK (actor IN {values_sql})" in store_mod.ONTOLOGY_SCHEMA
+        assert f"CHECK (executed_by IN {values_sql})" in store_mod.BUILDER_SCHEMA
+
+    def test_migrate_rebuilds_action_runs_with_check_preserving_data(
+        self, tmp_path
+    ) -> None:
+        """存量库（无 CHECK）经 Store.migrate 重建 action_runs：数据保留 + 约束生效。"""
+        import sqlite3
+
+        from src.runtime.store import Store
+
+        db = tmp_path / "legacy_ontology.db"
+        conn = sqlite3.connect(db)
+        # 旧版 action_runs（TD-9 之前：无 executed_by CHECK）+ audit_log
+        conn.executescript(
+            "CREATE TABLE audit_log ("
+            "audit_id TEXT PRIMARY KEY, ts TEXT NOT NULL, action_name TEXT NOT NULL, "
+            "actor TEXT NOT NULL CHECK (actor IN ('human','llm','api')), "
+            "actor_detail TEXT NOT NULL DEFAULT '', request_id TEXT NOT NULL DEFAULT '', "
+            "params_json TEXT NOT NULL, preconditions_json TEXT NOT NULL DEFAULT '[]', "
+            "effects_json TEXT NOT NULL DEFAULT '[]', writeback_json TEXT NOT NULL DEFAULT '[]', "
+            "outcome TEXT NOT NULL CHECK (outcome IN ('applied','rejected','failed')), "
+            "error_code TEXT, message TEXT, detail_json TEXT, duration_ms INTEGER NOT NULL DEFAULT 0"
+            ");"
+        )
+        conn.executescript(
+            "CREATE TABLE action_runs ("
+            "id TEXT PRIMARY KEY, action_type_id TEXT NOT NULL, "
+            "before_snapshot_json TEXT NOT NULL DEFAULT '{}', "
+            "after_snapshot_json TEXT NOT NULL DEFAULT '{}', "
+            "status TEXT NOT NULL CHECK (status IN ('applied','rejected','failed','dry_run')), "
+            "error TEXT NOT NULL DEFAULT '', executed_by TEXT NOT NULL DEFAULT 'api', "
+            "audit_ref TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL"
+            ");"
+        )
+        conn.execute(
+            "INSERT INTO action_runs (id, action_type_id, before_snapshot_json, "
+            "after_snapshot_json, status, error, executed_by, audit_ref, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                "arun_legacy",
+                "at_cancel_order",
+                "{}",
+                "{}",
+                "applied",
+                "",
+                "llm",
+                "audit_legacy",
+                "2026-08-01 00:00:00",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        Store(ontology_path=db).migrate()
+
+        conn = sqlite3.connect(db)
+        (ddl,) = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='action_runs'"
+        ).fetchone()
+        assert "CHECK (executed_by IN" in ddl, "迁移后必须带 executed_by CHECK"
+        row = conn.execute(
+            "SELECT executed_by, audit_ref, status FROM action_runs WHERE id=?",
+            ("arun_legacy",),
+        ).fetchone()
+        assert tuple(row) == ("llm", "audit_legacy", "applied"), "存量数据必须保留"
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute(
+                "INSERT INTO action_runs (id, action_type_id, before_snapshot_json, "
+                "after_snapshot_json, status, error, executed_by, audit_ref, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    "arun_bad",
+                    "x",
+                    "{}",
+                    "{}",
+                    "applied",
+                    "",
+                    "robot",
+                    "",
+                    "2026-08-20 00:00:00",
+                ),
+            )
+        conn.close()
