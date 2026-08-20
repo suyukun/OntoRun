@@ -741,6 +741,36 @@ class TestActionRunRejected:
         )
         assert row["status"] == "confirmed"
 
+    def test_dry_run_rejected_combination(self, client) -> None:
+        """TD-13(b)：dry_run + 前置被拒组合 -> status=rejected 且 audit_ref 非空。
+
+        拒绝优先于 dry_run 模拟（引擎早退语义不变）：dry_run 请求 + 前置不满足
+        = rejected（非 dry_run），审计照落，audit_ref 可对账，源库零变更。
+        """
+        r = client.post(
+            "/api/v1/builder/actions/cancel_order/run",
+            headers={"X-Actor": "llm"},
+            json={"params": {"order_id": ORDER_SHIPPED}, "dry_run": True},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["outcome"] == "rejected"
+        data = body["data"]
+        assert data["status"] == "rejected"
+        assert data["dry_run"] is True  # 请求是 dry_run，但拒绝路径优先
+        assert data["error_code"] == "SHIPPED_ORDER_CANNOT_BE_CANCELLED"
+        assert "SHIPPED_ORDER_CANNOT_BE_CANCELLED" in data["error"]
+        # 拒绝路径审计照落：audit_ref 非空且可对账（对账锚点不缺失）
+        assert data["audit_ref"]
+        audit = _audit_row(client, data["audit_ref"])
+        assert audit is not None and audit["outcome"] == "rejected"
+        # 源库零变更 + 快照语义（after == before）
+        row = _source_row(
+            client, "SELECT status FROM orders WHERE order_id=?", (ORDER_SHIPPED,)
+        )
+        assert row["status"] == "shipped"
+        assert data["after_snapshot"] == data["before_snapshot"]
+
 
 class TestActionRunFailed:
     """failed：引擎异常路径也落 action_runs（error 非空 + 审计可对账）。"""
@@ -779,6 +809,98 @@ class TestActionRunFailed:
             client, "SELECT status FROM orders WHERE order_id=?", (ORDER_CONFIRMED,)
         )
         assert row["status"] == "confirmed"
+
+    def test_failed_with_effects_after_rereads_source_new_value(
+        self, client, monkeypatch
+    ) -> None:
+        """TD-13(a)：failed + 有 effects 分支（源库已提交但本体同步失败）。
+
+        引擎 ⑦ 同步失败 -> FAILED_CODE_SYNC + effects 存在 -> after 重读源库新值
+        （cancelled），源库状态如实反映，audit_ref 可对账（对账缺口测试）。
+        """
+        rt = client.app.state.runtime
+        monkeypatch.setattr(
+            rt.engine.index,
+            "refresh_many",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("sync-boom")),
+        )
+        r = client.post(
+            "/api/v1/builder/actions/cancel_order/run",
+            headers={"X-Actor": "api"},
+            json={"params": {"order_id": ORDER_CONFIRMED, "reason": "TD-13a"}},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["outcome"] == "failed"
+        data = body["data"]
+        assert data["status"] == "failed"
+        assert data["error_code"] == "ONTOLOGY_SYNC_FAILED"
+        # effects 存在（failed 且 pairs 非空 -> after 走重读分支）
+        assert data["effects"], "failed 分支必须带 effects（源库已提交）"
+        effect_keys = {(e["object_type"], e["prop"]) for e in data["effects"]}
+        assert ("Order", "status") in effect_keys
+        # after 重读源库新值：cancelled（源库已变，如实反映）
+        after_order = data["after_snapshot"]["records"]["Order"][ORDER_CONFIRMED]
+        assert after_order["status"] == "cancelled"
+        before_order = data["before_snapshot"]["objects"]["order"]
+        assert after_order["status"] != before_order["status"]
+        # audit_ref 对账：failed 审计存在
+        assert data["audit_ref"]
+        audit = _audit_row(client, data["audit_ref"])
+        assert audit is not None and audit["outcome"] == "failed"
+        # 源库状态如实：cancelled（本体库同步失败不掩盖源库已变）
+        row = _source_row(
+            client, "SELECT status FROM orders WHERE order_id=?", (ORDER_CONFIRMED,)
+        )
+        assert row["status"] == "cancelled"
+
+    def test_snapshot_reread_failure_records_failed_run(
+        self, client, monkeypatch
+    ) -> None:
+        """TD-11 回归：after 快照重读异常不冒泡丢行——降级 failed run + 对账闭合。
+
+        注入重读异常（applied 已提交 + 审计已落）：action_runs 必须仍有 failed 行，
+        audit_ref 保留引擎侧审计锚点可对账，error 用 F1 安全摘要（不回显原始异常），
+        源库状态如实反映（cancelled）。
+        """
+        import src.builder.logic.action_runs as ar
+
+        def _boom(store, registry, pairs):
+            raise RuntimeError("boom-snapshot")
+
+        monkeypatch.setattr(ar, "_reread_records", _boom)
+        r = client.post(
+            "/api/v1/builder/actions/cancel_order/run",
+            headers={"X-Actor": "api"},
+            json={"params": {"order_id": ORDER_CONFIRMED, "reason": "TD-11"}},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["outcome"] == "failed"
+        data = body["data"]
+        assert data["status"] == "failed"
+        # F1 口径：error 只含稳定安全摘要，不回显原始异常文本
+        assert "boom-snapshot" not in data["error"]
+        assert "EXECUTION_FAILED" in data["error"]
+        assert data["error_code"] == "EXECUTION_FAILED"
+        # after_snapshot 显式降级标记（不伪造数据）
+        assert data["after_snapshot"]["degraded"] is True
+        # 不丢行：GET /runs 可见该 failed 行（TD-11 对账缺口修复的核心）
+        r2 = client.get("/api/v1/builder/actions/cancel_order/runs")
+        assert r2.status_code == 200
+        items = r2.json()["data"]["items"]
+        assert any(i["id"] == data["run_id"] and i["status"] == "failed" for i in items)
+        # audit_ref 对账：引擎侧审计（applied）已落，failed run 引用它 -> 对账闭合
+        assert data["audit_ref"]
+        audit = _audit_row(client, data["audit_ref"])
+        assert audit is not None
+        assert audit["action_name"] == "cancel_order"
+        assert audit["outcome"] == "applied"  # 源库已提交，审计如实为 applied
+        # 源库状态如实反映（不因快照失败而掩盖已发生的写回）
+        row = _source_row(
+            client, "SELECT status FROM orders WHERE order_id=?", (ORDER_CONFIRMED,)
+        )
+        assert row["status"] == "cancelled"
 
 
 class TestActionRunsListing:
