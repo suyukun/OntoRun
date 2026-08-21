@@ -1,4 +1,4 @@
-"""LLM 提取子包。
+"""LLM 提取子包（蓝图 v0.3）。
 
 E3 文档 → 实体/关系/动作；入库前七道校验器（fatal/error/warning/info）：
 1. 结构（合法 JSON、必含 entities 数组）

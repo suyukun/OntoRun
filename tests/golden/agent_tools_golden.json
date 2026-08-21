@@ -222,8 +222,10 @@
           "object_type": {
             "description": "对象类型 API 名",
             "enum": [
+              "code",
               "customer",
               "inventory",
+              "material",
               "order",
               "order_item",
               "product",
