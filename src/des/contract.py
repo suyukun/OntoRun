@@ -49,7 +49,6 @@ from src.ontology import build_registry
 from src.ontology.registry import Registry
 from src.runtime.permissions import (
     PermissionDecision,
-    PermissionRegistry,
     PermissionSubject,
 )
 
@@ -157,7 +156,7 @@ class PermissionContext:
     permission_registry: PermissionDecider
 
     @classmethod
-    def deny_all(cls, subject: PermissionSubject | None = None) -> "PermissionContext":
+    def deny_all(cls, subject: PermissionSubject | None = None) -> PermissionContext:
         """默认 deny 上下文（fail-closed）：一切操作判定 denied（read 直接拒答）。
 
         ContractExecutor 未显式传 ctx 时的缺省——无 ctx ≠ 无权限校验。
@@ -168,7 +167,7 @@ class PermissionContext:
         )
 
     @classmethod
-    def allow_all(cls, subject: PermissionSubject | None = None) -> "PermissionContext":
+    def allow_all(cls, subject: PermissionSubject | None = None) -> PermissionContext:
         """显式 allow-all 上下文（内部工具/测试口径）：read 全属性可见。
 
         仅一次性脚本/内部对账工具显式选择；生产查询不得使用（权限开关必须显式可见）。
@@ -790,7 +789,7 @@ class ContractExecutor:
             link = _find_link(self._registry, obj, link_traversal["link"])
             target = self._registry.object_type(link.target_type)
             # red-team P1-2：link 返回列显式白名单（已过目标可见集校验，禁 SELECT * 直读）
-            cols = ", ".join([link.fk_field, "code_space", "value"])
+            cols = f"{link.fk_field}, code_space, value"
             for c in rows_as_dicts(self._conn, f"SELECT {cols} FROM {target.source_table}", []):
                 by_pk[c[link.fk_field]].append({"code_space": c["code_space"], "value": c["value"]})
             for codes in by_pk.values():
