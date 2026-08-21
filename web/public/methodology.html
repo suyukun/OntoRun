@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OntoRun 方法论 · OSLM / OSL-6 指针版</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 960px; margin: 0 auto; padding: 24px; color: #1f2933; line-height: 1.6; }
+  h1 { font-size: 24px; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+  h2 { font-size: 18px; color: #2563eb; margin-top: 32px; }
+  .stage { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px 20px; margin: 12px 0; background: #f9fafb; }
+  .stage h3 { margin: 0 0 8px; font-size: 16px; }
+  .stage .step { color: #6b7280; font-size: 13px; }
+  .evidence { margin-top: 8px; font-size: 13px; color: #374151; }
+  .evidence a { color: #2563eb; text-decoration: none; margin-right: 12px; }
+  .evidence a:hover { text-decoration: underline; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .status { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+  .done { background: #dcfce7; color: #166534; }
+  .wip { background: #fef9c3; color: #854d0e; }
+  .note { font-size: 13px; color: #6b7280; border-left: 3px solid #2563eb; padding-left: 12px; margin: 24px 0; }
+</style>
+</head>
+<body>
+<h1>本体语义层落地方法论（OSLM）· 语义落地六步法（OSL-6）</h1>
+<p>核心主张：<strong>大模型要操作企业，必须先有现实世界的语义层当接口。</strong>本页为指针版（S2 范围）：每一步链到 OntoRun 的真实运行证据（git commit + 文档），不展示静态图文。</p>
+<p>状态：<span class="status done">M1 DES 切片 ✅</span> <span class="status done">M2 ChatBI 闭环 ✅</span> <span class="status done">M3 治理可信 ✅</span> <span class="status wip">M4 方法论+发布 🔄</span></p>
+
+<h2>六阶段（每步 = 输入 / 做什么 / 输出 / 验收 / 真实证据）</h2>
+
+<div class="stage">
+  <h3>① 定界（准备）</h3>
+  <div class="step">划竖井系统边界 → 定首个端到端流程 → 定量级目标 → 定首个可机验「穿通问题」</div>
+  <div class="evidence">证据：
+    <a href="/docs/P1a-DES-配置与表结构设计_v0.1.md">P1a 设计</a>
+    <a href="/docs/S2-P1a-垂直切片完成记录.md">P1a 完成记录</a>
+    <a href="/docs/S2-P1b-横向铺开完成记录.md">P1b 完成记录（100 万行量级）</a>
+    <code>commit 5a0359f · c46eb1b · 742f4f6 · 5da48ed</code>
+  </div>
+</div>
+
+<div class="stage">
+  <h3>② 建模（业务语义建模）</h3>
+  <div class="step">业务概念 → 本体对象/链接/动作（领域优先，不是表优先）；schema 一处分发四处消费</div>
+  <div class="evidence">证据：
+    <a href="/docs/P1a-本体映射与查询契约设计_v0.1.md">本体设计</a>
+    <a href="/docs/P2-ChatBI闭环设计_v0.1.md">指标模型（26 指标）</a>
+    <code>commit b922baa · 35a34aa · 8b1baae（4 对象注册）</code>
+  </div>
+</div>
+
+<div class="stage">
+  <h3>③ 映射（数据映射治理）</h3>
+  <div class="step">源表字段 → 本体 target：候选 + 分级置信度 + 人工审核 + 入注册表；recall@5 ≥ 80%</div>
+  <div class="evidence">证据：
+    <a href="/docs/P3-映射治理设计_v0.1.md">P3 设计</a>
+    <a href="/docs/P1.5-治理骨架设计_v0.1.md">打标骨架</a>
+    <a href="/docs/S2-redteam-处置记录.md">red-team 处置（C4 死锁修复）</a>
+    <code>commit 9931bb8 · 1fa251e · 508614c · 6613d80（62 条 GT recall@5=1.0）</code>
+  </div>
+</div>
+
+<div class="stage">
+  <h3>④ 成体（Ontology 构建）</h3>
+  <div class="step">映射审核后注册 + 自检 + 跨系统物化（join key 对齐竖井）；无孤儿、reconcile diff=0</div>
+  <div class="evidence">证据：
+    <a href="/docs/S2-P1a-垂直切片完成记录.md">本体映射</a>
+    <a href="/docs/S2-P2-ChatBI闭环完成记录.md">DuckDB 物化（26 指标 reconcile 全绿）</a>
+    <code>commit c46eb1b · 63a0fbb · 8b1baae</code>
+  </div>
+</div>
+
+<div class="stage">
+  <h3>⑤ 赋能（应用赋能）</h3>
+  <div class="step">ChatBI 读侧（对象→指标→物化）+ 动作写回 + 读权限；受限结构化查询为主路径</div>
+  <div class="evidence">证据：
+    <a href="/docs/P2-headtohead-实验报告v3.md">head-to-head v3（B 60% 首超 NL2SQL）</a>
+    <a href="/docs/P2-headtohead-实验报告v2.md">v2（语义面增补）</a>
+    <a href="/docs/S2-P4-完成记录.md">越权 0</a>
+    <code>commit 7c10f6f · bf8df12 · 0e67566 · 4f8344c · 0191344</code>
+  </div>
+</div>
+
+<div class="stage">
+  <h3>⑥ 运营（运营迭代）</h3>
+  <div class="step">审计 WORM + 权限治理 + 映射阈值随 GT 校准 + 会话不丢；问题注入迭代</div>
+  <div class="evidence">证据：
+    <a href="/docs/S2-P1.5-治理骨架完成记录.md">审计链</a>
+    <a href="/docs/S2-P4-完成记录.md">会话持久化 + 审计回填</a>
+    <a href="/docs/映射阈值校准报告_hc_precision.md">阈值校准</a>
+    <code>commit 9931bb8 · 9858f83 · 9f854df</code>
+  </div>
+</div>
+
+<h2>方法产物</h2>
+<ul>
+  <li>白皮书 v2（OSLM/OSL-6 + 10 铁律 + 15 反模式 + 10 张力点 + 中小企业裁剪）：<a href="/docs/白皮书_v2.md">docs/白皮书_v2.md</a></li>
+  <li>进度地图（阶段/步骤状态）：<a href="/docs/S2-进度地图.md">docs/S2-进度地图.md</a></li>
+  <li>独立对抗复核：<a href="/docs/red-team-p2p3-review.md">docs/red-team-p2p3-review.md</a>（23 项发现全部 P1/P2 已修）</li>
+</ul>
+
+<div class="note">指针版说明（D2 决策）：本页为 S2 指针版——每步链到真实运行/git commit，不做静态图文（防「数字盆景」反模式）；完整交互 UI 推 S3。数据源 = 本地 git 单一事实来源；发布期 GitHub 化后链接自动生效。</div>
+</body>
+</html>
