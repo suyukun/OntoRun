@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,7 +40,7 @@ MAPPING_KINDS: tuple[str, ...] = ("object", "attribute", "link")
 CONFIDENCE_LEVELS: tuple[str, ...] = ("high", "medium", "low")
 REVIEW_STATUSES: tuple[str, ...] = ("draft", "reviewing", "approved", "rejected")
 RETENTION_CLASSES: tuple[str, ...] = ("standard", "sensitive", "transient")
-AUDIT_SOURCES: tuple[str, ...] = ("action", "query", "review", "permission")
+AUDIT_SOURCES: tuple[str, ...] = ("action", "query", "review", "permission", "publish")
 
 
 def _sql_in(values: tuple[str, ...]) -> str:
@@ -458,6 +459,54 @@ def _apply_governance_patches(conn: sqlite3.Connection) -> None:
             "ALTER TABLE audit_log ADD COLUMN source TEXT NOT NULL DEFAULT 'action' "
             f"CHECK (source IN {_sql_in(AUDIT_SOURCES)})"
         )
+    _patch_audit_log_source_check(conn)
+
+
+def _patch_audit_log_source_check(conn: sqlite3.Connection) -> None:
+    """v5 patch（P3）：audit_log.source CHECK 补 'publish'（发布审计 source='publish'）。
+
+    P3 引入发布审计（action_name='mapping_publish', source='publish'），但存量库的
+    source CHECK 白名单（('action','query','review','permission')）不含 'publish'，
+    SQLite 无法 ALTER ADD CONSTRAINT。采用重建表迁移（仿 v4 action_runs.executed_by
+    先例）：单事务建新表（含新 CHECK）→ 拷数据 → 换名 → 重建索引与 WORM 触发器；
+    失败整体回滚不丢数据。存量哈希链 prev_hash/record_hash 原样拷贝，verify_integrity
+    不受影响。新库（source 列已按最新 AUDIT_SOURCES 建 CHECK）经 sqlite_master 检出
+    'publish' 后幂等跳过。
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='audit_log'"
+    ).fetchone()
+    if row is None or "publish" in (row[0] or ""):
+        return
+    new_sql = re.sub(
+        r"CHECK \(source IN \(.*?\)\)",
+        f"CHECK (source IN {_sql_in(AUDIT_SOURCES)})",
+        row[0],
+        flags=re.DOTALL,
+    )
+    cols = ",".join(r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall())
+    new_sql = re.sub(r"^CREATE TABLE audit_log", "CREATE TABLE audit_log_new", new_sql, count=1)
+    try:
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_log_wo_upd")
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_log_wo_del")
+        conn.execute(new_sql)
+        conn.execute(f"INSERT INTO audit_log_new ({cols}) SELECT {cols} FROM audit_log")
+        conn.execute("DROP TABLE audit_log")
+        conn.execute("ALTER TABLE audit_log_new RENAME TO audit_log")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_log(outcome)")
+        conn.execute(
+            "CREATE TRIGGER trg_audit_log_wo_upd BEFORE UPDATE ON audit_log "
+            "BEGIN SELECT RAISE(ABORT, 'audit_log 只读（WORM）'); END"
+        )
+        conn.execute(
+            "CREATE TRIGGER trg_audit_log_wo_del BEFORE DELETE ON audit_log "
+            "BEGIN SELECT RAISE(ABORT, 'audit_log 只读（WORM）'); END"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def init_builder_schema(conn: sqlite3.Connection) -> None:
