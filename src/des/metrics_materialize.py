@@ -29,6 +29,7 @@ from src.des.contract import ReconcileResult
 from src.des.metrics import (
     METRIC_META_TABLE,
     METRICS_DB,
+    JoinSpec,
     MetricDef,
     MetricRegistry,
     load_metrics,
@@ -202,15 +203,15 @@ def _row_filter_sql(metric: MetricDef) -> str:
     return " WHERE " + " AND ".join(clauses)
 
 
-def _join_on_explicit(table_id: str, joined: set[str], metric: MetricDef) -> str | None:
-    """从显式 joins 边派生 table_id 与已入链表集的连接（配置 fk 无法派生时的兜底，M9 已校验）。
+def _join_on_explicit(table_id: str, joined: set[str], edges: tuple[JoinSpec, ...]) -> str | None:
+    """从显式 joins/left_joins 边派生 table_id 与已入链表集的连接（配置 fk 无法派生时的兜底，M9 已校验）。
 
-    在 metric.joins 中找一条边：一侧短表名 ∈ 已入链表、另一侧 == 目标表；返回 '左表.列 = 右表.列'
+    在 edges 中找一条边：一侧短表名 ∈ 已入链表、另一侧 == 目标表；返回 '左表.列 = 右表.列'
     （如 'ACDOCA.REF_DOC = VBAK.VBELN'，多态引用 REF_DOC→VBAK 是配置 fk 声明不了双边的场景）。
     """
     short = table_id.rsplit(".", 1)[-1]
     joined_short = {t.rsplit(".", 1)[-1] for t in joined}
-    for j in metric.joins:
+    for j in edges:
         left_short, right_short = j.left.split(".", 1)[0], j.right.split(".", 1)[0]
         if right_short == short and left_short in joined_short:
             return f"{j.left} = {j.right}"
@@ -237,8 +238,17 @@ def derive_metric_sql(metric: MetricDef, config: dict, out_dir: Path) -> str:
     froms = [_table_source(out_dir, config, metric.source_tables[0])]
     joined = {metric.source_tables[0]}
     for table_id in metric.source_tables[1:]:
-        # join 键优先取显式 joins 边（M9），否则从配置 fk 派生（§2.6）
-        on = _join_on_explicit(table_id, joined, metric) if metric.joins else _join_on(table_id, config, joined)
+        # left_joins 显式边优先 → LEFT JOIN（保留左表全行，如 J1 含 0 单客户的客户粒度订单数）
+        on = _join_on_explicit(table_id, joined, metric.left_joins)
+        if on is not None:
+            froms.append(f"LEFT JOIN {_table_source(out_dir, config, table_id)} ON {on}")
+            joined.add(table_id)
+            continue
+        # 显式 joins 边优先（强制 join 路径，如 A2 物料组以工单物料 AUFK.MATNR 取），
+        # 未命中则回落配置 fk 派生（§2.6，混合 join：显式边只覆盖部分表）
+        on = _join_on_explicit(table_id, joined, metric.joins) if metric.joins else None
+        if on is None:
+            on = _join_on(table_id, config, joined)
         if on is None:
             raise MetricMaterializeError(
                 f"指标 {metric.metric_id}: 无法从配置 fk/joins 派生 {table_id} 的 join 键"

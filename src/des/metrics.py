@@ -304,10 +304,12 @@ class JoinSpec:
 
 @dataclass(frozen=True)
 class MetricDef:
-    """单条指标定义（核心 7 字段 §1.2 + 可选扩展字段 row_filter/measure_scale/joins）。
+    """单条指标定义（核心 7 字段 §1.2 + 可选扩展字段 row_filter/measure_scale/joins/left_joins）。
 
     row_filter：行级过滤（报告 §6 退款/收货口径）；measure_scale：度量缩放系数（如 -1
-    翻转借贷符号）；joins：显式 join 边（配置 fk 无法派生时）。三者均为可选、校验通过后不可变。
+    翻转借贷符号）；joins：显式 inner join 边（配置 fk 无法派生时，如 A2 物料组取工单物料
+    AUFK.MATNR）；left_joins：显式 LEFT JOIN 边（保留左表全行，如 J1 含 0 单客户的客户粒度
+    订单数）。均可选、校验通过后不可变。
     """
 
     metric_id: str
@@ -320,6 +322,7 @@ class MetricDef:
     row_filter: tuple[RowFilter, ...] = ()
     measure_scale: float = 1.0
     joins: tuple[JoinSpec, ...] = ()
+    left_joins: tuple[JoinSpec, ...] = ()  # LEFT JOIN 边（保留左表全行，0 单客户等缺口口径）
 
 
 @dataclass(frozen=True)
@@ -380,6 +383,25 @@ def _resolve_source(
     if len(matches) != 1:
         return None
     return matches[0], parts[1]
+
+
+def _check_join_list(v: list[str], raw: dict, idx: int, key: str) -> None:
+    """可选扩展字段 joins/left_joins 结构校验（同构：left/right 均为非空字符串 'TABLE.COLUMN'）。"""
+    js = raw.get(key)
+    if js is None:
+        return
+    if not isinstance(js, list):
+        v.append(f"指标 #{idx}: {key} 必须为数组")
+        return
+    for pos, j in enumerate(js):
+        if (
+            not isinstance(j, dict)
+            or not isinstance(j.get("left"), str)
+            or not j.get("left")
+            or not isinstance(j.get("right"), str)
+            or not j.get("right")
+        ):
+            v.append(f"指标 #{idx}: {key}[{pos}] 必须含非空 left/right")
 
 
 def _structure_violations(raw: Any, idx: int) -> tuple[list[str], dict | None]:
@@ -463,20 +485,8 @@ def _structure_violations(raw: Any, idx: int) -> tuple[list[str], dict | None]:
     ms = raw.get("measure_scale")
     if ms is not None and (isinstance(ms, bool) or not isinstance(ms, (int, float))):
         v.append(f"指标 #{idx}: measure_scale 必须为数值")
-    js = raw.get("joins")
-    if js is not None:
-        if not isinstance(js, list):
-            v.append(f"指标 #{idx}: joins 必须为数组")
-        else:
-            for pos, j in enumerate(js):
-                if (
-                    not isinstance(j, dict)
-                    or not isinstance(j.get("left"), str)
-                    or not j.get("left")
-                    or not isinstance(j.get("right"), str)
-                    or not j.get("right")
-                ):
-                    v.append(f"指标 #{idx}: joins[{pos}] 必须含非空 left/right")
+    _check_join_list(v, raw, idx, "joins")  # 显式 inner join 边（配置 fk 无法派生时）
+    _check_join_list(v, raw, idx, "left_joins")  # 显式 LEFT JOIN 边（保留左表全行）
     return (v, raw if not v else None)
 
 
@@ -621,16 +631,22 @@ def _check_m9_optional_fields(raw: dict, idx: int) -> list[str]:
     ms = raw.get("measure_scale")
     if ms is not None and float(ms) != 1.0 and raw.get("agg_function") != "sum":
         v.append(f"指标 #{idx}: measure_scale≠1 仅 sum 允许（M9）: {ms!r} agg={raw.get('agg_function')!r}")
-    for pos, j in enumerate(raw.get("joins") or []):
+    _check_join_edges_m9(v, raw.get("joins") or [], st, idx, "joins")
+    _check_join_edges_m9(v, raw.get("left_joins") or [], st, idx, "left_joins")
+    return v
+
+
+def _check_join_edges_m9(v: list[str], edges: list[dict], st: tuple[str, ...], idx: int, key: str) -> None:
+    """M9 可选扩展字段 joins/left_joins 列存在校验：left/right 解析到来源表列（M3 同源）。"""
+    for pos, j in enumerate(edges):
         for side in ("left", "right"):
             resolved = _resolve_source(j[side], st)
             if resolved is None:
-                v.append(f"指标 #{idx}: joins[{pos}].{side} 无法解析到来源表（M9）: {j[side]!r}")
+                v.append(f"指标 #{idx}: {key}[{pos}].{side} 无法解析到来源表（M9）: {j[side]!r}")
             else:
                 table_id, column = resolved
                 if column not in SOURCE_COLUMNS.get(table_id, {}):
-                    v.append(f"指标 #{idx}: joins[{pos}].{side} 列不存在（M9）: {table_id}.{column}")
-    return v
+                    v.append(f"指标 #{idx}: {key}[{pos}].{side} 列不存在（M9）: {table_id}.{column}")
 
 
 def _to_metric(raw: dict) -> MetricDef:
@@ -654,6 +670,9 @@ def _to_metric(raw: dict) -> MetricDef:
         measure_scale=float(raw.get("measure_scale") or 1.0),
         joins=tuple(
             JoinSpec(left=j["left"], right=j["right"]) for j in raw.get("joins") or []
+        ),
+        left_joins=tuple(
+            JoinSpec(left=j["left"], right=j["right"]) for j in raw.get("left_joins") or []
         ),
     )
 

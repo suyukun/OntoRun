@@ -48,7 +48,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0], "val_idx": [1],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "order_count_by_customer"}},
-        "b_note": "命中物化指标 order_count_by_customer（COUNT DISTINCT VBELN，物化即客户粒度，勿 group_by——count_distinct 非可加会拒答）——但指标只含下过单的 9,823 客户，GT 为 LEFT JOIN 含 0 单客户的 10,000 行，预计行数不一致（零单客户缺口，见 v2 §6）",
+        "b_note": "命中物化指标 order_count_by_customer（KNA1 全客户出发 LEFT JOIN VBAK，含 0 单客户计 0；物化即客户粒度，勿 group_by——count_distinct 非可加会拒答）",
     },
     {
         "id": "J2", "group": "G1",
@@ -156,7 +156,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0, 1, 2], "val_idx": [3],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "cofv_qty_by_matkl_werks_month"}},
-        "b_note": "命中物化指标 cofv_qty_by_matkl_werks_month（物料组 MATKL×工厂 WERKS×月 DATUM 报工数量 ISM01，三维），适配口径=报工数量",
+        "b_note": "命中物化指标 cofv_qty_by_matkl_werks_month（物料组 MATKL×工厂 WERKS×月 DATUM 报工数量 ISM01，物料组以工单 AUFK.MATNR 为准，与 GT 一致），适配口径=报工数量",
     },
     {
         "id": "A3", "group": "G2",
@@ -448,18 +448,17 @@ QUESTIONS = [
     {
         "id": "T4", "group": "G5",
         "ask": "本月 vs 上月退款对比",
-        "adapted_note": "本月=2026-12、上月=2026-11（数据末两个月）；退款 = SO 负向分录",
+        "adapted_note": "本月=2026-12、上月=2026-11（数据末两个月）；退款 = SO 负向分录；cur/prev 属呈现层标签，数据层统一按月份返回",
         "gt_sql": (
-            "SELECT CASE WHEN substr(BUDAT,1,7) = '2026-12' THEN 'cur' ELSE 'prev' END AS period, "
-            "ROUND(SUM(-WSL), 2) AS refund_amt "
+            "SELECT substr(BUDAT,1,7) AS month, ROUND(SUM(-WSL), 2) AS refund_amt "
             "FROM sqlite_scan('{D}/fin.db','ACDOCA') "
             "WHERE REF_TYPE = 'SO' AND WSL < 0 AND substr(BUDAT,1,7) IN ('2026-11','2026-12') "
-            "GROUP BY 1"
+            "GROUP BY 1 ORDER BY 1"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "refund_amount_by_month", "time_range": {"from": "2026-11-01", "to": "2026-12-31"}}},
-        "b_note": "refund_amount_by_month + time_range 11-12 可算两月退款，数值与 GT 一致；但 GT key 为 cur/prev 标签而物化返回月份标签，预计 key 标签不匹配（呈现口径差异，见 v2 §6）",
+        "b_note": "refund_amount_by_month + time_range 11-12 返回月份标签（2026-11/2026-12），GT key 同为月份标签，数值一致（cur/prev 属呈现层）",
     },
     {
         "id": "T5", "group": "G5",

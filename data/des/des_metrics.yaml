@@ -166,11 +166,13 @@ metrics:
   - metric_id: order_count_by_customer
     object_type: Customer
     dimension_fields:
-      - { name: customer, source: "VBAK.KUNNR" }
+      - { name: customer, source: "KNA1.KUNNR" }
     measure: { name: order_count, source: "VBAK.VBELN" }
     agg_function: count_distinct
-    definition: "每个客户的下单数 = COUNT(DISTINCT VBAK.VBELN)（报告 §6 J1：客户→订单数）"
-    source_tables: [erp.VBAK]
+    left_joins:
+      - { left: "VBAK.KUNNR", right: "KNA1.KUNNR" }
+    definition: "每个客户的下单数 = COUNT(DISTINCT VBAK.VBELN)（从 KNA1 全客户出发 LEFT JOIN VBAK 订单，0 单客户计数 0；报告 §6 J1 零单客户口径）"
+    source_tables: [erp.KNA1, erp.VBAK]
 
   - metric_id: customer_count_by_month
     object_type: Customer
@@ -271,7 +273,9 @@ metrics:
       - { name: month, source: "COFV.DATUM", transform: "substr(1,7)" }
     measure: { name: qty, source: "COFV.ISM01" }
     agg_function: sum
-    definition: "按物料组×工厂×月的报工数量 = Σ COFV.ISM01（COFV↔AUFK 以 AUFNR、AUFK↔MARA 以 MATNR 关联；报告 §6 A2 三维汇总）"
+    joins:
+      - { left: "AUFK.MATNR", right: "MARA.MATNR" }
+    definition: "按物料组×工厂×月的报工数量 = Σ COFV.ISM01（COFV↔AUFK 以 AUFNR；物料组以工单物料 AUFK.MATNR→MARA.MATKL 取，报工物料归属以工单为准；报告 §6 A2 三维汇总）"
     source_tables: [mes.COFV, mes.AUFK, erp.MARA]
 
   - metric_id: cofv_avg_hrs_by_month

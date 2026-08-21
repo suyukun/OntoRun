@@ -111,8 +111,19 @@ B_OBJECT_SURFACE = (
     "post_date, ref_type(SO/PO/MV), ref_doc(SO=订单号)。\n"
 )
 
+B_HARD_RULES = (
+    "## 契约硬性规则（违反 → fail-closed 拒答）\n"
+    "- 数据时间范围：全表覆盖 2025-01-01 至 2026-12-31（月粒度 2025-01..2026-12 共 24 个月）；"
+    "time_range 只在此区间取值，切勿虚构 2024 等未覆盖年份（会过滤成 0 行）。\n"
+    "- 指标已按自身粒度物化：order_count_by_customer 已是客户粒度、customer_count_by_month / "
+    "order_count_by_month / cofv_avg_hrs_by_month 已是月粒度——直接查询即可；count_distinct / avg "
+    "聚合指标禁加 group_by（非可加，加了 fail-closed 拒答）；仅 sum/count/min/max 指标可按维度子集 group_by。\n"
+)
+
+
 B_CONTRACT_SCHEMA = (
-    "## 契约 schema（v0.1/v0.2）\n"
+    B_HARD_RULES
+    + "## 契约 schema（v0.1/v0.2）\n"
     "- v0.1 对象路径：{\"contract_version\": \"0.1\", \"object_type\": \"Material\", \"filters\": {...}, "
     "\"aggregations\": [{\"function\": ..., \"field\": ...}], \"group_by\": [...], \"link_traversal\": {...}|null}\n"
     "  - filters 操作符：eq/ne/gt/ge/lt/le/is_null/is_not_null/in；如 {\"old_code\": {\"op\": \"is_not_null\"}}\n"
@@ -134,6 +145,11 @@ B_CONTRACT_SCHEMA = (
     "\"group_by\":[\"customer\"],\"topN\":5}}\n"
     "- 指标+度量过滤（退款超阈值订单）：{\"contract_version\":\"0.2\",\"metric\":{\"metric_id\":\"refund_amount_by_order\","
     "\"dimension_filters\":{\"refund_amount\":{\"op\":\"gt\",\"value\":50000}}}}\n"
+    "- 指标+按仓库聚合（各仓库库存水位，勿用 factory×location 双维）：{\"contract_version\":\"0.2\",\"metric\":{\"metric_id\":"
+    "\"stock_balance_by_location\",\"group_by\":[\"location\"]}}\n"
+    "- 指标+维度过滤（指定仓库 W01/W02 的物料库存明细，勿误选 by_location 聚合）：{\"contract_version\":\"0.2\",\"metric\":"
+    "{\"metric_id\":\"stock_balance_by_mat_location\",\"dimension_filters\":{\"location\":{\"op\":\"in\","
+    "\"value\":[\"W01\",\"W02\"]}}}}\n"
 )
 
 B_METRIC_CATALOG = (
@@ -152,7 +168,10 @@ def build_b_surface(metrics: MetricRegistry) -> str:
     lines.append(
         "### 指标语义（按业务含义选指标；物化表预聚合，度量过滤在物化粒度行级生效）\n"
         "- sales_amount_by_*: 销售金额（VBAP.NETWR）；sales_qty_by_mat_month: 销售数量；sales_amount_by_day: 日粒度销售金额（配 time_range 用近 30 天）。\n"
-        "- stock_balance_by_*: 库存账面（LABST）——by_location(工厂×地点)/by_mat_location(物料×工厂×地点)/by_mat_group(物料组/品类)；stock_flow_by_location: 库存流水净变。\n"
+        "- stock_balance_by_*: 库存账面（LABST）——by_location(工厂×地点)/by_mat_location(物料×工厂×地点)/by_mat_group(物料组/品类)。"
+    "「各仓库库存水位」选 by_location + group_by location（勿用 factory×location）；"
+    "「指定仓库的物料库存明细」选 by_mat_location + dimension_filters location IN (...)。"
+    "stock_flow_by_location: 库存流水净变。\n"
         "- purchase_*: 采购金额/数量（EKKO/EKPO，月 AEDAT）；purchase_order_count_by_vendor_month: 供应商采购订单数。\n"
         "- finance_amount_by_*: 财务金额（WSL 借正贷负）按科目/成本中心/参考类型（SO/PO/MV）。\n"
         "- order_count_by_customer: 每客户下单数；order_count_by_month: 各月订单量；customer_count_by_month: 各月下单客户数。\n"
