@@ -28,6 +28,9 @@ ENTERPRISE_CODE = "hc_precision"
 EXPECTED_SEED = 20260821
 # 生效配置（模板层 + 企业覆盖层合并后，模块级缓存）：行数/注入期望全部从配置读取，不硬编码。
 _CONFIG = load_config(ENTERPRISE_CODE)
+# 确定性测试分层（§7 两档测试制度）：确定性属性与规模无关，test_determinism_same_seed_all_18_tables
+# 用 scale=SMALL_SCALE（~3000 行，生成 <1s）独立生成对比；其余测试读样例 1M 库保留全量验证。
+SMALL_SCALE = 0.003
 TABLE_IDS = sorted(
     f"{code}.{name}"
     for code, sys_cfg in _CONFIG["enterprise"]["systems"].items()
@@ -293,8 +296,8 @@ def test_d10_inventory_reconciliation(gen_dir: Path, config: dict) -> None:
 # 确定性（§5.1 约定 1-5）：同 seed 两次生成 → 18 表 sha256 相同
 # ===========================================================================
 def test_determinism_same_seed_all_18_tables(tmp_path: Path) -> None:
-    """同 seed 同配置两次生成，18 表 table_sha256 逐一相同（约定 1-5）。"""
+    """同 seed 同配置两次生成，18 表 table_sha256 逐一相同（约定 1-5；小规模 scale=SMALL_SCALE）。"""
     out1, out2 = tmp_path / "g1", tmp_path / "g2"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1))
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2))
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1), scale=SMALL_SCALE)
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2), scale=SMALL_SCALE)
     assert _all_table_shas(out1, _CONFIG) == _all_table_shas(out2, _CONFIG)

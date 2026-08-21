@@ -5,7 +5,8 @@
 - 门禁 B（注入率 ±2%）：B1-B4；
 - 门禁 C（确定性 SHA256）：C1-C4；
 - 门禁 D（跨系统一致性）：D1-D4。
-确定性可复跑：B3/C1/C3 使用临时目录独立生成对比，其余读样例企业产物（缺则确定性重建）。
+确定性可复跑：B3/C1/C2/C3 使用临时目录小规模（scale=SMALL_SCALE，~3000 行，生成 <1s）独立生成
+对比（确定性属性与规模无关，测试分层 §7 两档测试制度）；其余读样例企业产物（缺则确定性重建）。
 """
 
 from __future__ import annotations
@@ -33,6 +34,14 @@ _CONFIG = load_config(ENTERPRISE_CODE)
 EXPECTED_COUNT = _CONFIG["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
 EXPECTED_RATE = _CONFIG["injection"]["multi_code"]["rate"]
 EXPECTED_INJECTED = round(EXPECTED_COUNT * EXPECTED_RATE)
+# 小规模确定性测试（测试分层，§7 两档测试制度）：确定性属性与规模无关，B3/C1/C2/C3 用
+# scale=SMALL_SCALE（~3000 行，生成 <1s）独立生成对比；其余测试读样例 1M 库保留全量验证。
+SMALL_SCALE = 0.003
+_CONFIG_SMALL = load_config(ENTERPRISE_CODE, scale=SMALL_SCALE)
+EXPECTED_INJECTED_SMALL = round(
+    _CONFIG_SMALL["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
+    * _CONFIG_SMALL["injection"]["multi_code"]["rate"]
+)
 MASTER_RE = re.compile(r"^MAT-\d{4}-\d{4}-[A-Z0-9]{3}$")
 
 # 系统代码 -> (库文件名, 表名)（设计 §1.3/§5）
@@ -83,7 +92,7 @@ def _rows(db_path: Path, table: str, order_by: str = "MATNR") -> list[sqlite3.Ro
 
 def _table_pk(config: dict, sys_name: str) -> list[str]:
     """某系统表的配置主键列（read_table_rows/manifest 泛化排序键，设计 §5.1）。"""
-    db, tbl = SYSTEMS[sys_name]
+    _, tbl = SYSTEMS[sys_name]
     return config["enterprise"]["systems"][sys_name]["tables"][tbl]["pk"]
 
 
@@ -154,12 +163,12 @@ def test_b2_exact_round_count(gen_dir: Path, config: dict) -> None:
 def test_b3_same_seed_same_injected_set(tmp_path: Path) -> None:
     """B3：同 seed 两次生成，BISMT 非空行集（按 MATNR 排序）逐一相等。"""
     out1, out2 = tmp_path / "g1", tmp_path / "g2"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1))
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2))
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1), scale=SMALL_SCALE)
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2), scale=SMALL_SCALE)
     set1 = [(r["MATNR"], r["BISMT"]) for r in _rows(out1 / "erp.db", "MARA") if r["BISMT"] is not None]
     set2 = [(r["MATNR"], r["BISMT"]) for r in _rows(out2 / "erp.db", "MARA") if r["BISMT"] is not None]
     assert set1 == set2
-    assert len(set1) == EXPECTED_INJECTED
+    assert len(set1) == EXPECTED_INJECTED_SMALL
 
 
 def test_b4_no_malformed_rows(gen_dir: Path) -> None:
@@ -182,20 +191,20 @@ def test_b4_no_malformed_rows(gen_dir: Path) -> None:
 def test_c1_same_seed_same_config_hashes_equal(tmp_path: Path) -> None:
     """C1：同 seed 同配置两次生成，三表 table_sha256 逐一相同。"""
     out1, out2 = tmp_path / "g1", tmp_path / "g2"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1))
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2))
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1), scale=SMALL_SCALE)
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2), scale=SMALL_SCALE)
     assert _table_shas(out1, _CONFIG) == _table_shas(out2, _CONFIG)
 
 
 def test_c2_seed_and_config_change_hashes(tmp_path: Path, config: dict) -> None:
     """C2：改 seed → 三表 sha 全变；改配置（rate）→ config_sha256 变、MARA sha 变（配置参与 hash）。"""
     base = tmp_path / "base"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(base), seed=EXPECTED_SEED)
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(base), seed=EXPECTED_SEED, scale=SMALL_SCALE)
     base_shas = _table_shas(base, config)
 
     # (a) 改 seed → 三表 sha 全变
     alt = tmp_path / "alt_seed"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(alt), seed=EXPECTED_SEED + 1)
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(alt), seed=EXPECTED_SEED + 1, scale=SMALL_SCALE)
     alt_shas = _table_shas(alt, config)
     for name in SYSTEMS:
         assert alt_shas[name] != base_shas[name], f"改 seed 后 {name} sha 未变"
@@ -205,20 +214,20 @@ def test_c2_seed_and_config_change_hashes(tmp_path: Path, config: dict) -> None:
     data["enterprise"]["injection"]["multi_code"]["rate"] = 0.20
     mod_path = tmp_path / "des_enterprise_rate020.yaml"
     mod_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    mod_cfg = load_config(ENTERPRISE_CODE, config_file=str(mod_path))
+    mod_cfg = load_config(ENTERPRISE_CODE, config_file=str(mod_path), scale=SMALL_SCALE)
     assert mod_cfg["injection"]["multi_code"]["rate"] == 0.20
-    assert config_sha256(mod_cfg, EXPECTED_SEED) != config_sha256(config, EXPECTED_SEED)
+    assert config_sha256(mod_cfg, EXPECTED_SEED) != config_sha256(_CONFIG_SMALL, EXPECTED_SEED)
     alt_cfg = tmp_path / "alt_cfg"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(alt_cfg), seed=EXPECTED_SEED, config_file=str(mod_path))
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(alt_cfg), seed=EXPECTED_SEED, config_file=str(mod_path), scale=SMALL_SCALE)
     assert _table_shas(alt_cfg, config)["erp"] != base_shas["erp"], "改配置后 erp.MARA sha 未变"
 
 
 def test_c3_no_wall_clock_dependence(tmp_path: Path) -> None:
     """C3：两次运行墙钟不同，sha 仍相同（生成不依赖系统时间）。"""
     out1, out2 = tmp_path / "g1", tmp_path / "g2"
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1))
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out1), scale=SMALL_SCALE)
     time.sleep(1.1)  # 拉大两次运行的墙钟间隔
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2))
+    build_enterprise(ENTERPRISE_CODE, out_dir=str(out2), scale=SMALL_SCALE)
     assert _table_shas(out1, _CONFIG) == _table_shas(out2, _CONFIG)
 
 
