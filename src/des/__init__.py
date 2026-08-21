@@ -2,6 +2,7 @@
 
 对外 CLI：python -m src.des --enterprise hc_precision --seed 20260821 --out <dir>
 数据侧公开 API：load_config / build_enterprise / build_manifest / config_sha256 / table_sha256
+指标侧公开 API：load_metrics / MetricRegistry / MetricDef（P2 指标注册表加载 + 校验 M1-M7）
 本体侧公开 API：materialize_des（DuckDB 跨 3 库物化）/ validate_contract / ContractExecutor
                 / run_dq01 / reconcile_dq01（契约 v0.1 + DQ-01 一物多码 + 对账）
 """
@@ -30,6 +31,14 @@ from .materialize import (
     derive_legacy_regex,
     materialize_des,
 )
+from .metrics import (
+    DimensionField,
+    Measure,
+    MetricDef,
+    MetricError,
+    MetricRegistry,
+    load_metrics,
+)
 
 __all__ = [
     "DQ01_CONTRACT",
@@ -37,7 +46,12 @@ __all__ = [
     "ContractExecutor",
     "DesConfigError",
     "DesMaterialization",
+    "DimensionField",
     "MaterializeError",
+    "Measure",
+    "MetricDef",
+    "MetricError",
+    "MetricRegistry",
     "ReconcileResult",
     "build_enterprise",
     "build_manifest",
@@ -47,6 +61,7 @@ __all__ = [
     "deep_merge",
     "derive_legacy_regex",
     "load_config",
+    "load_metrics",
     "master_code",
     "materialize_des",
     "reconcile_dq01",

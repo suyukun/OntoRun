@@ -1,0 +1,164 @@
+# des_metrics.yaml —— P2 ChatBI 指标注册表（本体读侧：对象 → 指标定义 → 物化结果）
+# 依据 docs/P2-ChatBI闭环设计_v0.1.md §1（指标模型 7 字段 / 校验 M1-M7 / 5 组 15 指标清单 §1.5）：
+#   - 核心 7 字段：metric_id / object_type / dimension_fields[] / measure / agg_function / definition / source_tables[]
+#   - 维度「语义名→源列」映射：dimension_fields[].source = "表.列"（表名省略系统前缀，如 VBAP.MATNR），
+#     transform 为可选派生（如 substr(1,7) → 'YYYY-MM' 月，口径单点 §2.3）
+#   - source_tables ∈ DES 18 表注册表（P1b §3.1），形如 "erp.VBAK"
+#   - agg_function ∈ {sum, count, count_distinct, avg, min, max}
+# 本文件是物化 SQL / reconcile SQL 的单一事实来源（口径单点 §2.3 R3），禁双处手写。
+metrics_version: "0.1"
+
+metrics:
+  # —— 组 A · 物料（主体对象 Material，源表 erp.MARA / erp.MARC，设计 §1.5-A）——
+  - metric_id: mat_count_by_type_factory
+    object_type: Material
+    dimension_fields:
+      - { name: material_type, source: "MARA.MTART" }
+      - { name: factory, source: "MARC.WERKS" }
+    measure: { name: material_count, source: "*" }
+    agg_function: count
+    definition: "按物料类型×工厂的物料行数 = 行计数（MARA↔MARC 以 MATNR 关联，无孤儿门禁 D2）"
+    source_tables: [erp.MARA, erp.MARC]
+
+  - metric_id: mat_count_by_abc_factory
+    object_type: Material
+    dimension_fields:
+      - { name: abc_class, source: "MARC.MAABC" }
+      - { name: factory, source: "MARC.WERKS" }
+    measure: { name: material_count, source: "*" }
+    agg_function: count
+    definition: "按 ABC 分类×工厂的物料行数 = 行计数（MARC 工厂级主数据）"
+    source_tables: [erp.MARC]
+
+  - metric_id: mat_count_by_group
+    object_type: Material
+    dimension_fields:
+      - { name: material_group, source: "MARA.MATKL" }
+    measure: { name: material_count, source: "*" }
+    agg_function: count
+    definition: "按物料组的物料行数 = 行计数（MARA 物料主数据）"
+    source_tables: [erp.MARA]
+
+  # —— 组 B · 销售（主体对象 Material / Customer，源表 erp.VBAK + erp.VBAP，设计 §1.5-B）——
+  - metric_id: sales_amount_by_mat_month
+    object_type: Material
+    dimension_fields:
+      - { name: matnr, source: "VBAP.MATNR" }
+      - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
+    measure: { name: sales_amount, source: "VBAP.NETWR" }
+    agg_function: sum
+    definition: "按物料×月的销售金额 = Σ VBAP.NETWR（月 = VBAK.AUDAT 前 7 位；VBAK↔VBAP 以 VBELN 关联，无孤儿门禁 D5）"
+    source_tables: [erp.VBAK, erp.VBAP]
+
+  - metric_id: sales_amount_by_customer_month
+    object_type: Customer
+    dimension_fields:
+      - { name: customer, source: "VBAK.KUNNR" }
+      - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
+    measure: { name: sales_amount, source: "VBAP.NETWR" }
+    agg_function: sum
+    definition: "按客户×月的销售金额 = Σ VBAP.NETWR（月 = VBAK.AUDAT 前 7 位；VBAK↔VBAP 以 VBELN 关联）"
+    source_tables: [erp.VBAK, erp.VBAP]
+
+  - metric_id: sales_qty_by_mat_month
+    object_type: Material
+    dimension_fields:
+      - { name: matnr, source: "VBAP.MATNR" }
+      - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
+    measure: { name: sales_qty, source: "VBAP.KWMENG" }
+    agg_function: sum
+    definition: "按物料×月的销售数量 = Σ VBAP.KWMENG（月 = VBAK.AUDAT 前 7 位）"
+    source_tables: [erp.VBAK, erp.VBAP]
+
+  # —— 组 C · 库存（主体对象 InventoryLocation / Material，源表 erp.MARD + wms.MSEG，设计 §1.5-C）——
+  - metric_id: stock_balance_by_location
+    object_type: InventoryLocation
+    dimension_fields:
+      - { name: factory, source: "MARD.WERKS" }
+      - { name: location, source: "MARD.LGORT" }
+    measure: { name: stock_balance, source: "MARD.LABST" }
+    agg_function: sum
+    definition: "按库存地点的库存账面 = Σ MARD.LABST（W01/W02/W03 三地点；与 C3 流水净变对账 diff=0，D10）"
+    source_tables: [erp.MARD]
+
+  - metric_id: stock_balance_by_mat_location
+    object_type: Material
+    dimension_fields:
+      - { name: matnr, source: "MARD.MATNR" }
+      - { name: factory, source: "MARD.WERKS" }
+      - { name: location, source: "MARD.LGORT" }
+    measure: { name: stock_balance, source: "MARD.LABST" }
+    agg_function: sum
+    definition: "按物料×工厂×地点的库存账面 = Σ MARD.LABST（与 C3 流水净变按物料+地点对账，D10）"
+    source_tables: [erp.MARD]
+
+  - metric_id: stock_flow_by_location
+    object_type: InventoryLocation
+    dimension_fields:
+      - { name: factory, source: "MSEG.WERKS" }
+      - { name: location, source: "MSEG.LGORT" }
+    measure: { name: flow_qty, source: "MSEG.MENGE" }
+    agg_function: sum
+    definition: "按库存地点的流水净变 = Σ MSEG.MENGE（带符号：入正/出负；与 C1 账面对账 diff=0，D10）"
+    source_tables: [wms.MSEG]
+
+  # —— 组 D · 采购（主体对象 Vendor / Material，源表 scm.EKKO + scm.EKPO，设计 §1.5-D）——
+  - metric_id: purchase_amount_by_vendor_month
+    object_type: Vendor
+    dimension_fields:
+      - { name: vendor, source: "EKKO.LIFNR" }
+      - { name: month, source: "EKKO.AEDAT", transform: "substr(1,7)" }
+    measure: { name: purchase_amount, source: "EKPO.NETWR" }
+    agg_function: sum
+    definition: "按供应商×月的采购金额 = Σ EKPO.NETWR（月 = EKKO.AEDAT 前 7 位；EKKO↔EKPO 以 EBELN 关联，无孤儿门禁 D4）"
+    source_tables: [scm.EKKO, scm.EKPO]
+
+  - metric_id: purchase_qty_by_mat_month
+    object_type: Material
+    dimension_fields:
+      - { name: matnr, source: "EKPO.MATNR" }
+      - { name: month, source: "EKKO.AEDAT", transform: "substr(1,7)" }
+    measure: { name: purchase_qty, source: "EKPO.MENGE" }
+    agg_function: sum
+    definition: "按物料×月的采购数量 = Σ EKPO.MENGE（月 = EKKO.AEDAT 前 7 位）"
+    source_tables: [scm.EKKO, scm.EKPO]
+
+  - metric_id: purchase_order_count_by_vendor_month
+    object_type: Vendor
+    dimension_fields:
+      - { name: vendor, source: "EKKO.LIFNR" }
+      - { name: month, source: "EKKO.AEDAT", transform: "substr(1,7)" }
+    measure: { name: purchase_orders, source: "EKKO.EBELN" }
+    agg_function: count_distinct
+    definition: "按供应商×月的采购订单数 = COUNT(DISTINCT EKKO.EBELN)（月 = EKKO.AEDAT 前 7 位）"
+    source_tables: [scm.EKKO]
+
+  # —— 组 E · 财务（主体对象 FinanceEntry，源表 fin.ACDOCA，设计 §1.5-E）——
+  - metric_id: finance_amount_by_account_month
+    object_type: FinanceEntry
+    dimension_fields:
+      - { name: account, source: "ACDOCA.RACCT" }
+      - { name: month, source: "ACDOCA.BUDAT", transform: "substr(1,7)" }
+    measure: { name: amount, source: "ACDOCA.WSL" }
+    agg_function: sum
+    definition: "按科目×月的财务金额 = Σ ACDOCA.WSL（借正/贷负；月 = BUDAT 前 7 位）"
+    source_tables: [fin.ACDOCA]
+
+  - metric_id: finance_amount_by_costcenter_month
+    object_type: FinanceEntry
+    dimension_fields:
+      - { name: cost_center, source: "ACDOCA.KOSTL" }
+      - { name: month, source: "ACDOCA.BUDAT", transform: "substr(1,7)" }
+    measure: { name: amount, source: "ACDOCA.WSL" }
+    agg_function: sum
+    definition: "按成本中心×月的财务金额 = Σ ACDOCA.WSL（借正/贷负；月 = BUDAT 前 7 位）"
+    source_tables: [fin.ACDOCA]
+
+  - metric_id: finance_amount_by_reftype
+    object_type: FinanceEntry
+    dimension_fields:
+      - { name: ref_type, source: "ACDOCA.REF_TYPE" }
+    measure: { name: amount, source: "ACDOCA.WSL" }
+    agg_function: sum
+    definition: "按参考单据类型（SO/PO/MV）的财务金额 = Σ ACDOCA.WSL（REF_TYPE 决定 REF_DOC 归属，无孤儿门禁 D8）"
+    source_tables: [fin.ACDOCA]
