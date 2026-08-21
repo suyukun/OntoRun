@@ -192,6 +192,38 @@ SOURCE_COLUMNS: dict[str, dict[str, str]] = {
 # metric_id 命名契约（snake_case，§1.2）
 _METRIC_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# ---------------------------------------------------------------------------
+# 物化存储/命名 + 时间维度识别（读侧契约共用，禁双处硬编码；metrics_materialize 同源）
+# ---------------------------------------------------------------------------
+METRICS_DB = "metrics.db"  # 指标物化库文件名（§2.1，企业目录下与 5 源库并列）
+METRIC_TABLE_PREFIX = "metric_"  # 物化表名前缀（§2.1，metric_<id> 由注册表派生）
+METRIC_META_TABLE = "metric_meta"  # 物化元表（§2.1，版本/口径锚，读侧 T3 守卫同源引用）
+DATE_TRANSFORM_FUNCS = ("substr",)  # 时间派生 transform（substr(1,7) → YYYY-MM 月粒度）
+_SUBSTR_LEN_RE = re.compile(r"^substr\(\s*1\s*,\s*(\d+)\s*\)$")
+
+
+def metric_table_name(metric_id: str) -> str:
+    """物化表名：metric_<metric_id>（§2.1，由注册表派生，禁硬编码）。"""
+    return METRIC_TABLE_PREFIX + metric_id
+
+
+def is_date_dimension(dim: DimensionField) -> bool:
+    """维度是否为日期维度（带时间派生 transform；v0.2 time_range 的绑定点）。"""
+    if dim.transform is None:
+        return False
+    return dim.transform.split("(", 1)[0].strip() in DATE_TRANSFORM_FUNCS
+
+
+def date_dimension_grain(dim: DimensionField) -> int | None:
+    """日期维度输出粒度（字符数）：substr(1,7) → 7（YYYY-MM）、substr(1,10) → 10（YYYY-MM-DD）。
+
+    返回 None 表示非 substr 派生（time_range 按整串比较，不截断）。
+    """
+    if dim.transform is None:
+        return 10
+    m = _SUBSTR_LEN_RE.match(dim.transform)
+    return int(m.group(1)) if m else None
+
 
 class MetricError(Exception):
     """指标注册表加载/校验失败（fail-fast，不静默）。"""

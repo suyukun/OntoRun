@@ -26,14 +26,18 @@ import duckdb
 
 from src.des.config import DEFAULT_ENTERPRISES_DIR, load_config
 from src.des.contract import ReconcileResult
-from src.des.metrics import MetricDef, MetricRegistry, load_metrics
+from src.des.metrics import (
+    METRIC_META_TABLE,
+    METRICS_DB,
+    MetricDef,
+    MetricRegistry,
+    load_metrics,
+    metric_table_name,
+)
 
 # ---------------------------------------------------------------------------
 # 常量（物化存储/命名/元表，§2.1/§2.2；物化表名由注册表派生，禁硬编码）
 # ---------------------------------------------------------------------------
-METRICS_DB = "metrics.db"
-METRIC_TABLE_PREFIX = "metric_"
-METRIC_META_TABLE = "metric_meta"
 REFRESH_MODE_FULL = "full"  # S2 固定全量重建（C4 契约 §2.2，增量留 S3）
 
 # metric_meta 表结构（§2.1：metric_id/data_version/config_sha256/refresh_mode/refresh_ts/row_count/source_total_rows）
@@ -76,10 +80,6 @@ class MetricsMaterializationResult:
 # ---------------------------------------------------------------------------
 # 同源 SQL 派生（物化与 reconcile 共用，R3 口径单点；表/字段/join 键全为常量，无注入面）
 # ---------------------------------------------------------------------------
-def _metric_table_name(metric_id: str) -> str:
-    """物化表名：metric_<metric_id>（§2.1，由注册表派生）。"""
-    return METRIC_TABLE_PREFIX + metric_id
-
 
 def _table_alias(table_id: str) -> str:
     """'erp.VBAP' → 'VBAP'（sqlite_scan 别名 = 表名末段，延续 materialize.py）。"""
@@ -219,7 +219,7 @@ def _ordered_rows(conn: Any, sql: str, order_by: str) -> list[tuple[Any, ...]]:
 def _reconcile_one(conn: Any, metric: MetricDef, sql: str) -> ReconcileResult:
     """单指标 reconcile：物化表 vs 源库直算（同 SQL）按维度键逐行 diff=0（§2.3 R1）。"""
     dims = ", ".join(d.name for d in metric.dimension_fields)
-    materialized = _ordered_rows(conn, f"SELECT * FROM {_metric_table_name(metric.metric_id)}", dims)
+    materialized = _ordered_rows(conn, f"SELECT * FROM {metric_table_name(metric.metric_id)}", dims)
     source = _ordered_rows(conn, sql, dims)
     diffs: list[str] = []
     if len(materialized) != len(source):
@@ -304,7 +304,7 @@ def materialize_metrics(
         tables: dict[str, int] = {}
         reconciles: list[ReconcileResult] = []
         for metric in reg.metrics:
-            table_name = _metric_table_name(metric.metric_id)
+            table_name = metric_table_name(metric.metric_id)
             dims = ", ".join(d.name for d in metric.dimension_fields)
             sql = derive_metric_sql(metric, cfg, out)
             con.execute(f"CREATE OR REPLACE TABLE {table_name} AS {sql} ORDER BY {dims}")

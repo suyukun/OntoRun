@@ -1,9 +1,17 @@
-"""结构化查询契约 v0.1 校验 + 执行器（设计 §3）。
+"""结构化查询契约 v0.1/v0.2 校验 + 执行器（设计 §3）。
 
-- V1-V5 校验 fail-closed（设计 §3.3）：字段白名单查 Registry / 类型约束 / ≤1 跳 / 防注入参数化 / 结果护栏；
-- 执行：过滤 + 聚合 + group_by + link_traversal（≤1 跳）参数化执行，契约值永不拼 SQL（V4）；
-- DQ-01「哪些物料一物多码？」：执行器对 old_code 非空结果集强制再过一物多码全谓词（§2.2），口径单点化；
-- reconcile_dq01：本体查询结果 vs 数据侧注入集 + manifest.multi_code_count 三方对账（§2.3）。
+v0.1（对象路径，行为不变）：V1-V5 校验 fail-closed（设计 §3.3）——字段白名单查 Registry / 类型约束 /
+≤1 跳 / 防注入参数化 / 结果护栏；过滤 + 聚合 + group_by + link_traversal（≤1 跳）参数化执行，契约值永不拼 SQL（V4）；
+DQ-01「哪些物料一物多码？」：执行器对 old_code 非空结果集强制再过一物多码全谓词（§2.2），口径单点化；
+reconcile_dq01：本体查询结果 vs 数据侧注入集 + manifest.multi_code_count 三方对账（§2.3）。
+
+v0.2 扩展（设计 §3.1/§3.2，老 v0.1 契约原样可执行）：
+- metric 键 → 指标物化路径：metric_id ∈ 指标注册表（M 系列）、dimension_filters 键 ∈ 维度白名单、
+  time_range 绑定日期维度，查询命中 metrics.db 物化表（预聚合，不现场算），读前过 T3 版本守卫；
+  ContractExecutor.execute 开头按 has_metric 分派：metric → _execute_metric（物化路径），
+  否则走 v0.1 对象路径（行为完全不变）；
+- count_distinct 聚合函数（v0.1 普通聚合同样支持）；
+- time_range（{from, to} ISO 日期）——metric 块内绑定日期维度；非 metric 契约绑定对象唯一 date 字段。
 """
 
 from __future__ import annotations
@@ -12,25 +20,47 @@ import json
 import re
 import sqlite3
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin
 
+import duckdb
+
 from src.des.config import DEFAULT_ENTERPRISES_DIR
 from src.des.materialize import DesMaterialization, materialize_des, rows_as_dicts
+from src.des.metrics import (
+    METRIC_META_TABLE,
+    METRICS_DB,
+    SOURCE_COLUMNS,
+    DimensionField,
+    MetricDef,
+    MetricRegistry,
+    date_dimension_grain,
+    is_date_dimension,
+    metric_table_name,
+)
 from src.ontology import build_registry
 from src.ontology.registry import Registry
 
 # ---------------------------------------------------------------------------
 # 常量（契约 schema 白名单 / 护栏上限，设计 §3.1/§3.3）
 # ---------------------------------------------------------------------------
-CONTRACT_KEYS = {"contract_version", "object_type", "filters", "aggregations", "group_by", "link_traversal"}
+CONTRACT_KEYS = {
+    "contract_version", "object_type", "filters", "aggregations",
+    "group_by", "link_traversal", "metric", "time_range",
+}
 FILTER_EXPR_KEYS = {"op", "value"}
+METRIC_KEYS = {"metric_id", "dimension_filters", "time_range", "group_by"}
+TIME_RANGE_KEYS = {"from", "to"}
 OPS = ("eq", "ne", "is_null", "is_not_null", "in")
-AGG_FUNCS = ("count", "sum", "avg", "min", "max")
+AGG_FUNCS = ("count", "sum", "avg", "min", "max", "count_distinct")  # v0.2 追加 count_distinct
 RESULT_LIMIT_FLOOR = 1000  # V5 结果护栏下限（实际上限从配置派生 = max(下限, 2×round(N×rate))，禁硬编码）
 MAX_AGGREGATIONS = 5  # V5
 MAX_GROUP_BY = 4  # V5
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # time_range ISO 日期（V2）
+# 物化表子集重聚合（group_by）仅可加聚合合法：sum/count 加法、min/max 幂等；avg/count_distinct 非可加拒答
+_METRIC_REAGG_SQL = {"sum": "SUM", "count": "SUM", "min": "MIN", "max": "MAX"}
 _SQL_FRAGMENT_MARKERS = ("'", '"', ";", "--", "/*", "*/")
 _SQL_KEYWORDS = re.compile(r"\b(select|union|insert|delete|update|drop|alter)\b", re.IGNORECASE)
 
@@ -114,12 +144,16 @@ def _check_value_type(v: list[str], fname: str, value: Any, field_info: Any) -> 
         v.append(f"过滤值类型应为字符串: {fname}={value!r}")
 
 
-def _validate_filter_expr(fname: str, expr: Any, field_info: Any) -> list[str]:
-    """校验单个过滤表达式（标量简写 = 等值；对象含 op/value，V2/V4）。"""
+def _validate_filter_expr(
+    fname: str, expr: Any, value_check: Callable[[list[str], Any], None]
+) -> list[str]:
+    """校验单个过滤表达式（标量简写 = 等值；对象含 op/value，V2/V4）。
+
+    value_check(v, value) 做值级检查（类型 V2 + 防注入 V4）——对象路径与指标维度路径各自注入。
+    """
     v: list[str] = []
     if isinstance(expr, (str, int, float, bool)):
-        _check_value_type(v, fname, expr, field_info)
-        _check_sql_fragment(v, fname, expr)
+        value_check(v, expr)
         return v
     if not isinstance(expr, dict):
         return [f"过滤表达式必须为对象或标量: {fname}"]
@@ -143,12 +177,139 @@ def _validate_filter_expr(fname: str, expr: Any, field_info: Any) -> list[str]:
             v.append(f"op=in 的 value 必须为非空数组: {fname}")
             return v
         for item in value:
-            _check_value_type(v, fname, item, field_info)
-            _check_sql_fragment(v, fname, item)
+            value_check(v, item)
         return v
-    _check_value_type(v, fname, value, field_info)
-    _check_sql_fragment(v, fname, value)
+    value_check(v, value)
     return v
+
+
+def _object_value_check(fname: str, field_info: Any) -> Callable[[list[str], Any], None]:
+    """对象字段过滤值检查：类型（V2）+ 防注入（V4）。"""
+
+    def check(v: list[str], value: Any) -> None:
+        _check_value_type(v, fname, value, field_info)
+        _check_sql_fragment(v, fname, value)
+
+    return check
+
+
+def _dimension_value_check(
+    fname: str, md: MetricDef, dim_name: str
+) -> Callable[[list[str], Any], None]:
+    """指标维度过滤值检查：维度列类型（来源列契约派生）+ 防注入（V4）。"""
+
+    def check(v: list[str], value: Any) -> None:
+        _check_dimension_value_type(v, fname, value, md, dim_name)
+        _check_sql_fragment(v, fname, value)
+
+    return check
+
+
+def _dimension_value_type(md: MetricDef, dim_name: str) -> type:
+    """物化维度列期望类型（从注册表 source 列契约派生：REAL→float，其余→str；未知保守 str）。
+
+    维度过滤值类型须与物化列类型一致（V2 对齐指标维度白名单）。
+    """
+    for dim in md.dimension_fields:
+        if dim.name != dim_name:
+            continue
+        table, _, column = dim.source.partition(".")
+        for tid, cols in SOURCE_COLUMNS.items():
+            if tid.rsplit(".", 1)[-1] == table and column in cols:
+                return float if cols[column] == "REAL" else str
+        return str  # 来源列契约缺失时保守按字符串（当前 15 指标维度全为 TEXT）
+    return str
+
+
+def _check_dimension_value_type(
+    v: list[str], fname: str, value: Any, md: MetricDef, dim_name: str
+) -> None:
+    """V2 维度过滤值类型约束：匹配物化维度列类型（REAL→数值，TEXT→字符串）。"""
+    t = _dimension_value_type(md, dim_name)
+    if t is float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            v.append(f"维度过滤值类型应为数值: {fname}={value!r}")
+    elif not isinstance(value, str):
+        v.append(f"维度过滤值类型应为字符串: {fname}={value!r}")
+
+
+def _validate_time_range(v: list[str], tr: Any) -> None:
+    """V2 time_range 校验：{from, to} ISO 日期字符串且 from ≤ to（设计 §3.1）。"""
+    if not isinstance(tr, dict):
+        v.append("time_range 必须为对象 {from, to}")
+        return
+    unknown = set(tr) - TIME_RANGE_KEYS
+    if unknown:
+        v.append(f"time_range 未知键: {sorted(unknown)}")
+    frm, to = tr.get("from"), tr.get("to")
+    for name, val in (("from", frm), ("to", to)):
+        if not isinstance(val, str) or not _ISO_DATE_RE.match(val):
+            v.append(f"time_range.{name} 必须为 ISO 日期 YYYY-MM-DD: {val!r}")
+    if isinstance(frm, str) and isinstance(to, str) and frm > to:
+        v.append(f"time_range.from 必须 ≤ to: {frm!r} > {to!r}")
+
+
+def _date_fields(obj: Any) -> list[str]:
+    """对象 schema 中类型为 date 的字段（非 metric 路径 time_range 的绑定点）。"""
+    return [
+        name
+        for name, f in obj.model.model_fields.items()
+        if _is_date(_unwrap_optional(f.annotation))
+    ]
+
+
+def _validate_metric_block(
+    v: list[str],
+    metric: Any,
+    metrics: MetricRegistry,
+    top_time_range: Any = None,
+) -> None:
+    """M 系列指标校验（设计 §3.1/§3.2）：metric_id ∈ 注册表 / dimension_filters 键 ∈ 维度白名单 /
+    值类型 / time_range 合法且指标须有日期维度 / group_by 取物化表维度子集且仅可加聚合。
+
+    top_time_range：顶层 time_range（未放 metric 块内时与块内等价，执行取块内优先）。
+    """
+    if not isinstance(metric, dict):
+        v.append("metric 必须为对象")
+        return
+    unknown = set(metric) - METRIC_KEYS
+    if unknown:
+        v.append(f"metric 未知键: {sorted(unknown)}")
+    mid = metric.get("metric_id")
+    if not isinstance(mid, str) or mid not in metrics.by_id():
+        v.append(f"metric_id 不在指标注册表（M 系列）: {mid!r}")
+        return  # 后续校验依赖 metric 定义
+    md = metrics.by_id()[mid]
+    dims = {d.name for d in md.dimension_fields}
+
+    dim_filters = metric.get("dimension_filters") or {}
+    if not isinstance(dim_filters, dict):
+        v.append("metric.dimension_filters 必须为对象")
+        dim_filters = {}
+    for fname, expr in dim_filters.items():
+        if fname not in dims:
+            v.append(f"dimension_filters 字段不在 {mid} 维度白名单: {fname!r}")
+            continue
+        v.extend(_validate_filter_expr(fname, expr, _dimension_value_check(fname, md, fname)))
+
+    tr = metric.get("time_range") if metric.get("time_range") is not None else top_time_range
+    if tr is not None:
+        _validate_time_range(v, tr)
+        if not any(is_date_dimension(d) for d in md.dimension_fields):
+            v.append(f"指标 {mid} 无日期维度（substr 派生），time_range 无法绑定")
+
+    gb = metric.get("group_by")
+    if gb is not None:
+        if not isinstance(gb, list):
+            v.append("metric.group_by 必须为数组")
+        elif len(gb) > MAX_GROUP_BY:
+            v.append(f"metric.group_by 超过上限 {MAX_GROUP_BY}（V5）")
+        elif gb:
+            for g in gb:
+                if not isinstance(g, str) or g not in dims:
+                    v.append(f"metric.group_by 不在 {mid} 维度白名单: {g!r}")
+            if md.agg_function in ("avg", "count_distinct"):
+                v.append(f"聚合 {md.agg_function} 非可加，禁物化表子集重聚合 group_by: {mid}")
 
 
 def _validate_aggregation(agg: Any, fields: dict, obj_name: str) -> list[str]:
@@ -176,14 +337,28 @@ def _validate_aggregation(agg: Any, fields: dict, obj_name: str) -> list[str]:
     return v
 
 
-def validate_contract(contract: Any, registry: Registry) -> list[str]:
-    """契约 v0.1 校验（V1-V5）。返回违规列表；空列表 = 通过（fail-closed：非空即拒答）。"""
+def validate_contract(
+    contract: Any, registry: Registry, metrics: MetricRegistry | None = None
+) -> list[str]:
+    """契约 v0.1/v0.2 校验（V1-V5 + M 系列）。返回违规列表；空列表 = 通过（fail-closed：非空即拒答）。
+
+    contract 含 metric → v0.2 指标物化路径校验（M 系列，口径由指标注册表单点定义，不要求 object_type）；
+    无 metric → v0.1 对象路径（老契约行为完全不变；count_distinct / time_range 为 v0.1 扩展）。
+    metrics 未注入且契约含 metric → 拒答（M 系列 fail-closed）。
+    """
     v: list[str] = []
     if not isinstance(contract, dict):
         return ["契约必须为 JSON 对象"]
     unknown = set(contract) - CONTRACT_KEYS
     if unknown:
         v.append(f"未知顶层键（additionalProperties:false）: {sorted(unknown)}")
+
+    if contract.get("metric") is not None:
+        if metrics is None:
+            v.append("contract 含 metric 但未提供指标注册表（M 系列拒答，fail-closed）")
+        else:
+            _validate_metric_block(v, contract["metric"], metrics, contract.get("time_range"))
+        return v  # v0.2 物化路径：语义由指标注册表单点定义（§3.1 R3）
 
     obj = _resolve_type(registry, contract.get("object_type"))
     if obj is None:
@@ -199,7 +374,7 @@ def validate_contract(contract: Any, registry: Registry) -> list[str]:
         if fname not in fields:
             v.append(f"过滤字段不在 {obj.name} 白名单: {fname}")
             continue
-        v.extend(_validate_filter_expr(fname, expr, fields[fname]))
+        v.extend(_validate_filter_expr(fname, expr, _object_value_check(fname, fields[fname])))
 
     aggs = contract.get("aggregations") or []
     if not isinstance(aggs, list):
@@ -282,21 +457,48 @@ def _compute_agg(rows: list[dict[str, Any]], agg: dict) -> dict[str, Any]:
         return {"function": fn, "field": fld, "value": min(vals)}
     if fn == "max":
         return {"function": fn, "field": fld, "value": max(vals)}
+    if fn == "count_distinct":  # v0.2 扩展：COUNT(DISTINCT 字段) 去重计数
+        return {"function": fn, "field": fld, "value": len(set(vals))}
     return {"function": fn, "field": fld, "value": sum(vals) / len(vals)}
 
 
 class ContractExecutor:
-    """契约 v0.1 执行器：校验 → 参数化查询 → 多码谓词强制 → 结果护栏。"""
+    """契约 v0.1/v0.2 执行器：校验 → 参数化查询 → 多码谓词强制 → 结果护栏。
 
-    def __init__(self, materialization: DesMaterialization, registry: Registry) -> None:
+    v0.1 对象路径（默认）：DuckDB 动态派生（过滤/聚合/≤1 跳 link_traversal）；
+    v0.2 指标路径（contract 含 metric）：命中 metrics.db 预聚合表（不现场算，设计 §3.2）。
+    """
+
+    def __init__(
+        self,
+        materialization: DesMaterialization,
+        registry: Registry,
+        metrics: MetricRegistry | None = None,
+        metrics_db: Path | None = None,
+    ) -> None:
+        """metrics：指标注册表（v0.2 metric 路径必需；未注入时含 metric 契约 fail-closed 拒答）。
+
+        metrics_db：metrics.db 路径（默认 = 企业目录 / metrics.db，与 manifest.json 同目录，
+        供 T3 版本守卫比对）。
+        """
         self._mz = materialization
         self._registry = registry
+        self._metrics = metrics
         self._conn = materialization.duckdb
         self._legacy_re = materialization.legacy_re
+        self._metrics_db = metrics_db or (
+            DEFAULT_ENTERPRISES_DIR / materialization.enterprise_code / METRICS_DB
+        )
 
     def execute(self, contract: dict) -> dict:
-        """校验并执行契约；任一校验失败抛 ContractError（fail-closed 拒答）。"""
-        violations = validate_contract(contract, self._registry)
+        """校验并执行契约；任一校验失败抛 ContractError（fail-closed 拒答）。
+
+        contract 含 metric → v0.2 指标物化路径（_execute_metric）；
+        否则走 v0.1 对象路径（行为完全不变）。
+        """
+        if isinstance(contract, dict) and contract.get("metric") is not None:
+            return self._execute_metric(contract)
+        violations = validate_contract(contract, self._registry, self._metrics)
         if violations:
             raise ContractError("契约校验失败（fail-closed 拒答）: " + "; ".join(violations))
         obj = _resolve_type(self._registry, contract["object_type"])
@@ -394,6 +596,113 @@ class ContractExecutor:
                 item["codes"] = by_pk.get(pk, [])
             items.append(item)
         return items
+
+    # ------------------------------------------------------------------
+    # v0.2 指标物化路径（设计 §3.2：命中 metrics.db 预聚合表，不现场算）
+    # ------------------------------------------------------------------
+    def _execute_metric(self, contract: dict) -> dict:
+        """执行 v0.2 指标契约：M 系列校验 → T3 版本守卫 → 查 metrics.db 物化表。
+
+        返回 {object_type, metric_id, count, rows}；结果护栏与 v0.1 一致（V5）。
+        """
+        if self._metrics is None:
+            raise ContractError("契约含 metric 但执行器未注入指标注册表（M 系列 fail-closed）")
+        violations = validate_contract(contract, self._registry, self._metrics)
+        if violations:
+            raise ContractError("契约校验失败（fail-closed 拒答）: " + "; ".join(violations))
+        if not self._metrics_db.is_file():
+            raise ContractError(f"metrics.db 缺失: {self._metrics_db}（先运行 materialize_metrics）")
+        md = self._metrics.by_id()[contract["metric"]["metric_id"]]
+        conn = duckdb.connect(str(self._metrics_db), read_only=True)
+        try:
+            self._guard_version(conn)  # T3 版本守卫（漂移 fail-fast）
+            where, params = self._metric_where(contract, md)
+            gb = contract["metric"].get("group_by") or []
+            rows = self._query_metric(conn, md, gb, where, params)
+        finally:
+            conn.close()
+        limit = self._result_limit()
+        if len(rows) > limit:
+            raise ContractError(f"结果行数 {len(rows)} 超过护栏上限 {limit}（V5，请加过滤）")
+        return {
+            "object_type": md.object_type,
+            "metric_id": md.metric_id,
+            "count": len(rows),
+            "rows": rows,
+        }
+
+    def _guard_version(self, conn: Any) -> None:
+        """T3 查询侧版本守卫（设计 §2.2(3)）：metric_meta.data_version/config_sha256 vs manifest。
+
+        与 metrics_materialize.check_metrics_version 同源口径（单一事实来源 = manifest.json）；
+        漂移（源数据变更后未刷新）即抛 ContractError（fail-closed：拒答并提示刷新）。
+        """
+        man_path = self._metrics_db.parent / "manifest.json"
+        if not man_path.is_file():
+            raise ContractError(f"manifest 缺失: {man_path}（先运行 python -m src.des --enterprise <code>）")
+        man = json.loads(man_path.read_text(encoding="utf-8"))
+        rows = conn.execute(
+            f"SELECT metric_id, data_version, config_sha256 FROM {METRIC_META_TABLE} ORDER BY metric_id"
+        ).fetchall()
+        if not rows:
+            raise ContractError(f"{METRIC_META_TABLE} 为空（尚未物化）: {self._metrics_db}")
+        drifted = [
+            f"{mid}: 物化 {dv}/{sha} ≠ manifest {man['data_version']}/{man['config_sha256']}"
+            for mid, dv, sha in rows
+            if dv != man["data_version"] or sha != man["config_sha256"]
+        ]
+        if drifted:
+            raise ContractError("数据版本漂移，请刷新（T3 fail-closed）: " + "; ".join(drifted))
+
+    def _metric_where(self, contract: dict, md: MetricDef) -> tuple[str, list[Any]]:
+        """指标 WHERE：dimension_filters 参数化（V4）+ time_range 绑定日期维度。
+
+        物化表列名 = 维度语义名（metric_table_name 约定）；time_range 值按日期维度粒度
+        截断（substr(1,7) → 前 7 位 YYYY-MM）后比较；块内 time_range 优先于顶层。
+        """
+        metric = contract["metric"]
+        where, params = _build_where(metric.get("dimension_filters") or {})
+        tr = metric.get("time_range") if metric.get("time_range") is not None else contract.get("time_range")
+        if tr is not None:
+            dim = self._date_dimension(md)
+            grain = date_dimension_grain(dim)
+            frm = tr["from"][:grain] if grain else tr["from"]
+            to = tr["to"][:grain] if grain else tr["to"]
+            where = f"{where} AND {dim.name} >= ? AND {dim.name} <= ?"
+            params += [frm, to]
+        return where, params
+
+    def _date_dimension(self, md: MetricDef) -> DimensionField:
+        """指标时间维度（time_range 绑定点）：带 substr 派生的日期维度（校验已保证存在）。"""
+        for d in md.dimension_fields:
+            if is_date_dimension(d):
+                return d
+        raise ContractError(f"指标 {md.metric_id} 无日期维度，time_range 无法绑定（校验应已拦截）")
+
+    def _query_metric(
+        self, conn: Any, md: MetricDef, gb: list[str], where: str, params: list[Any]
+    ) -> list[dict[str, Any]]:
+        """查 metric_<id> 物化表（参数化，V4）：无 group_by → 维度全列 + 度量列；
+        有 group_by → 物化表子集重聚合（仅可加聚合 sum/count/min/max，校验已挡 avg/count_distinct）。
+
+        表名/列名全为注册表派生常量（无用户输入，无注入面），值一律 ? 绑定。
+        """
+        table = metric_table_name(md.metric_id)
+        measure_col = md.measure.name
+        if gb:
+            select = ", ".join(
+                gb + [f"{_METRIC_REAGG_SQL[md.agg_function]}({measure_col}) AS {measure_col}"]
+            )
+            order = ", ".join(gb)
+            sql = f"SELECT {select} FROM {table} WHERE {where} GROUP BY {order} ORDER BY {order}"
+        else:
+            cols = ", ".join([d.name for d in md.dimension_fields] + [measure_col])
+            order = ", ".join(d.name for d in md.dimension_fields)
+            sql = f"SELECT {cols} FROM {table} WHERE {where} ORDER BY {order}"
+        try:
+            return rows_as_dicts(conn, sql, params)
+        except Exception as exc:  # 表缺失/类型错误即 fail-closed
+            raise ContractError(f"指标执行失败（fail-closed 拒答）: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
