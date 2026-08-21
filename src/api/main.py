@@ -75,7 +75,11 @@ def create_app(
     with store.ontology_conn() as conn:
         index.load_ontology_state(conn)
     audit = AuditLog(store)
-    engine = ActionEngine(registry, store, index, audit)
+    # P4：动作权限门（fail-closed + 演示策略种子，越权 0；额度恢复后由编码角色复核）
+    from src.runtime.permission_setup import build_permission_enforcer
+
+    enforcer = build_permission_enforcer(store, registry)
+    engine = ActionEngine(registry, store, index, audit, enforcer=enforcer)
     query = ObjectQuery(index, registry)
 
     # P4-T2：把 runtime 内置动作登记进 action_types（单一事实来源 = 运行时引擎，
