@@ -1,7 +1,7 @@
 """S2 P1a DES 垂直切片 —— 本体映射侧门禁（设计文档 §1.4/§3/§4 可机验断言）。
 
-对照 docs/P1a-本体映射与查询契约设计_v0.1.md：
-- 物化锚点（§1.4/§1.5）：Material=200、Code=830（跨 3 源系统物化，可机验）；
+对照 docs/P1a-本体映射与查询契约设计_v0.1.md（量级随 P1b 配置：MARA=8,000）：
+- 物化锚点（§1.4/§1.5）：Material=8,000、Code=33,200（跨 3 源系统物化，可机验）；
 - 契约校验 V1-V5（§3.3）：字段白名单 / 类型 / ≤1 跳 / 防注入 / 护栏，违规一律 fail-closed 拒答；
 - ground truth（§4.1-§4.3）：DQ-01（Q1）/ Q2 / Q3 执行断言 + reconcile_dq01 三方对账（§2.3）。
 旧码正则禁硬编码：一律从配置派生（mz.legacy_re，设计 §2.2）。
@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from src.des.config import load_config
 from src.des.contract import (
     DQ01_CONTRACT,
     ContractError,
@@ -29,10 +30,17 @@ from src.ontology.registry import Registry
 ROOT = Path(__file__).resolve().parents[1]
 ENTERPRISE_CODE = "hc_precision"
 ENTERPRISE_DIR = ROOT / "data" / "des" / "enterprises" / ENTERPRISE_CODE
-EXPECTED_MATERIAL = 200  # 设计 §1.4/§1.5：MARA 行数 = 物料概念数
-EXPECTED_CODE = 830  # 设计 §1.4：200×3 主码族 + 200 mes + 30 legacy
-EXPECTED_MULTI = 30  # 设计 §4.1：round(N × rate) = round(200×0.15)
-EXPECTED_RATE = 0.15  # 设计 §4.3：占比 = 30/200 = 15.00%
+# 期望值全部从生效配置派生（单一事实来源 = 配置，禁硬编码）：模板层 + 企业覆盖层 deep_merge 后读取
+_CONFIG = load_config(ENTERPRISE_CODE)
+_MARA_ROWS = _CONFIG["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
+_MPLA_ROWS = _CONFIG["enterprise"]["systems"]["mes"]["tables"]["MPLA"]["row_count"]
+_MULTI_RATE = _CONFIG["injection"]["multi_code"]["rate"]
+
+EXPECTED_MATERIAL = _MARA_ROWS  # §1.4/§1.5：MARA 行数 = 物料概念数
+EXPECTED_MULTI = round(_MARA_ROWS * _MULTI_RATE)  # §4.1：round(N×rate)
+# §1.4：Code = 主码族(plm/erp/wms 各 N) + mes(N) + legacy(round(N×rate))
+EXPECTED_CODE = 3 * _MARA_ROWS + _MPLA_ROWS + EXPECTED_MULTI
+EXPECTED_RATE = EXPECTED_MULTI / EXPECTED_MATERIAL  # §4.3：占比 = count/N
 
 
 # 契约校验 V1-V5 拒答集：（违规契约, 预期违规说明片段, 对应规则）
@@ -103,7 +111,7 @@ def _executor(mz: tuple[DesMaterialization, Registry]) -> ContractExecutor:
 # 物化锚点（设计 §1.4/§1.5）
 # ===========================================================================
 def test_materialization_anchors(mz: tuple[DesMaterialization, Registry]) -> None:
-    """物化锚点：Material=200、Code=830、跨库一致性 0 差异、self_check 零问题。"""
+    """物化锚点：Material=N、Code=3N+mes+legacy、跨库一致性 0 差异、self_check 零问题。"""
     mat, _ = mz
     assert mat.material_count == EXPECTED_MATERIAL
     assert mat.code_count == EXPECTED_CODE
@@ -142,7 +150,7 @@ def test_dq01_contract_validates_clean(mz: tuple[DesMaterialization, Registry]) 
 # ground truth 执行（设计 §4.3 Q1/Q2/Q3）
 # ===========================================================================
 def test_dq01_execution(mz: tuple[DesMaterialization, Registry]) -> None:
-    """DQ-01（Q1）：30 条 Material，每条满足一物多码全谓词，codes 含 legacy 行。"""
+    """DQ-01（Q1）：round(N × rate) 条 Material，每条满足一物多码全谓词，codes 含 legacy 行。"""
     result = _executor(mz).execute(DQ01_CONTRACT)
     assert result["object_type"] == "Material"
     assert result["count"] == EXPECTED_MULTI
@@ -186,7 +194,7 @@ def test_q2_single_material_codes(mz: tuple[DesMaterialization, Registry]) -> No
 
 
 def test_q3_aggregation(mz: tuple[DesMaterialization, Registry]) -> None:
-    """Q3：一物多码计数与占比（聚合）—— count=30、ratio=15.00%。"""
+    """Q3：一物多码计数与占比（聚合）—— count=round(N × rate)、ratio=count/N。"""
     contract = {
         "object_type": "Material",
         "filters": {"old_code": {"op": "is_not_null"}},
@@ -201,7 +209,7 @@ def test_q3_aggregation(mz: tuple[DesMaterialization, Registry]) -> None:
 
 
 def test_reconcile_dq01(mz: tuple[DesMaterialization, Registry]) -> None:
-    """DQ-01 三方对账（设计 §2.3）：ok=True、expected=actual=30、differences 空。"""
+    """DQ-01 三方对账（设计 §2.3）：ok=True、expected=actual=round(N × rate)、differences 空。"""
     result = _executor(mz).execute(DQ01_CONTRACT)
     rec = reconcile_dq01(result, out_dir=ENTERPRISE_DIR)
     assert rec.ok is True

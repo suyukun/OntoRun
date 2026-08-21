@@ -28,7 +28,7 @@ CONTRACT_KEYS = {"contract_version", "object_type", "filters", "aggregations", "
 FILTER_EXPR_KEYS = {"op", "value"}
 OPS = ("eq", "ne", "is_null", "is_not_null", "in")
 AGG_FUNCS = ("count", "sum", "avg", "min", "max")
-RESULT_LIMIT = 1000  # V5 结果行数上限
+RESULT_LIMIT_FLOOR = 1000  # V5 结果护栏下限（实际上限从配置派生 = max(下限, 2×round(N×rate))，禁硬编码）
 MAX_AGGREGATIONS = 5  # V5
 MAX_GROUP_BY = 4  # V5
 _SQL_FRAGMENT_MARKERS = ("'", '"', ";", "--", "/*", "*/")
@@ -306,8 +306,9 @@ class ContractExecutor:
             rows = rows_as_dicts(self._conn, sql, params)
         except Exception as exc:  # 表不存在/类型错误即 fail-closed
             raise ContractError(f"契约执行失败（fail-closed 拒答）: {exc}") from exc
-        if len(rows) > RESULT_LIMIT:
-            raise ContractError(f"结果行数 {len(rows)} 超过护栏上限 {RESULT_LIMIT}（V5，请加过滤）")
+        limit = self._result_limit()
+        if len(rows) > limit:
+            raise ContractError(f"结果行数 {len(rows)} 超过护栏上限 {limit}（V5，请加过滤）")
 
         # 多码谓词强制（设计 §3.2：对 old_code 非空结果集再过 §2.2 全谓词，口径单点化）
         excluded = 0
@@ -323,6 +324,17 @@ class ContractExecutor:
         if excluded:
             result["_diagnostics"] = {"predicate_excluded": excluded}
         return result
+
+    def _result_limit(self) -> int:
+        """V5 结果护栏上限：从生效配置派生（禁硬编码 1000）——max(下限, 2×round(N×rate))。
+
+        保证 DQ-01 全量结果（round(N×rate) 条）可放行，同时按量级封顶大结果集（如未过滤的全表）；
+        N = MARA 行数、rate = multi_code 注入率，均取自定义配置（单一事实来源）。
+        """
+        config = self._mz.config
+        mara = config["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
+        rate = config["injection"]["multi_code"]["rate"]
+        return max(RESULT_LIMIT_FLOOR, 2 * round(mara * rate))
 
     def _needs_multi_code_predicate(self, contract: dict) -> bool:
         """契约是否以 old_code is_not_null 选中一物多码结果集（触发全谓词强制）。"""
