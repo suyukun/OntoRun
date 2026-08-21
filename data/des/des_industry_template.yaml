@@ -1,0 +1,22 @@
+# des_industry_template.yaml —— 制造业行业模板（默认层，行业级共用，一般不改）
+# 依据 docs/P1a-DES-配置与表结构设计_v0.1.md §1.3；企业文件经加载器 deep_merge 继承本层。
+industry: manufacturing
+template_version: "0.1"
+
+# —— 默认锚：企业文件经加载器深度合并继承；本文件内 anchor/alias 消重 ——
+coding: &coding
+  master_pattern: "MAT-{YYYY}-{NNNN}-{CCC}"    # 新主码（ERP MATNR 格式），机验锚点
+  year: 2026
+
+injection: &injection
+  multi_code:
+    field: BISMT            # 旧码承载字段（ERP MARA.BISMT）
+    rate: 0.15              # 一物多码注入率目标（默认 15%）
+    tolerance: 0.02         # 注入率机验容差（±2%）
+    legacy_pattern: "{prefix}-{year}{seq:05d}"   # 旧码格式，如 HC-202600007
+
+storage:
+  layout: "one_enterprise_one_dir"   # 1 企业=1 目录，N 系统=N SQLite 文件（见 §5）
+
+seed_policy: fixed                   # 确定性锚：固定 seed（沿用 S1：SEED 固定 + 确定性生成）
+material_count_default: 200

@@ -1,0 +1,29 @@
+"""DES 生成器 CLI 入口（设计 §5 目录/存储，对外 argparse 接口）。
+
+用法示例：
+    python -m src.des --enterprise hc_precision
+    python -m src.des --enterprise hc_precision --seed 20260821 --out /tmp/des_out
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Sequence
+
+from .generate import build_enterprise
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """argparse 入口：--enterprise/--seed/--out（默认输出企业目录）。"""
+    parser = argparse.ArgumentParser(description="DES 确定性企业数据生成器（S2 P1a 垂直切片）")
+    parser.add_argument("--enterprise", default="hc_precision", help="企业编码（目录名），默认 hc_precision")
+    parser.add_argument("--seed", type=int, default=None, help="覆盖企业配置中的生成 seed")
+    parser.add_argument("--out", default=None, help="输出目录（默认 <data/des/enterprises>/<enterprise>）")
+    args = parser.parse_args(argv)
+    result = build_enterprise(args.enterprise, out_dir=args.out, seed=args.seed)
+    print(f"已生成企业数据: {result['enterprise']}（seed={result['seed']}，注入 {result['injected']} 行）")
+    print(f"输出目录: {result['out']}")
+
+
+if __name__ == "__main__":
+    main()

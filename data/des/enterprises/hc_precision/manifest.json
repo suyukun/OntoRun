@@ -1,0 +1,20 @@
+{
+  "enterprise": "hc_precision",
+  "seed": 20260821,
+  "config_sha256": "8a559631fdb3cef42ceaa26654ca4079a4fa1b4886ebe10de4a11c2ecad1208b",
+  "tables": {
+    "erp.MARA": {
+      "rows": 200,
+      "sha256": "c17d20db58cd35881f822f2c3a55885fc1ba2daecc55562d74db8b94079b9da1",
+      "multi_code_count": 30
+    },
+    "mes.MPLA": {
+      "rows": 200,
+      "sha256": "0ae06ea42ad171e758c84107d9619954c0ca3cf40f87f3bc2c5a4b0d8b4e7d7d"
+    },
+    "wms.WMMD": {
+      "rows": 200,
+      "sha256": "8694b0cb2d6b54daab38206d81e4f326ce2692e5974a9dc6ac0dddf53f6042c3"
+    }
+  }
+}
