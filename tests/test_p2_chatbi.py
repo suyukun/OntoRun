@@ -125,9 +125,14 @@ def executor(
     metrics: MetricRegistry,
     mat_result: MetricsMaterializationResult,
 ) -> ContractExecutor:
-    """无权限上下文执行器（v0.1/v0.2 全路径共用；metrics_db 为 Path，勿传 str）。"""
+    """显式 allow-all 权限上下文执行器（功能路径共用；red-team P1-1：无 ctx = 默认 deny，
+    功能测试必须显式放行；metrics_db 为 Path，勿传 str）。"""
     return ContractExecutor(
-        mz, registry, metrics=metrics, metrics_db=METRICS_DB_PATH
+        mz,
+        registry,
+        metrics=metrics,
+        metrics_db=METRICS_DB_PATH,
+        permission_ctx=PermissionContext.allow_all(),
     )
 
 
@@ -160,7 +165,7 @@ def _executor_with_perm(
     metrics: MetricRegistry,
     ctx: PermissionContext | None,
 ) -> ContractExecutor:
-    """构造带读侧权限上下文的执行器（None = 无权限校验，保持既有调用兼容）。"""
+    """构造带读侧权限上下文的执行器（None = 默认 deny，fail-closed；red-team P1-1）。"""
     return ContractExecutor(
         mz, registry, metrics=metrics, metrics_db=METRICS_DB_PATH, permission_ctx=ctx
     )
@@ -404,7 +409,11 @@ def test_t3_guard_rejects_drift(
     with open(drift_dir / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(man, f, ensure_ascii=False)
     ex = ContractExecutor(
-        mz, registry, metrics=metrics, metrics_db=drift_dir / METRICS_DB
+        mz,
+        registry,
+        metrics=metrics,
+        metrics_db=drift_dir / METRICS_DB,
+        permission_ctx=PermissionContext.allow_all(),
     )
     contract = {
         "contract_version": "0.2",
@@ -559,7 +568,9 @@ def test_metric_missing_registry_fail_closed(
         "metric": {"metric_id": "sales_amount_by_mat_month"},
     }
     assert validate_contract(contract, registry)  # metrics=None → 非空违规
-    ex = ContractExecutor(mz, registry, metrics_db=METRICS_DB_PATH)
+    ex = ContractExecutor(
+        mz, registry, metrics_db=METRICS_DB_PATH, permission_ctx=PermissionContext.allow_all()
+    )
     with pytest.raises(ContractError):
         ex.execute(contract)
 
@@ -634,20 +645,17 @@ def test_q3_v01_compat(executor: ContractExecutor) -> None:
 # ===========================================================================
 # ⑤ 读侧权限（设计 §3.3，P1.5 decide(read) 接线）
 # ===========================================================================
-def test_permission_no_ctx_compat(
-    executor: ContractExecutor, metrics: MetricRegistry
+def test_permission_no_ctx_deny_fail_closed(
+    mz: DesMaterialization, registry: Registry
 ) -> None:
-    """无 permission_ctx：不校验权限，v0.2 指标路径照常执行（保持既有调用兼容）。"""
-    conn = duckdb.connect(str(METRICS_DB_PATH), read_only=True)
-    try:
-        matnr = conn.execute(
-            "SELECT matnr FROM metric_sales_amount_by_mat_month "
-            "ORDER BY sales_amount DESC LIMIT 1"
-        ).fetchone()[0]
-    finally:
-        conn.close()
-    result = executor.execute(_sales_contract(matnr))
-    assert result["count"] > 0
+    """red-team P1-1：无 permission_ctx → 执行器缺省默认 deny（fail-closed），读操作被拒。
+
+    旧行为「无 ctx 照常执行」是 fail-open 缺陷，不再保留——内部工具需显式 allow_all 才放行。
+    """
+    ex = ContractExecutor(mz, registry)  # 不传 ctx = 默认 deny
+    with pytest.raises(PermissionDeniedError) as exc:
+        ex.execute(DQ01_CONTRACT)
+    assert exc.value.code == "PERMISSION_DENIED"
 
 
 def test_permission_no_policy_fail_closed(
@@ -731,6 +739,82 @@ def test_permission_attribute_deny_v01_dq01(
     with pytest.raises(PermissionDeniedError) as exc:
         ex.execute(DQ01_CONTRACT)
     assert "old_code" in str(exc.value)
+
+
+def test_permission_link_target_denied_fail_closed(
+    mz: DesMaterialization,
+    registry: Registry,
+    metrics: MetricRegistry,
+    perm_service: PermissionService,
+) -> None:
+    """red-team P1-2：link_traversal 目标（Code）无 read 策略 + source（Material）allow → 拒答。
+
+    目标对象权限必须纳入 decide(read)，否则 link_traversal 可系统性旁路被 deny 的敏感对象。
+    """
+    perm_service.create(_policy(policy_id="allow-mat"))  # 仅 Material allow，Code 无策略
+    ctx = PermissionContext(subject=_agent(), permission_registry=perm_service.perm_registry)
+    ex = _executor_with_perm(mz, registry, metrics, ctx)
+    with pytest.raises(PermissionDeniedError) as exc:
+        ex.execute(DQ01_CONTRACT)
+    assert exc.value.code == "PERMISSION_DENIED"
+    assert "Code" in str(exc.value)
+
+
+def test_permission_link_target_allow_passes(
+    mz: DesMaterialization,
+    registry: Registry,
+    metrics: MetricRegistry,
+    perm_service: PermissionService,
+) -> None:
+    """red-team P1-2：link 目标（Code）allow → DQ-01 返回且 codes 数组在（目标权限放行）。"""
+    perm_service.create(_policy(policy_id="allow-mat"))
+    perm_service.create(_policy(policy_id="allow-code", object_type="Code"))
+    ctx = PermissionContext(subject=_agent(), permission_registry=perm_service.perm_registry)
+    ex = _executor_with_perm(mz, registry, metrics, ctx)
+    result = ex.execute(DQ01_CONTRACT)
+    assert result["count"] > 0
+    assert any(item["codes"] for item in result["items"])
+
+
+def test_permission_link_target_attribute_deny_fail_closed(
+    mz: DesMaterialization,
+    registry: Registry,
+    metrics: MetricRegistry,
+    perm_service: PermissionService,
+) -> None:
+    """red-team P1-2：link 目标（Code）属性级 deny（value）→ 返回列不可见 → fail-closed 拒答。"""
+    perm_service.create(_policy(policy_id="allow-mat"))
+    perm_service.create(_policy(policy_id="allow-code", object_type="Code"))
+    perm_service.create(
+        _policy(
+            policy_id="deny-code-value",
+            object_type="Code",
+            effect="deny",
+            scope="attribute",
+            attributes=["value"],
+        )
+    )
+    ctx = PermissionContext(subject=_agent(), permission_registry=perm_service.perm_registry)
+    ex = _executor_with_perm(mz, registry, metrics, ctx)
+    with pytest.raises(PermissionDeniedError) as exc:
+        ex.execute(DQ01_CONTRACT)
+    assert "value" in str(exc.value)
+
+
+def test_v01_time_range_fail_closed(
+    executor: ContractExecutor, registry: Registry
+) -> None:
+    """red-team P2-2：v0.1 非 metric 契约带 time_range → 校验违规 ∧ 执行器拒答（杜绝静默忽略）。"""
+    contract = {
+        "object_type": "Material",
+        "filters": {"material_type": {"op": "eq", "value": "ROH"}},
+        "time_range": {"from": "2026-01-01", "to": "2026-01-31"},
+    }
+    violations = validate_contract(contract, registry)
+    assert any("不支持 time_range" in v for v in violations)
+    with pytest.raises(ContractError) as exc:
+        executor.execute(contract)
+    assert "不支持 time_range" in str(exc.value)
 
 
 # ===========================================================================

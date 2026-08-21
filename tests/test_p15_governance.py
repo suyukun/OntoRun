@@ -20,6 +20,7 @@ import json
 import shutil
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -378,8 +379,13 @@ def test_decide_approve_human_only_fallback(perm, registry) -> None:
 # ② 审计骨架可查（门禁 2）
 # ======================================================================
 def _recompute_hash(prev_hash: str, row: dict) -> str:
-    """按设计 2.3 规格独立重算 record_hash（不调用实现，防测试与实现同错）。"""
-    content = {k: v for k, v in row.items() if k not in ("prev_hash", "record_hash")}
+    """按设计 2.3 规格独立重算 record_hash（不调用实现，防测试与实现同错）。
+
+    seq 与 prev_hash/record_hash 同属链元数据（链序，非记录内容），不入哈希（P2-1）。
+    """
+    content = {
+        k: v for k, v in row.items() if k not in ("prev_hash", "record_hash", "seq")
+    }
     payload = (
         (prev_hash or "")
         + "|"
@@ -389,17 +395,21 @@ def _recompute_hash(prev_hash: str, row: dict) -> str:
 
 
 def test_audit_hash_chain_correct(audit, store) -> None:
-    """哈希链：genesis prev=""、record_hash 与按规格重算一致、prev_hash 逐条衔接。"""
+    """哈希链：genesis prev=""、record_hash 与按规格重算一致、prev_hash 逐条衔接。
+
+    链序 = seq 追加序（P2-1），与 audit_id 字典序解耦。
+    """
     for _ in range(3):
         audit.append(_audit_record())
     conn = store.ontology_conn()
     try:
         rows = [
             dict(r)
-            for r in conn.execute("SELECT * FROM audit_log ORDER BY audit_id ASC").fetchall()
+            for r in conn.execute("SELECT * FROM audit_log ORDER BY seq ASC").fetchall()
         ]
     finally:
         conn.close()
+    assert [r["seq"] for r in rows] == [1, 2, 3]  # seq = 追加序自增
     assert len(rows) == 3
     assert rows[0]["prev_hash"] == ""  # genesis
     assert rows[0]["record_hash"] == _recompute_hash("", rows[0])
@@ -418,6 +428,37 @@ def test_verify_integrity_ok(audit) -> None:
     assert report["checked"] == 3
     assert report["broken"] == []
     assert report["first_broken_index"] is None
+
+
+def test_verify_integrity_same_ms_out_of_order(audit, store) -> None:
+    """P2-1 修复：同毫秒内 audit_id 乱序追加（后追加 id 字典序更小）→ 链序 = 追加序（seq），verify 全绿。
+
+    旧实现按 audit_id 字典序定链序，同毫秒后追加的随机 ULID 有 ~50% 字典序更小，
+    导致 append 取 prev 与 verify 重算顺序相反 → 正常追加被误报 broken。seq 修复后
+    链序与追加序统一，乱序 audit_id 不再断链。
+    """
+    ts = datetime(2026, 8, 21, 10, 0, 0, tzinfo=timezone.utc)
+    first = audit.append(
+        _audit_record(action_name="first", audit_id="ZZZZZZZZZZZZZZZZZZZZZZZZZZ", ts=ts)
+    )
+    second = audit.append(
+        _audit_record(action_name="second", audit_id="AAAA000000000000000000000000", ts=ts)
+    )
+    report = audit.verify_integrity()
+    assert report["ok"] is True, f"同毫秒乱序追加不应断链（链序 = seq 追加序）: {report}"
+    assert report["broken"] == []
+    # 链序 = 追加序：second 的 prev_hash 指向 first（而非按 audit_id 字典序）
+    conn = store.ontology_conn()
+    try:
+        rows = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM audit_log ORDER BY seq ASC").fetchall()
+        ]
+    finally:
+        conn.close()
+    assert [r["audit_id"] for r in rows] == [first, second]
+    assert rows[0]["prev_hash"] == ""  # genesis
+    assert rows[1]["prev_hash"] == rows[0]["record_hash"]
 
 
 def test_verify_integrity_detects_bypass_tamper(tmp_path, store, audit) -> None:

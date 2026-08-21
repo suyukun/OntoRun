@@ -19,6 +19,7 @@ from src.des.contract import (
     DQ01_CONTRACT,
     ContractError,
     ContractExecutor,
+    PermissionContext,
     reconcile_dq01,
     validate_contract,
 )
@@ -102,9 +103,12 @@ def mz() -> Iterator[tuple[DesMaterialization, Registry]]:
 
 
 def _executor(mz: tuple[DesMaterialization, Registry]) -> ContractExecutor:
-    """从会话物化构造执行器（校验 + 参数化执行）。"""
+    """从会话物化构造执行器（校验 + 参数化执行）。
+
+    red-team P1-1：无 ctx = 默认 deny（fail-closed），本内部工具显式 allow-all 放行。
+    """
     mat, reg = mz
-    return ContractExecutor(mat, reg)
+    return ContractExecutor(mat, reg, permission_ctx=PermissionContext.allow_all())
 
 
 # ===========================================================================

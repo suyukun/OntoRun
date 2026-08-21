@@ -3,6 +3,8 @@
 audit_log 是"运行语义层"区别于"只读语义层"的证据面：writeback_json 含写回 SQL 与影响行数，
 三问测试 2 除直查源库断言外，审计亦可自证（§3.5 注）。
 audit_id 用 ULID（时间有序 + 随机，标准库实现，不引依赖）。
+链序 = seq 自增列（追加序，与 audit_id 字典序解耦；red-team P2-1：同毫秒乱序 audit_id
+不断链——append 取 max(seq) 作 prev，verify 按 seq 升序重算）。
 """
 
 from __future__ import annotations
@@ -94,8 +96,9 @@ def _hash_chain(prev_hash: str, content: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-# 哈希忽略字段：prev_hash / record_hash 是链元数据，不能自引用入内容
-_HASH_IGNORE_FIELDS = frozenset({"prev_hash", "record_hash"})
+# 哈希忽略字段：prev_hash / record_hash / seq 是链元数据（seq = 链序，非记录内容），
+# 不能自引用入内容——回填/追加 seq 不影响既有 record_hash（既有表兼容，red-team P2-1）。
+_HASH_IGNORE_FIELDS = frozenset({"prev_hash", "record_hash", "seq"})
 
 
 def _content_of(row: dict) -> dict:
@@ -122,7 +125,8 @@ class AuditLog:
     ) -> str:
         """原语义 + 计算 prev_hash/record_hash（哈希链）+ 同步落字段级镜像（同一事务）。
 
-        - 链序按 audit_id（ULID 时间有序）；首条 prev_hash = ""（genesis）；
+        - 链序 = seq 自增列（追加序；首条 prev_hash = "" genesis；red-team P2-1：与
+          audit_id 字典序解耦，同毫秒乱序 audit_id 不断链）；
         - record_hash = SHA256(prev_hash + "|" + canonical_json(内容))（设计 2.3）；
         - effects 按 FieldEffect 协议 duck-typing（action_engine.Effect 直接可用），
           同一事务内落 audit_field_mirror（记录 + 镜像原子，设计 2.4）；
@@ -150,15 +154,17 @@ class AuditLog:
                 "retention_class": record.retention_class,
                 "source": record.source,
             }
+            seq = self._next_seq(conn)
             prev_hash = self._prev_hash(conn)
             record_hash = _hash_chain(prev_hash, _content_of(row))
             conn.execute(
-                "INSERT INTO audit_log (audit_id, ts, action_name, actor, actor_detail, request_id, "
-                "params_json, preconditions_json, effects_json, writeback_json, outcome, error_code, "
-                "message, detail_json, duration_ms, prev_hash, record_hash, retention_class, source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO audit_log (audit_id, seq, ts, action_name, actor, actor_detail, "
+                "request_id, params_json, preconditions_json, effects_json, writeback_json, "
+                "outcome, error_code, message, detail_json, duration_ms, prev_hash, record_hash, "
+                "retention_class, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     row["audit_id"],
+                    seq,
                     row["ts"],
                     row["action_name"],
                     row["actor"],
@@ -200,10 +206,15 @@ class AuditLog:
             conn.close()
         return record.audit_id
 
+    def _next_seq(self, conn) -> int:
+        """链序列（追加序）：max(seq)+1。Store 单写连接串行（§3.4），同事务内安全。"""
+        row = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM audit_log").fetchone()
+        return int(row["n"])
+
     def _prev_hash(self, conn) -> str:
-        """链上前一记录的 record_hash（按 audit_id 降序取最新；空链 → genesis ""）。"""
+        """链上前一记录的 record_hash（按 seq 降序 = 最近追加；空链 → genesis ""）。"""
         row = conn.execute(
-            "SELECT record_hash FROM audit_log ORDER BY audit_id DESC LIMIT 1"
+            "SELECT record_hash FROM audit_log ORDER BY seq DESC LIMIT 1"
         ).fetchone()
         return row["record_hash"] if row else ""
 
@@ -248,8 +259,9 @@ class AuditLog:
             conn.close()
 
     def verify_integrity(self) -> dict:
-        """按 audit_id 升序重算整条哈希链（设计 2.3/2.5 机验 ②③）。
+        """按 seq 升序（追加序）重算整条哈希链（设计 2.3/2.5 机验 ②③；red-team P2-1）。
 
+        链序 = 追加序（seq），与 audit_id 字典序解耦——同毫秒乱序 audit_id 的追加不断链。
         返回 {ok, checked, broken, first_broken_index}：
         - ok = 链全部自洽；checked = 检查条数；
         - broken = 被篡改/删除/插入的记录 audit_id 列表；
@@ -259,7 +271,7 @@ class AuditLog:
         conn = self._store.ontology_conn()
         try:
             rows = conn.execute(
-                "SELECT * FROM audit_log ORDER BY audit_id ASC"
+                "SELECT * FROM audit_log ORDER BY seq ASC"
             ).fetchall()
         finally:
             conn.close()

@@ -11,10 +11,12 @@ v0.2 扩展（设计 §3.1/§3.2，老 v0.1 契约原样可执行）：
   ContractExecutor.execute 开头按 has_metric 分派：metric → _execute_metric（物化路径），
   否则走 v0.1 对象路径（行为完全不变）；
 - count_distinct 聚合函数（v0.1 普通聚合同样支持）；
-- time_range（{from, to} ISO 日期）——metric 块内绑定日期维度；非 metric 契约绑定对象唯一 date 字段。
-- 读侧权限（P1.5 decide(read) 接线，设计 §3.3）：permission_ctx 非 None 时查询前
-decide(subject, object_type, 'read')，属性级 visible_attributes 过滤返回列，
-契约显式请求的字段触及不可见列 fail-closed 拒答（不静默裁剪，防推断泄漏）。
+- time_range（{from, to} ISO 日期）——metric 块内绑定日期维度；非 metric 契约校验期
+  fail-closed 拒答「不支持 time_range」（red-team P2-2：杜绝静默忽略）。
+- 读侧权限（P1.5 decide(read) 接线，设计 §3.3）：permission_ctx 缺省 = 默认 deny
+  （fail-closed，red-team P1-1：无 ctx ≠ 无校验），查询前 decide(subject, object_type, 'read')，
+  属性级 visible_attributes 过滤返回列；契约显式请求的字段触及不可见列 fail-closed 拒答
+  （不静默裁剪，防推断泄漏）；link_traversal 目标对象同样 decide(read)（red-team P1-2）。
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Any, Literal, Protocol, Union, get_args, get_origin
 
 import duckdb
 
@@ -45,7 +47,11 @@ from src.des.metrics import (
 )
 from src.ontology import build_registry
 from src.ontology.registry import Registry
-from src.runtime.permissions import PermissionRegistry, PermissionSubject
+from src.runtime.permissions import (
+    PermissionDecision,
+    PermissionRegistry,
+    PermissionSubject,
+)
 
 # ---------------------------------------------------------------------------
 # 常量（契约 schema 白名单 / 护栏上限，设计 §3.1/§3.3）
@@ -99,17 +105,78 @@ class PermissionDeniedError(ContractError):
     code = PERMISSION_DENIED
 
 
+class PermissionDecider(Protocol):
+    """权限判定协议：PermissionRegistry 与静态工厂（deny_all/allow_all）共用 decide()。"""
+
+    def decide(
+        self,
+        subject: PermissionSubject,
+        object_type: str,
+        operation: str,
+        attribute: str | None = None,
+    ) -> PermissionDecision: ...
+
+
+class _StaticPermissionRegistry:
+    """固定判定注册表（PermissionContext.deny_all/allow_all 内部用）。
+
+    deny=True → 一切操作判定 denied（fail-closed 默认）；deny=False → read 全属性可见
+    （visible_attributes=None 语义 = 全字段可见，见 _permission_visible 兜底）。
+    """
+
+    def __init__(self, *, deny: bool) -> None:
+        self._deny = deny
+
+    def decide(
+        self,
+        subject: PermissionSubject,
+        object_type: str,
+        operation: str,
+        attribute: str | None = None,
+    ) -> PermissionDecision:
+        if self._deny:
+            return PermissionDecision(allowed=False, visible_attributes=None)
+        return PermissionDecision(allowed=True, visible_attributes=None)
+
+
+# deny_all/allow_all 静态上下文的系统主体（内部工具/默认 deny 标识，非真实用户）
+SYSTEM_SUBJECT = PermissionSubject(kind="agent", id="system")
+
+
 @dataclass(frozen=True)
 class PermissionContext:
-    """读侧权限上下文（设计 §3.3）：主体 + 权限注册表。
+    """读侧权限上下文（设计 §3.3）：主体 + 权限判定器。
 
     传给 ContractExecutor 即启用读侧权限：查询前 decide(subject, object_type, "read")，
     属性级 visible_attributes 过滤返回列；契约显式请求的字段触及不可见列 fail-closed 拒答
-    （不静默裁剪，防推断泄漏）。缺省 None = 无权限校验（保持既有调用兼容）。
+    （不静默裁剪，防推断泄漏）。缺省 None = 默认 deny（red-team P1-1：无 ctx ≠ 无校验，
+    fail-closed）——内部工具需显式 PermissionContext.allow_all() 才放行。
     """
 
     subject: PermissionSubject
-    permission_registry: PermissionRegistry
+    permission_registry: PermissionDecider
+
+    @classmethod
+    def deny_all(cls, subject: PermissionSubject | None = None) -> "PermissionContext":
+        """默认 deny 上下文（fail-closed）：一切操作判定 denied（read 直接拒答）。
+
+        ContractExecutor 未显式传 ctx 时的缺省——无 ctx ≠ 无权限校验。
+        """
+        return cls(
+            subject=subject or SYSTEM_SUBJECT,
+            permission_registry=_StaticPermissionRegistry(deny=True),
+        )
+
+    @classmethod
+    def allow_all(cls, subject: PermissionSubject | None = None) -> "PermissionContext":
+        """显式 allow-all 上下文（内部工具/测试口径）：read 全属性可见。
+
+        仅一次性脚本/内部对账工具显式选择；生产查询不得使用（权限开关必须显式可见）。
+        """
+        return cls(
+            subject=subject or SYSTEM_SUBJECT,
+            permission_registry=_StaticPermissionRegistry(deny=False),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +460,11 @@ def validate_contract(
             _validate_metric_block(v, contract["metric"], metrics, contract.get("time_range"))
         return v  # v0.2 物化路径：语义由指标注册表单点定义（§3.1 R3）
 
+    if contract.get("time_range") is not None:
+        # red-team P2-2：v0.1 非 metric 对象路径不支持 time_range，校验期 fail-closed 拒答
+        # （杜绝静默忽略——否则查询返回全周期数据却让用户以为已过滤）。
+        v.append("非 metric 契约不支持 time_range（v0.1 对象路径 fail-closed 拒答）")
+
     obj = _resolve_type(registry, contract.get("object_type"))
     if obj is None:
         v.append(f"object_type 未注册或非法（V1 白名单）: {contract.get('object_type')!r}")
@@ -514,8 +586,9 @@ class ContractExecutor:
 
         metrics_db：metrics.db 路径（默认 = 企业目录 / metrics.db，与 manifest.json 同目录，
         供 T3 版本守卫比对）。
-        permission_ctx：读侧权限上下文（设计 §3.3，P1.5 接线）；缺省 None = 无权限校验，
-        保持既有调用兼容。非 None 时 execute/_execute_metric 前置 decide(read) 并做可见列过滤。
+        permission_ctx：读侧权限上下文（设计 §3.3，P1.5 接线）；缺省 None = 默认 deny
+        （fail-closed，red-team P1-1：无 ctx ≠ 无校验，读操作直接拒答）。内部工具需显式
+        PermissionContext.allow_all() 才放行；execute/_execute_metric 前置 decide(read) 并做可见列过滤。
         """
         self._mz = materialization
         self._registry = registry
@@ -525,7 +598,10 @@ class ContractExecutor:
         self._metrics_db = metrics_db or (
             DEFAULT_ENTERPRISES_DIR / materialization.enterprise_code / METRICS_DB
         )
-        self._permission_ctx = permission_ctx
+        # red-team P1-1：缺省默认 deny（而非跳过校验）——读侧权限唯一入口 fail-closed
+        self._permission_ctx = (
+            permission_ctx if permission_ctx is not None else PermissionContext.deny_all()
+        )
 
     def execute(self, contract: dict) -> dict:
         """校验并执行契约；任一校验失败抛 ContractError（fail-closed 拒答）。
@@ -547,6 +623,10 @@ class ContractExecutor:
         ]
         requested += contract.get("group_by") or []
         self._assert_fields_visible(visible, requested, obj.name)
+        # red-team P1-2：link_traversal 目标对象读权限 fail-closed（目标 decide(read) + 返回列可见集）
+        lt = contract.get("link_traversal")
+        if lt is not None:
+            self._check_link_target_permission(_find_link(self._registry, obj, lt["link"]))
         where, params = _build_where(contract.get("filters") or {})
         sql = f"SELECT * FROM {obj.source_table} WHERE {where} ORDER BY {obj.pk_field}"
         try:
@@ -566,7 +646,7 @@ class ContractExecutor:
 
         if contract.get("aggregations"):
             return self._run_aggregation(contract, obj, rows, excluded)
-        items = self._build_items(obj, rows, contract.get("link_traversal"), visible)
+        items = self._build_items(obj, rows, lt, visible)
         result = {"object_type": obj.name, "count": len(items), "items": items}
         if excluded:
             result["_diagnostics"] = {"predicate_excluded": excluded}
@@ -589,12 +669,10 @@ class ContractExecutor:
     def _permission_visible(self, object_type: str) -> list[str] | None:
         """前置 decide(subject, object_type, 'read')：allowed=False → fail-closed 拒答。
 
-        返回 visible_attributes（读侧可见属性列表，属性级 deny 已剔除）；无权限上下文 → None
-        （不校验，兼容既有调用）。allowed 但可见集缺失（decide 异常态）保守视为全字段可见。
+        返回 visible_attributes（读侧可见属性列表，属性级 deny 已剔除）；ctx 缺省 = 默认 deny
+        （red-team P1-1：无 ctx 不豁免校验）。allowed 但可见集缺失（decide 异常态）保守全字段可见。
         """
         ctx = self._permission_ctx
-        if ctx is None:
-            return None
         decision = ctx.permission_registry.decide(ctx.subject, object_type, "read")
         if not decision.allowed:
             raise PermissionDeniedError(
@@ -606,6 +684,22 @@ class ContractExecutor:
         if self._registry.has_object_type(object_type):  # 异常态兜底：全字段可见
             return list(self._registry.object_type(object_type).model.model_fields)
         return None
+
+    def _check_link_target_permission(self, link: Any) -> None:
+        """link_traversal 目标对象读权限（red-team P1-2）：目标 decide(read) fail-closed。
+
+        链接返回列（fk_field/code_space/value）必须落在目标可见集内；任一不可见即拒答
+        （不静默裁剪，防 link_traversal 系统性旁路被 deny 的敏感对象）。
+        """
+        target = self._registry.object_type(link.target_type)
+        visible = self._permission_visible(target.name)
+        need = [link.fk_field, "code_space", "value"]
+        invisible = sorted(c for c in set(need) if c not in visible)
+        if invisible:
+            raise PermissionDeniedError(
+                f"读侧权限拒绝（link 目标 {target.name}）: 返回列不可见 {invisible}"
+                "（属性级 deny，fail-closed）"
+            )
 
     def _object_fields(self, object_type: str, names: list[str]) -> list[str]:
         """把请求列裁剪到对象字段（指标派生列/度量列非对象字段，不受属性级 deny 约束）。"""
@@ -695,7 +789,9 @@ class ContractExecutor:
         if link_traversal:
             link = _find_link(self._registry, obj, link_traversal["link"])
             target = self._registry.object_type(link.target_type)
-            for c in rows_as_dicts(self._conn, f"SELECT * FROM {target.source_table}", []):
+            # red-team P1-2：link 返回列显式白名单（已过目标可见集校验，禁 SELECT * 直读）
+            cols = ", ".join([link.fk_field, "code_space", "value"])
+            for c in rows_as_dicts(self._conn, f"SELECT {cols} FROM {target.source_table}", []):
                 by_pk[c[link.fk_field]].append({"code_space": c["code_space"], "value": c["value"]})
             for codes in by_pk.values():
                 codes.sort(key=lambda c: c["code_space"])
@@ -880,4 +976,8 @@ def run_dq01(
     """物化 + 执行 DQ-01，返回 (查询结果, 物化对象)。调用方负责 mz.duckdb.close()。"""
     reg = registry or build_registry()
     mz = materialize_des(enterprise_code, out_dir=out_dir, registry=reg)
-    return ContractExecutor(mz, reg).execute(DQ01_CONTRACT), mz
+    # 内部对账工具显式 allow-all 权限上下文（red-team P1-1：权限开关显式可见，不靠缺省放行）
+    return (
+        ContractExecutor(mz, reg, permission_ctx=PermissionContext.allow_all()).execute(DQ01_CONTRACT),
+        mz,
+    )

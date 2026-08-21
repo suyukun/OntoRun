@@ -55,10 +55,13 @@ def load_ground_truth(path: str | Path) -> dict[str, str]:
         raise TypeError("GT 文件根必须是映射 {candidate_key: true_target}")
     entries = raw.get("entries", raw)
     if isinstance(entries, list):
-        # 兼容设计 §3.1 条目列表形态
+        # 兼容设计 §3.1 条目列表形态；同 (source_table, source_field, kind) 重复即 fail-fast
+        # （列表形态用普通 dict 合并会静默覆盖重复，须先显式去重检查再转 dict）
         mapping: dict[str, Any] = {}
         for item in entries:
             key = f"{item['source_table']}|{item['source_field']}|{item.get('kind', '')}"
+            if key in mapping:
+                raise ValueError(f"GT 条目重复: {key}")
             mapping[key] = item["gt_target"]
         entries = mapping
     if not isinstance(entries, dict):

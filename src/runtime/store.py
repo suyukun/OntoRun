@@ -53,6 +53,7 @@ SCHEMA_VERSION = 1
 ONTOLOGY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_log (
   audit_id          TEXT PRIMARY KEY,
+  seq               INTEGER NOT NULL DEFAULT 0,
   ts                TEXT NOT NULL,
   action_name       TEXT NOT NULL,
   actor             TEXT NOT NULL CHECK (actor IN _ACTOR_VALUES_),
@@ -462,6 +463,25 @@ def _apply_governance_patches(conn: sqlite3.Connection) -> None:
     _patch_audit_log_source_check(conn)
 
 
+def _patch_audit_log_seq(conn: sqlite3.Connection) -> None:
+    """P2-1 修复（red-team）：audit_log 加 seq 链序列 + 既有行按 audit_id 序回填。
+
+    链序 = 追加序（seq 自增），与 audit_id 字典序解耦：同毫秒乱序 audit_id 不再导致
+    verify_integrity 误报 broken。新库建表已含 seq → 幂等跳过；既有库回填必须在 WORM
+    触发器创建前执行（Store.migrate 顺序，见 _patch_audit_log_seq 调用点），故无需摘触发器。
+    回填按 audit_id 序（既有链的历史口径，rank = COUNT(<=) 相关子查询，SQLite 全版本兼容）；
+    seq 不参与哈希内容（_HASH_IGNORE_FIELDS），回填不破坏既有 record_hash。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()}
+    if not cols or "seq" in cols:
+        return
+    conn.execute("ALTER TABLE audit_log ADD COLUMN seq INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "UPDATE audit_log SET seq = (SELECT COUNT(*) FROM audit_log t2 "
+        "WHERE t2.audit_id <= audit_log.audit_id)"
+    )
+
+
 def _patch_audit_log_source_check(conn: sqlite3.Connection) -> None:
     """v5 patch（P3）：audit_log.source CHECK 补 'publish'（发布审计 source='publish'）。
 
@@ -603,6 +623,8 @@ class Store:
         action_runs 引用 audit_log.audit_id 对账，不复制审计真相。
         v4 patch（TD-9）：action_runs.executed_by 补 CHECK 白名单（重建表迁移，
         SQLite 无 ALTER ADD CONSTRAINT；单事务保数据，幂等跳过已迁移库）。
+        v6 patch（P2-1）：audit_log 加 seq 链序列（链序 = 追加序，回填在 WORM 触发器
+        创建前执行——见下方 _patch_audit_log_seq 调用点，无需摘触发器）。
         """
         runtime_note = (
             "MVP 本体运行时 v1：audit_log / ontology_state / schema_version"
@@ -615,7 +637,8 @@ class Store:
         governance_note = (
             "治理段（P1.5）：permission_roles/permission_policies/audit_field_mirror/"
             "mapping_candidates/mapping_review_history + audit_log 加列(prev_hash/"
-            "record_hash/retention_class/source) + WORM 触发器 + 枚举 CHECK 同源"
+            "record_hash/retention_class/source/seq) + WORM 触发器 + 枚举 CHECK 同源；"
+            "v6 patch: audit_log.seq 链序列（P2-1 哈希链序 = 追加序）"
         )
         merged_note = f"{runtime_note}；{builder_note}；{governance_note}"
         conn = self.ontology_conn()
@@ -625,6 +648,9 @@ class Store:
             # v2/v3/v4 幂等补丁单一实现（PRAGMA table_info 返回列序
             # [cid, name, type, notnull, dflt_value, pk]，索引 1 = name）。
             _apply_builder_patches(conn)
+            # P2-1（v6）：audit_log.seq 链序列 + 既有行回填。必须在 GOVERNANCE_SCHEMA
+            # 创建 WORM 触发器之前执行（回填是 UPDATE，会被 BEFORE UPDATE 触发器拦截）。
+            _patch_audit_log_seq(conn)
             # P1.5 治理段：新表 CREATE IF NOT EXISTS + audit_log 幂等加列
             # （不 bump schema_version，沿用 v2/v3/v4「幂等补丁只追加 note 不升号」先例）。
             conn.executescript(GOVERNANCE_SCHEMA)
