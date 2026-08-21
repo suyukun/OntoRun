@@ -7,15 +7,20 @@
    中/低进审核队列；C4 未注册 target 跳过（待补录）。
 2. 审核流转（§2）：review CLI export（CSV 含 header 快照）→ import accept/reject/conflict
    → 状态机合法 + mapping_review_history 留痕 + audit source='review'；非法裁决（未知
-   candidate_id / 非法 decision）fail-fast 记失败不静默；approved 终态锁定不可改。
+   candidate_id / 非法 decision）fail-fast 记失败不静默；approved 终态锁定不可改；
+   approve 权限门（P1-3：无策略 fail-closed、agent reviewer 一律拒 V9）+ 单连接单事务
+   原子性（P2-6：中途失败整体回滚）+ corrected_target 格式/C4 校验。
 3. 入注册表（§4）：approved link → publish_approved 注册 + self_check 0 error + mappings
    血缘落表 + audit(mapping_publish, source='publish')；同名对象重复注册拒绝（防静默覆盖）；
+   approve 权限复核（P1-3 ④）+ self_check 有 error 回滚本批（P2-7）；
    对象注册机制经两注册表路径锁定（C4 与重复检查对同一 registry 互斥，见测试内说明）。
 4. 阈值校准（§3）：GT 加载合法/非法 fail-fast；recall@k（full_recall@5≥0.80 门禁 +
    top-5 与 top-1 区分）；auto_recall 与 full_recall 双口径显式（差值=人工审核增量）；
    网格扫描 medium≤high、选择规则（满 recall 下 auto_coverage 最大）、报告含默认行与最优行、
-   写 mapping_thresholds.yaml；无解如实回退默认 (0.9,0.6)。
-5. 变更影响（§4.3）：src/builder/mapping/impact.py 尚未实现（P3 未交付）→ 标注待实现（skip）。
+   写 mapping_thresholds.yaml；无解如实回退默认 (0.9,0.6)；auto_precision 分母含非 GT 键
+   （P2-5）+ unvalidated 报告；medium 不参与选优报告注明（P2-9）。
+5. 变更影响（§4.3）：analyze_change → MappingChangeReport 完整可查（实跑）；管道编排
+   （§1.1）run_mapping_pipeline → PipelineReport，C4 跳过显式 skipped_c4 计数。
 6. 安全/一致（§5）：审计链 verify_integrity 全绿（含 review/publish 记录后仍自洽）、
    mapping_review_history/audit_log WORM（禁改删）、发布后注册表无孤儿（血缘 entity_class
    均指向已注册对象/链接）、self_check 0 error。
@@ -101,6 +106,40 @@ def _write_gt(path: Path, entries: list[dict]) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _grant_approve(
+    store: Store, object_type: str, subject_id: str = "jack", policy_id: str | None = None
+) -> None:
+    """直接落 approve 策略（绕过 V1：目标为 link/属性名等非对象字符串，直插 permission_policies）。
+
+    门禁测试在测「approve 门本身」，policy 的创建走直插（PermissionService.create 的 V1
+    对象校验不适用 link/属性目标）。
+    """
+    conn = store.ontology_conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO permission_policies (policy_id, object_type, operation, "
+            "effect, subject_kind, subject_id, role_id, scope, attributes_json, version, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                policy_id or f"appr-{object_type}-{subject_id}",
+                object_type,
+                "approve",
+                "allow",
+                "human",
+                subject_id,
+                "",
+                "object",
+                "[]",
+                1,
+                "",
+                "",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _seed_calibration(service: MappingCandidateService) -> list[dict]:
@@ -259,7 +298,10 @@ def test_review_cli_export_import(tmp_path, store, service, audit) -> None:
         rows = list(csv.DictReader(f))
     assert list(rows[0].keys()) == review_mod.EXPORT_COLUMNS
     assert {r["candidate_id"] for r in rows} == {"c-acc", "c-rej", "c-conf"}
-    # import：accept / reject / conflict
+    # import：accept / reject / conflict（approve 权限门：jack 对三个目标均有 approve 策略）
+    _grant_approve(store, "order_id", "jack")
+    _grant_approve(store, "note", "jack")
+    _grant_approve(store, "total_cents", "jack")
     dec = tmp_path / "decisions.csv"
     _write_csv(dec, [
         ["c-acc", "accept", "", "证据充分"],
@@ -314,6 +356,9 @@ def test_review_accept_corrected_registers(tmp_path, store, service, registry, a
               evidence_json={"method": "fk_detection.detect_links", "source_type": "Order",
                              "target_type": "Customer", "cardinality": "N:1", "fk_field": "customer_id"})
     )
+    # approve 权限门：jack 对 corrected 目标有 approve 策略；发布 actor 'cli' 同样需策略
+    _grant_approve(store, "order.p3_supplier", "jack")
+    _grant_approve(store, "order.p3_supplier", "cli")
     dec = tmp_path / "corrected.csv"
     _write_csv(dec, [["c-link", "accept", "order.p3_supplier", "修正目标"]])
     report = review_mod.import_decisions(store, dec, reviewer="jack")
@@ -360,6 +405,9 @@ def test_approved_to_registry(store, service, registry, audit) -> None:
     service.transition("c-lnk", APPROVED, reviewer="jack")
     service.create(_cand("c-attr", target="matnr", score=1.0))          # attribute → skip
     service.create(_cand("c-obj", kind="object", target="Material", score=1.0))  # 已注册 → error
+    # publish actor 'cli' 的 approve 权限复核（P1-3 ④）
+    _grant_approve(store, "order.p3_customer", "cli")
+    _grant_approve(store, "Material", "cli")
     report = publish_approved(store, registry)
     assert "order.p3_customer" in report["published_links"]
     assert report["self_check"]["ok"] is True
@@ -382,6 +430,7 @@ def test_registry_duplicate_rejected(store, service, registry) -> None:
     """同名对象重复注册拒绝（防静默覆盖）：已注册 target 的 object 候选发布报错，注册表无变化。"""
     before = sorted(o.name for o in registry.object_types())
     service.create(_cand("c-obj", kind="object", target="Material", score=1.0))
+    _grant_approve(store, "Material", "cli")
     report = publish_approved(store, registry)
     assert report["published_objects"] == []
     assert any("已注册" in e["reason"] for e in report["errors"])
@@ -403,6 +452,7 @@ def test_publish_object_mechanism(tmp_path, store, registry) -> None:
               source_field="matnr", evidence_json={"pk_field": "matnr"})
     )
     reg_b = Registry()  # 不含 Material → 重复检查通过，可注册
+    _grant_approve(store, "Material", "cli")
     report = publish_approved(store, reg_b)
     assert report["published_objects"] == ["Material"]
     assert report["errors"] == []
@@ -536,23 +586,202 @@ def test_calibrate_no_solution_fallback(tmp_path) -> None:
 
 
 # ======================================================================
-# ⑤ 变更影响分析（门禁 5 —— 设计 §4.3 规格，P3 未交付，如实标注待实现）
+# ④b 审核 approve 权限门（P1-3）/ 原子性（P2-6）
 # ======================================================================
-@pytest.mark.skip(
-    reason="src/builder/mapping/impact.py 尚未实现（设计 §4.3 analyze_change 规格，"
-    "commit 1fa251e P3 交付不含 impact；门禁要求报告含 change/affected/audit_chain_ok/risk，"
-    "待实现后启用本测试）"
-)
-def test_change_impact_analysis_pending() -> None:
-    """变更影响分析门禁（设计 §4.3）：analyze_change → MappingChangeReport 完整可查。
+def test_review_import_approve_gate_fail_closed(tmp_path, store, service, audit) -> None:
+    """P1-3 ①：无 approve 策略 → accept 被拒（fail-closed），无部分成功、无审计。"""
+    service.create(_cand("c-gate", target="order_id", source_field="order_no", score=0.7))
+    dec = tmp_path / "gate.csv"
+    _write_csv(dec, [["c-gate", "accept", "", "无权限"]])
+    report = review_mod.import_decisions(store, dec, reviewer="jack")
+    assert report["failed"] == 1 and report["processed"] == 0
+    assert any("approve 权限不足" in f["reason"] for f in report["failures"])
+    assert service.get("c-gate").review_status == DRAFT
+    assert service.list_history("c-gate") == []
+    _rev, total = audit.query(action="mapping_review")
+    assert total == 0  # 被拒不落审计
 
-    启用条件（实现后取消 skip）：
-    - 变更对象/链接 → 报告列出受影响 metric（metrics 注册表反向引用）与受影响契约；
-    - affected 含 objects/links/metrics/contracts；audit_chain_ok=True；risk 分级合法。
-    """
-    from src.builder.mapping.impact import analyze_change  # noqa: F401
 
-    raise AssertionError("impact.py 已实现但本测试未完成断言，请按门禁规格补齐")
+def test_review_import_agent_reviewer_rejected(tmp_path, store, service) -> None:
+    """P1-3 ② V9：reviewer 解析为 agent → 一律拒（审=人专属），状态不变。"""
+    _grant_approve(store, "order_id", "jack")
+    service.create(_cand("c-v9", target="order_id", source_field="order_no", score=0.7))
+    dec = tmp_path / "v9.csv"
+    _write_csv(dec, [["c-v9", "accept", "", ""]])
+    report = review_mod.import_decisions(store, dec, reviewer="agent:procurement_agent")
+    assert report["failed"] == 1
+    assert any("V9" in f["reason"] and "agent" in f["reason"] for f in report["failures"])
+    assert service.get("c-v9").review_status == DRAFT
+
+
+def test_review_import_atomic_rollback(tmp_path, store, service, audit) -> None:
+    """P2-6 原子性：单行事务中途失败（已拒绝候选再 accept → 非法流转）整体回滚，无中间态。"""
+    _grant_approve(store, "order_id", "jack")
+    service.create(_cand("c-at", target="order_id", source_field="order_no", score=0.7))
+    dec1 = tmp_path / "rej.csv"
+    _write_csv(dec1, [["c-at", "reject", "", "先拒绝"]])
+    report1 = review_mod.import_decisions(store, dec1, reviewer="jack")
+    assert report1["rejected"] == 1
+    assert service.get("c-at").review_status == "rejected"
+    hist_before = len(service.list_history("c-at"))
+    # 已 rejected 再 accept：rejected→approved 非法流转 → 事务中途抛错，整体回滚
+    dec2 = tmp_path / "acc.csv"
+    _write_csv(dec2, [["c-at", "accept", "", "想翻案"]])
+    report2 = review_mod.import_decisions(store, dec2, reviewer="jack")
+    assert report2["failed"] == 1
+    assert any("IllegalTransitionError" in f["reason"] for f in report2["failures"])
+    assert service.get("c-at").review_status == "rejected"  # 状态未变
+    assert len(service.list_history("c-at")) == hist_before  # 历史未增
+    _rev, total = audit.query(action="mapping_review")
+    assert total == 1  # 仅 reject 一次审计；失败的 accept 未落
+    assert audit.verify_integrity()["ok"] is True
+
+
+def test_review_import_corrected_target_validated(tmp_path, store, service) -> None:
+    """P1-3 ③：corrected_target 写入前 C4/格式校验（未注册属性 / 非法格式 → 拒，不落库）。"""
+    _grant_approve(store, "order_id", "jack")
+    service.create(_cand("c-c4", target="order_id", source_field="order_no", score=0.7))
+    dec = tmp_path / "c4.csv"
+    _write_csv(dec, [["c-c4", "accept", "ghost_attr", "未注册字段"]])
+    report = review_mod.import_decisions(store, dec, reviewer="jack")
+    assert report["failed"] == 1
+    assert any("C4" in f["reason"] for f in report["failures"])
+    c = service.get("c-c4")
+    assert c.target == "order_id" and c.review_status == DRAFT  # 未改
+    assert service.list_history("c-c4") == []
+    # 非法格式（attribute 目标非 snake_case）
+    dec2 = tmp_path / "fmt.csv"
+    _write_csv(dec2, [["c-c4", "accept", "Bad Target!", ""]])
+    report2 = review_mod.import_decisions(store, dec2, reviewer="jack")
+    assert report2["failed"] == 1
+    assert any("格式非法" in f["reason"] for f in report2["failures"])
+    assert service.get("c-c4").target == "order_id"
+
+
+def test_review_accept_corrected_registered_field(tmp_path, store, service) -> None:
+    """P1-3 ③ 正向路径：corrected_target 为已注册对象字段（C4 放行）→ 修正生效。"""
+    _grant_approve(store, "note", "jack")
+    service.create(_cand("c-pos", target="order_id", source_field="order_no", score=0.7))
+    dec = tmp_path / "pos.csv"
+    _write_csv(dec, [["c-pos", "accept", "note", "修正到已注册字段"]])
+    report = review_mod.import_decisions(store, dec, reviewer="jack")
+    assert report["accepted"] == 1 and report["failed"] == 0
+    c = service.get("c-pos")
+    assert c.target == "note" and c.review_status == APPROVED
+    assert len(service.list_history("c-pos")) == 1
+
+
+def test_publish_requires_approve_permission(store, service) -> None:
+    """P1-3 ④：publish 前复核 approve 权限——无策略 → 候选记 error 不入批、不注册。"""
+    reg = build_registry()
+    svc = MappingCandidateService(store, reg)
+    svc.create(
+        _cand("c-obj", kind="object", target="Material", score=1.0,
+              source_field="matnr", evidence_json={"pk_field": "matnr"})
+    )
+    report = publish_approved(store, reg)
+    assert report["published_objects"] == []
+    assert report["published_links"] == []
+    assert report["rolled_back"] is False
+    assert any("approve 权限" in e["reason"] for e in report["errors"])
+
+
+def test_publish_self_check_rollback(store, service, registry, audit) -> None:
+    """P2-7：发布后 self_check 有 error（LINK_FK_MISSING）→ 回滚本批（卸载注册+删血缘+failed 审计）。"""
+    _grant_approve(store, "order.p3_bad_link", "cli")
+    service.create(
+        _cand("c-bad", kind="link", target="order.p3_bad_link", score=0.8,
+              source_field="customer_id",
+              evidence_json={"method": "fk_detection.detect_links", "source_type": "Order",
+                             "target_type": "Customer", "cardinality": "N:1", "fk_field": "ghost_fk"})
+    )
+    service.transition("c-bad", APPROVED, reviewer="jack")
+    report = publish_approved(store, registry)
+    assert report["rolled_back"] is True
+    assert report["published_links"] == []  # published 语义 = 最终持久
+    assert report["self_check"]["ok"] is False
+    assert not any(l.name == "order.p3_bad_link" for l in registry.link_types())  # 已卸载
+    conn = store.ontology_conn()
+    try:
+        rows = conn.execute(
+            "SELECT entity_class FROM mappings WHERE entity_class='order.p3_bad_link'"
+        ).fetchall()
+        pub = conn.execute(
+            "SELECT outcome, error_code FROM audit_log WHERE action_name='mapping_publish'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == []  # 血缘已删
+    assert len(pub) == 1 and pub[0]["outcome"] == "failed"
+    assert pub[0]["error_code"] == "SELF_CHECK_FAILED"
+    assert audit.verify_integrity()["ok"] is True
+
+
+def test_create_thresholds_override(store, registry, service) -> None:
+    """P1-4（§1.3）：create(thresholds=...) 覆盖 classify——0.9 分候选在 high=0.95 下降档。"""
+    c = service.create(_cand("c-t1", target="order_id", score=0.9), thresholds=(0.95, 0.6))
+    assert c.confidence_level == "medium" and c.review_status == DRAFT and not c.auto_approved
+    c2 = service.create(_cand("c-t2", target="order_id", score=0.9))
+    assert c2.confidence_level == "high" and c2.review_status == APPROVED and c2.auto_approved
+
+
+# ======================================================================
+# ⑤ 变更影响分析（门禁 5） + 管道编排（设计 §1.1）
+# ======================================================================
+def test_change_impact_analysis(tmp_path, store, service) -> None:
+    """门禁 5（设计 §4.3 实跑）：analyze_change → MappingChangeReport 完整可查。"""
+    from src.builder.mapping.impact import analyze_change
+    from src.des.config import load_config
+    from src.des.metrics import load_metrics
+
+    metrics = load_metrics(config=load_config("hc_precision"))
+    cand = _cand(
+        "c-imp", kind="object", target="Material", score=0.95,
+        source_field="matnr", source_table="erp.MARA",
+    )
+    report = analyze_change(cand, store=store, registry=build_registry(), metrics=metrics)
+    assert report["change"]["candidate_id"] == "c-imp"
+    assert report["change"]["target_to"] == "Material"
+    assert report["change"]["target_from"] is None  # approved 终态不可改 → 变更 = 新增候选
+    assert "Material" in report["affected"]["objects"]
+    assert report["affected"]["metrics"]  # object_type=Material 的指标反向引用（读侧受影响）
+    assert "v0.2 metric" in report["affected"]["contracts"]
+    assert report["affected"]["audit_chain_ok"] is True
+    assert report["risk"] in ("high", "medium", "low")
+    assert report["risk"] == "high"  # 读侧指标受影响 → 需重物化
+
+
+def test_run_mapping_pipeline_report(store, registry) -> None:
+    """P1-4（设计 §1.1）：run_mapping_pipeline → PipelineReport，C4 跳过显式 skipped_c4 计数。"""
+    from src.builder.mapping.pipeline import run_mapping_pipeline
+
+    source = {
+        "source_table": "erp.MARA",
+        "columns": [
+            {"column": "name", "inferred_type": "string", "is_technical": False},
+            {"column": "etl_loaded_at", "inferred_type": "datetime", "is_technical": True},
+        ],
+        "des_mappings": [
+            {"kind": "object", "target": "Material"},
+            {"kind": "attribute", "target": "matnr", "source_field": "material_number"},
+            {"kind": "object", "target": "GhostObj"},  # C4 未注册 → skipped_c4
+        ],
+        "detected_links": [
+            DetectedLink(
+                link_id="lnk_p", source_field="matnr", target_field="matnr",
+                cardinality="N:1", detection_method="exact_match",
+                match_summary={"direct_match_rows": 20, "format_normalized_match_rows": 5,
+                               "unmatched_rows": 5, "total_rows": 30},
+            ),
+        ],
+    }
+    report = run_mapping_pipeline(source, store=store, registry=registry)
+    assert report["source_table"] == "erp.MARA"
+    assert report["total_candidates"] == 3  # Material + matnr + lnk_p（Name C4 跳过）
+    assert report["auto_approved"] == 2     # Material + matnr（DES score 1.0 高置信自动过）
+    assert report["in_queue"] == 1          # lnk_p medium → draft 队列
+    assert report["by_level"] == {"high": 2, "medium": 1, "low": 0}
+    assert report["skipped_c4"] == ["GhostObj", "Name"]  # C4 未注册 target 显式计数（不再静默丢弃）
 
 
 # ======================================================================
@@ -591,6 +820,7 @@ def test_registry_no_orphan_after_publish(store, service, registry, audit) -> No
                              "target_type": "Customer", "cardinality": "N:1", "fk_field": "customer_id"})
     )
     service.transition("c-lnk", APPROVED, reviewer="jack")
+    _grant_approve(store, "order.p3_customer", "cli")
     report = publish_approved(store, registry)
     assert report["self_check"]["ok"] is True
     conn = store.ontology_conn()

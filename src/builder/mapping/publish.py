@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
 from typing import Any
 
 from src.builder.mapping import repo as mapping_repo
@@ -24,22 +23,20 @@ from src.ontology.links import LinkTypeDef
 from src.ontology.objects import OWN_SOURCE, ObjectTypeDef
 from src.ontology.registry import Registry
 from src.runtime.audit import AuditLog, AuditRecord
+from src.runtime.permissions import PermissionService, resolve_human_subject
 from src.runtime.store import Store
 
 PUBLISH_SOURCE = "publish"
 AUDIT_ACTION_PUBLISH = "mapping_publish"
 AUDIT_ACTOR = "human"  # audit_log.actor CHECK 白名单 ('human','llm','api')
 PAGE_ALL = 1_000_000
+SELF_CHECK_ERROR_CODE = "SELF_CHECK_FAILED"  # 发布后自检失败（P2-7 回滚本批）
 
 _API_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class PublishError(ValueError):
     """发布前置校验失败（目标缺失/重复/信息不足），跳过并记 error 不静默。"""
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _to_snake(name: str) -> str:
@@ -160,13 +157,18 @@ def _lineage_kwargs(candidate, defn: Any) -> dict:
     }
 
 
-def _audit_publish(audit: AuditLog, actor: str, candidate, defn: Any, outcome: str) -> None:
-    audit.append(
+def _audit_publish_on(
+    conn, audit: AuditLog, actor: str, candidate, defn: Any, outcome: str, error_code: str | None = None,
+) -> None:
+    """落 source='publish' 审计（P2-7：走调用方单事务，commit 由外部负责）。"""
+    audit.append_on(
+        conn,
         AuditRecord(
             action_name=AUDIT_ACTION_PUBLISH,
             actor=AUDIT_ACTOR,
             actor_detail=f"cli:{actor}",
             outcome=outcome,
+            error_code=error_code,
             detail_json=json.dumps(
                 {
                     "candidate_id": candidate.candidate_id,
@@ -178,11 +180,17 @@ def _audit_publish(audit: AuditLog, actor: str, candidate, defn: Any, outcome: s
                 ensure_ascii=False,
             ),
             source=PUBLISH_SOURCE,
-        )
+        ),
     )
 
 
-def _publish_object(store: Store, registry: Registry, audit: AuditLog, cand, actor: str, report: dict) -> None:
+def _permission_service(store: Store) -> PermissionService:
+    """默认 approve 权限判定器：从 store 的 permission_policies 表加载（gate 恒开）。"""
+    return PermissionService(store, Registry())
+
+
+def _prepare_object(cand, registry: Registry) -> ObjectTypeDef:
+    """object 候选前置校验（P1-3 ④ + §4.1）：去重 / pk / source_table，通过即返回 defn。"""
     if registry.has_object_type(cand.target):
         raise PublishError(f"对象已注册，拒绝重复注册（防静默覆盖）: {cand.target}")
     defn = _build_object_defn(cand)
@@ -190,69 +198,39 @@ def _publish_object(store: Store, registry: Registry, audit: AuditLog, cand, act
         raise PublishError(f"对象 pk {defn.pk_field} 不在模型字段（OBJECT_PK_MISSING 前置挡）")
     if not defn.source_table:
         raise PublishError(f"对象缺 source_table（OBJECT_NO_SOURCE_TABLE 前置挡）: {cand.target}")
-    registry.register_object_type(defn)
-    mapping_repo.create(
-        store.ontology_conn(),
-        ontology_id="default",
-        source_table=defn.source_table,
-        status="published",
-        **_lineage_kwargs(cand, defn),
-    )
-    _audit_publish(audit, actor, cand, defn, "applied")
-    report["published_objects"].append(cand.target)
+    return defn
 
 
-def _publish_link(store: Store, registry: Registry, audit: AuditLog, cand, actor: str, report: dict) -> None:
+def _prepare_link(cand, registry: Registry) -> LinkTypeDef:
+    """link 候选前置校验（§4.1）：端点已注册 / 基数 / 去重，通过即返回 defn。"""
     defn = _build_link_defn(cand, registry)
     if any(l.name == defn.name for l in registry.link_types()):
         raise PublishError(f"链接已注册，拒绝重复注册: {defn.name}")
-    registry.register_link_type(defn)
-    mapping_repo.create(
-        store.ontology_conn(),
-        ontology_id="default",
-        source_table=cand.source_table,
-        status="published",
-        **_lineage_kwargs(cand, defn),
-    )
-    _audit_publish(audit, actor, cand, defn, "applied")
-    report["published_links"].append(cand.target)
+    return defn
 
 
-def publish_approved(
-    store: Store,
-    registry: Registry,
-    *,
-    actor: str = "cli",
-) -> dict[str, Any]:
-    """把所有 approved 候选发布入注册表：对象/链接注册 + 血缘 + 审计 + 自检。
-
-    attribute 不单独注册（随对象 property_schema 归并）；缺前置条件（端点未注册等）
-    跳过并记 error（R1：演示对象注册待 Jack 决定，机制如实报错）。
-    返回 PublishReport（含 published 清单 / skipped / errors / self_check 结果）。
-    """
-    service = MappingCandidateService(store, registry)
-    rows, total = service.list(status=APPROVED, page=1, page_size=PAGE_ALL)
-    audit = AuditLog(store)
-    report: dict[str, Any] = {
-        "scanned": total,
-        "published_objects": [],
-        "published_links": [],
-        "skipped": [],
-        "errors": [],
-    }
+def _prepare_publish_batch(rows, perm, subject, registry: Registry, report: dict) -> list[tuple]:
+    """阶段 0：逐个候选过 approve 门 + 去重/pk/source/端点；失败记 error 不入批，返回本批 (cand, defn)。"""
+    prepared: list[tuple] = []
     for cand in rows:
         try:
-            if cand.kind == "object":
-                _publish_object(store, registry, audit, cand, actor, report)
-            elif cand.kind == "link":
-                _publish_link(store, registry, audit, cand, actor, report)
-            else:
+            if cand.kind not in ("object", "link"):
                 report["skipped"].append(
                     {
                         "candidate_id": cand.candidate_id,
                         "reason": "attribute 归并进所属对象 property_schema，不单独注册",
                     }
                 )
+                continue
+            if not perm.decide(subject, cand.target, "approve").allowed:
+                raise PublishError(
+                    f"发布前 approve 权限复核失败: {subject.id} 对 {cand.target} 无 approve 权限"
+                )
+            if cand.kind == "object":
+                defn = _prepare_object(cand, registry)
+            else:
+                defn = _prepare_link(cand, registry)
+            prepared.append((cand, defn))
         except PublishError as exc:
             report["errors"].append(
                 {"candidate_id": cand.candidate_id, "kind": cand.kind, "reason": str(exc)}
@@ -261,8 +239,121 @@ def publish_approved(
             report["errors"].append(
                 {"candidate_id": cand.candidate_id, "kind": cand.kind, "reason": f"注册失败: {exc}"}
             )
-    # 发布后自检（设计 §4.1：0 error 才接受）
+    return prepared
+
+
+def _write_lineage(store: Store, prepared: list[tuple]) -> list[str]:
+    """阶段 1：血缘先落（单连接单事务）；任一步失败整批回滚（Registry 未注册，无孤儿）。"""
+    lineage_ids: list[str] = []
+    if not prepared:
+        return lineage_ids
+    conn = store.ontology_conn()
+    try:
+        for cand, defn in prepared:
+            row = mapping_repo.create(
+                conn,
+                ontology_id="default",
+                source_table=(
+                    defn.source_table if cand.kind == "object" else cand.source_table
+                ),
+                status="published",
+                commit=False,
+                **_lineage_kwargs(cand, defn),
+            )
+            lineage_ids.append(row.id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return lineage_ids
+
+
+def _register_batch(registry: Registry, prepared: list[tuple], report: dict) -> None:
+    """阶段 2：注册后置（血缘已落，才注册内存 Registry）。"""
+    for cand, defn in prepared:
+        if cand.kind == "object":
+            registry.register_object_type(defn)
+            report["published_objects"].append(cand.target)
+        else:
+            registry.register_link_type(defn)
+            report["published_links"].append(cand.target)
+
+
+def _rollback_batch(store: Store, registry: Registry, audit, actor, prepared, lineage_ids) -> None:
+    """阶段 3 error 回滚：卸载注册 + 删除血缘 + 落 failed 审计（设计 §4.1：0 error 才接受）。"""
+    for cand, defn in prepared:
+        if cand.kind == "object":
+            registry.unregister_object_type(defn.name)
+        else:
+            registry.unregister_link_type(defn.name)
+    conn = store.ontology_conn()
+    try:
+        for lid in lineage_ids:
+            conn.execute("DELETE FROM mappings WHERE id=?", (lid,))
+        for cand, defn in prepared:
+            _audit_publish_on(conn, audit, actor, cand, defn, "failed", SELF_CHECK_ERROR_CODE)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _audit_publish_applied(store: Store, audit, actor, prepared) -> None:
+    """阶段 3 ok：自检通过才落 applied 审计（单事务；血缘已先落）。"""
+    if not prepared:
+        return
+    conn = store.ontology_conn()
+    try:
+        for cand, defn in prepared:
+            _audit_publish_on(conn, audit, actor, cand, defn, "applied")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def publish_approved(
+    store: Store,
+    registry: Registry,
+    *,
+    actor: str = "cli",
+    permission: PermissionService | None = None,
+) -> dict[str, Any]:
+    """发布 approved 候选入注册表：血缘先落 → 注册后置 → 自检回滚（P2-7，§4.1）。
+
+    前置校验（P1-3 ④ + §4.1）：待发布候选（对象/链接）复核 approve 权限与 human 来源（V9）、
+    去重/pk/source/端点；血缘同事务先落库；自检 error 回滚本批并落 failed 审计。
+    attribute 不单独注册（随对象 property_schema 归并）。
+    """
+    service = MappingCandidateService(store, registry)
+    rows, total = service.list(status=APPROVED, page=1, page_size=PAGE_ALL)
+    audit = AuditLog(store)
+    perm = permission or _permission_service(store)
+    subject = resolve_human_subject(actor)  # V9：发布 actor 必须解析为 human（agent 拒）
+    report: dict[str, Any] = {
+        "scanned": total,
+        "published_objects": [],
+        "published_links": [],
+        "skipped": [],
+        "errors": [],
+        "rolled_back": False,
+    }
+    # 阶段 0：前置校验（approve 门 + 去重 + pk/source/端点），失败记 error 不入批。
+    # attribute 不单独注册 → 先跳过（不要求 approve 策略），对象/链接逐个过门。
+    prepared = _prepare_publish_batch(rows, perm, subject, registry, report)
+    # 阶段 1：血缘先落（同事务）——全部本批候选血缘，任一步失败整批回滚（Registry 未注册）
+    lineage_ids = _write_lineage(store, prepared)
+    # 阶段 2：注册后置（血缘已落，才注册内存 Registry）
+    _register_batch(registry, prepared, report)
+    # 阶段 3：自检（设计 §4.1：0 error 才接受）；error → 回滚本批
     error_issues = [i for i in registry.self_check() if i.severity == "error"]
+    if prepared and error_issues:
+        _rollback_batch(store, registry, audit, actor, prepared, lineage_ids)
+        report["published_objects"] = []  # 已回滚，published 语义 = 最终持久
+        report["published_links"] = []
+        report["rolled_back"] = True
+    elif prepared:
+        _audit_publish_applied(store, audit, actor, prepared)  # 自检通过才落 applied 审计
     report["self_check"] = {
         "ok": not error_issues,
         "error_issues": [i.model_dump() for i in error_issues],

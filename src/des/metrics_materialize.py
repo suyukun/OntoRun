@@ -53,6 +53,11 @@ META_SCHEMA = """(
 
 _MAX_DIFFS = 20  # reconcile 差异报告截断条数（防超大列表）
 
+# R2 跨指标自洽（设计 §2.3 R2）：C1 库存账面 vs C3 流水净变，物化层按地点 diff=0（升级自 D10）
+_R2_BALANCE_METRIC = "stock_balance_by_location"
+_R2_FLOW_METRIC = "stock_flow_by_location"
+_R2_TOLERANCE = 1e-6  # 对账容差（与 D10 同量级）
+
 # 聚合函数 → SQL 模板（M4 白名单；count_distinct 单独处理）
 _AGG_TEMPLATES = {"sum": "SUM({c})", "count": "COUNT({c})", "avg": "AVG({c})", "min": "MIN({c})", "max": "MAX({c})"}
 
@@ -239,6 +244,59 @@ def _reconcile_one(conn: Any, metric: MetricDef, sql: str) -> ReconcileResult:
     )
 
 
+def _meta_row_count_mismatches(conn: Any, metric: MetricDef) -> list[str]:
+    """物化表行数 vs metric_meta.row_count 一致（P2-3 ②；meta 无该指标行则跳过）。
+
+    仅在版本戳提交后校验（materialize 中途表已重建、meta 仍是旧版本，会造成误报）。
+    """
+    row = conn.execute(
+        f"SELECT row_count FROM {METRIC_META_TABLE} WHERE metric_id=?", (metric.metric_id,)
+    ).fetchone()
+    if row is None or row[0] is None:
+        return []
+    meta_n = int(row[0])
+    actual = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM {metric_table_name(metric.metric_id)}"
+        ).fetchone()[0]
+    )
+    if actual != meta_n:
+        return [f"{metric.metric_id} 物化表行数 {actual} ≠ metric_meta.row_count {meta_n}"]
+    return []
+
+
+def _r2_diff(conn: Any, bal_metric: MetricDef, flow_metric: MetricDef) -> list[str]:
+    """物化层 R2 diff：C1 账面 vs C3 流水净变，按共同维度键逐行 diff≤容差 + 双向无孤儿。"""
+    dims_bal = [d.name for d in bal_metric.dimension_fields]
+    dims_flow = [d.name for d in flow_metric.dimension_fields]
+    if dims_bal != dims_flow:
+        raise MetricMaterializeError(
+            f"R2 维度不一致: {bal_metric.metric_id}{dims_bal} vs {flow_metric.metric_id}{dims_flow}"
+        )
+    key_sql = ", ".join(dims_bal)
+    bal_rows = conn.execute(
+        f"SELECT {key_sql}, {bal_metric.measure.name} "
+        f"FROM {metric_table_name(bal_metric.metric_id)}"
+    ).fetchall()
+    flow_rows = conn.execute(
+        f"SELECT {key_sql}, {flow_metric.measure.name} "
+        f"FROM {metric_table_name(flow_metric.metric_id)}"
+    ).fetchall()
+    bal_map = {(tuple(r[:-1])): float(r[-1]) for r in bal_rows}
+    flow_map = {(tuple(r[:-1])): float(r[-1]) for r in flow_rows}
+    diffs: list[str] = []
+    for key in flow_map:
+        if key not in bal_map:
+            diffs.append(f"C3 流水地点缺 C1 账面: {key}")
+    for key, bal in bal_map.items():
+        fl = flow_map.get(key, 0.0)
+        if abs(bal - fl) > _R2_TOLERANCE:
+            diffs.append(f"地点 {key}: 账面 {bal} ≠ 流水 {fl}")
+        if len(diffs) >= _MAX_DIFFS:
+            break
+    return diffs
+
+
 # ---------------------------------------------------------------------------
 # 公开入口：reconcile / 物化 / 版本守卫
 # ---------------------------------------------------------------------------
@@ -262,10 +320,67 @@ def reconcile_metrics(
         raise MetricMaterializeError(f"metrics.db 缺失: {db_path}（先运行 materialize_metrics）")
     con = _open_metrics_db(db_path, read_only=True)
     try:
-        return tuple(
-            _reconcile_one(con, metric, derive_metric_sql(metric, cfg, out))
-            for metric in reg.metrics
+        results: list[ReconcileResult] = []
+        for metric in reg.metrics:
+            r1 = _reconcile_one(con, metric, derive_metric_sql(metric, cfg, out))
+            meta_diffs = _meta_row_count_mismatches(con, metric)  # P2-3 ② 物化表 vs meta.row_count
+            if meta_diffs:
+                r1 = ReconcileResult(
+                    ok=False,
+                    expected_count=r1.expected_count,
+                    actual_count=r1.actual_count,
+                    ratio=r1.ratio,
+                    differences=r1.differences + meta_diffs,
+                )
+            results.append(r1)
+        return tuple(results)
+    finally:
+        con.close()
+
+
+def _reconcile_r2_on(conn: Any, reg: MetricRegistry) -> ReconcileResult:
+    """R2 核心（接受打开的 metrics.db 连接，物化与独立 reconcile 共用，防双连接锁冲突）。"""
+    m_bal = reg.by_id().get(_R2_BALANCE_METRIC)
+    m_flow = reg.by_id().get(_R2_FLOW_METRIC)
+    if m_bal is None or m_flow is None:
+        raise MetricMaterializeError(
+            f"R2 指标缺失: 注册表须含 {_R2_BALANCE_METRIC} 与 {_R2_FLOW_METRIC}"
         )
+    bal_count = int(
+        conn.execute(f"SELECT COUNT(*) FROM {metric_table_name(m_bal.metric_id)}").fetchone()[0]
+    )
+    flow_count = int(
+        conn.execute(f"SELECT COUNT(*) FROM {metric_table_name(m_flow.metric_id)}").fetchone()[0]
+    )
+    diffs = _r2_diff(conn, m_bal, m_flow)
+    return ReconcileResult(
+        ok=not diffs,
+        expected_count=bal_count,
+        actual_count=flow_count,
+        ratio=flow_count / bal_count if bal_count else 1.0,
+        differences=diffs,
+    )
+
+
+def reconcile_inventory_r2(
+    enterprise_code: str = "hc_precision",
+    out_dir: str | Path | None = None,
+    metrics: MetricRegistry | None = None,
+) -> ReconcileResult:
+    """物化层 R2：C1 库存账面 vs C3 流水净变，按地点 diff=0（设计 §2.3 R2）。
+
+    基于 metrics.db 的物化表（非源库直算）做跨指标对账——R1 同源 SQL 检不出「系统性
+    口径错误」（两侧同错），R2 是第二道防线（red-team P2-3）。metrics.db 缺失即 fail-fast。
+    """
+    out = Path(out_dir) if out_dir else DEFAULT_ENTERPRISES_DIR / enterprise_code
+    cfg = load_config(enterprise_code)
+    reg = metrics or load_metrics(config=cfg)
+    db_path = out / METRICS_DB
+    if not db_path.is_file():
+        raise MetricMaterializeError(f"metrics.db 缺失: {db_path}（先运行 materialize_metrics）")
+    con = _open_metrics_db(db_path, read_only=True)
+    try:
+        return _reconcile_r2_on(con, reg)
     finally:
         con.close()
 
@@ -279,10 +394,11 @@ def materialize_metrics(
 ) -> MetricsMaterializationResult:
     """P2 指标物化管道（§2.2 C4 流转契约：全量重建 + reconcile 全检 + 版本戳提交）。
 
-    流程：① 加载+校验指标注册表（M1-M7，复用 metrics.py）→ ② 逐指标
+    流程：① 加载+校验指标注册表（M1-M8，复用 metrics.py）→ ② 逐指标
     CREATE OR REPLACE TABLE metric_<id> AS <derive_metric_sql>（sqlite_scan 跨库直读源库）
-    → ③ reconcile 全检（§2.3 R1）→ ④ 全绿才提交 metric_meta 版本戳；任一失败抛异常，
-    整批不提交新版本戳（fail-closed，查询侧仍读旧物化，§2.2(1)）。
+    → ③ reconcile 全检（§2.3 R1 逐指标 + R2 物化层跨指标自洽，red-team P2-3）
+    → ④ 全绿才提交 metric_meta 版本戳；任一失败抛异常，整批不提交新版本戳
+    （fail-closed，查询侧仍读旧物化，§2.2(1)）。
     幂等：CREATE OR REPLACE 天然幂等，同源同配置重跑产出逐位相同（§2.3 R4）。
     刷新触发 = 显式调用（构建管道/CLI，T1/T2）；T3 查询侧版本守卫见 check_metrics_version。
     """
@@ -317,6 +433,12 @@ def materialize_metrics(
             for m, r in zip(reg.metrics, reconciles)
             if not r.ok
         ]
+        # R2 物化层跨指标自洽（C1 账面 vs C3 流水净变，diff=0；red-team P2-3 第二道防线）
+        r2 = _reconcile_r2_on(con, reg)  # 复用物化连接，避免同文件双连接锁冲突
+        if not r2.ok:
+            bad.append(
+                f"R2（{_R2_BALANCE_METRIC} vs {_R2_FLOW_METRIC}）: {r2.differences}"
+            )
         if bad:
             raise MetricMaterializeError(
                 "reconcile 未全绿（R1），整批不提交版本戳（fail-closed）: " + "; ".join(bad)

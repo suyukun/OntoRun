@@ -191,26 +191,35 @@ class MappingCandidateService:
         self._registry = registry
 
     # ---- C4 目标注册表校验（机验 ⑤） ----
-    def _validate_target(self, candidate: MappingCandidate) -> list[str]:
-        """C4：object → 已注册对象类型；attribute → 某已注册对象的字段；link → 不校验。"""
-        if candidate.kind == "object":
-            if not self._registry.has_object_type(candidate.target):
-                return [f"C4 未知对象 target: {candidate.target}"]
-        elif candidate.kind == "attribute" and not any(
-            candidate.target in o.model.model_fields
-            for o in self._registry.object_types()
+    def check_c4(self, kind: str, target: str) -> list[str]:
+        """C4 校验（公开，P1-3 ③ review 的 corrected_target 复用同一实现）：
+        object → 已注册对象类型；attribute → 某已注册对象的字段；link → 不校验。"""
+        if kind == "object":
+            if not self._registry.has_object_type(target):
+                return [f"C4 未知对象 target: {target}"]
+        elif kind == "attribute" and not any(
+            target in o.model.model_fields for o in self._registry.object_types()
         ):
-            return [f"C4 未知属性 target: {candidate.target}"]
+            return [f"C4 未知属性 target: {target}"]
         return []
 
-    def create(self, candidate: MappingCandidate) -> MappingCandidate:
-        """落表：派生档位（自洽）→ C4 校验 → routing → 落 mapping_candidates + auto 历史。"""
+    def _validate_target(self, candidate: MappingCandidate) -> list[str]:
+        return self.check_c4(candidate.kind, candidate.target)
+
+    def create(
+        self, candidate: MappingCandidate, *, thresholds: tuple[float, float] | None = None
+    ) -> MappingCandidate:
+        """落表：派生档位（自洽）→ C4 校验 → routing → 落 mapping_candidates + auto 历史。
+
+        thresholds=(high, medium)：P3 校准阈值覆盖（§1.3 阈值读取顺序，缺省 None 用默认）。
+        """
         if candidate.kind not in _KIND_SET:
             raise ValueError(f"非法映射类型: {candidate.kind}")
         now = _now()
         # 档位与分数自洽：一律由 classify(score) 派生，防 caller 传入不一致档位
+        high, medium = thresholds if thresholds else (HIGH_THRESHOLD, MEDIUM_THRESHOLD)
         candidate = candidate.model_copy(
-            update={"confidence_level": classify(candidate.confidence_score)}
+            update={"confidence_level": classify(candidate.confidence_score, high, medium)}
         )
         errors = self._validate_target(candidate)
         if errors:
@@ -242,16 +251,10 @@ class MappingCandidateService:
         current = self.get(candidate_id)
         if current is None:
             raise KeyError(f"候选不存在: {candidate_id}")
-        assert_review_transition(current.review_status, target)
-        now = _now()
         conn = self._store.ontology_conn()
         try:
-            conn.execute(
-                "UPDATE mapping_candidates SET review_status=?, updated_at=? WHERE candidate_id=?",
-                (target, now, candidate_id),
-            )
-            self._insert_history(
-                conn, candidate_id, current.review_status, target, reviewer, now, note
+            self.transition_on(
+                conn, candidate_id, target, reviewer, note, from_status=current.review_status
             )
             conn.commit()
         finally:
@@ -259,6 +262,52 @@ class MappingCandidateService:
         updated = self.get(candidate_id)
         assert updated is not None
         return updated
+
+    def transition_on(
+        self,
+        conn,
+        candidate_id: str,
+        target: str,
+        reviewer: str,
+        note: str = "",
+        *,
+        from_status: str | None = None,
+    ) -> None:
+        """流转核心（接受外部连接，P2-6 单连接单事务复用；commit 由调用方负责）。
+
+        from_status：显式传值则跳过重读——事务内上一跳未提交时，重读新连接看不到
+        中间态（如 reject 的 draft→reviewing→rejected 两跳），会误判非法流转。
+        """
+        if from_status is None:
+            current = self.get(candidate_id)
+            if current is None:
+                raise KeyError(f"候选不存在: {candidate_id}")
+            from_status = current.review_status
+        assert_review_transition(from_status, target)
+        now = _now()
+        conn.execute(
+            "UPDATE mapping_candidates SET review_status=?, updated_at=? WHERE candidate_id=?",
+            (target, now, candidate_id),
+        )
+        self._insert_history(
+            conn, candidate_id, from_status, target, reviewer, now, note
+        )
+
+    def update_target(self, candidate_id: str, target: str) -> None:
+        """改 target（服务层方法，供 review 的 corrected_target 原子复用）。"""
+        conn = self._store.ontology_conn()
+        try:
+            self.update_target_on(conn, candidate_id, target)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def update_target_on(self, conn, candidate_id: str, target: str) -> None:
+        """改 target 核心（接受外部连接，P2-6 单连接单事务复用；commit 由调用方负责）。"""
+        conn.execute(
+            "UPDATE mapping_candidates SET target=?, updated_at=? WHERE candidate_id=?",
+            (target, _now(), candidate_id),
+        )
 
     def _insert_history(
         self,
@@ -467,6 +516,37 @@ def adapt_des_semantics(
     return out
 
 
+def _adapt_all(source: dict) -> list[MappingCandidate]:
+    """四适配器产出候选（design §1.1 阶段 1 的候选来源，pipeline 与 annotate 共用）。"""
+    source_table = source["source_table"]
+    adapted: list[MappingCandidate] = []
+    adapted.extend(adapt_naming_attributes(source.get("columns") or [], source_table))
+    adapted.extend(adapt_fk_links(source.get("detected_links") or [], source_table))
+    adapted.extend(adapt_alias_matches(source.get("alias_result"), source_table))
+    adapted.extend(adapt_des_semantics(source.get("des_mappings") or [], source_table))
+    return adapted
+
+
+def _persist_candidates(
+    service: MappingCandidateService,
+    adapted: list[MappingCandidate],
+    *,
+    thresholds: tuple[float, float] | None = None,
+) -> tuple[list[MappingCandidate], list[str]]:
+    """落表 + 显式收集 C4 未注册 target（red-team P2-4：静默跳过 → 显式 skipped 计数）。
+
+    thresholds 透传 create（P3 §1.3 校准阈值覆盖，缺省 None 用默认）。
+    """
+    persisted: list[MappingCandidate] = []
+    skipped_c4: list[str] = []
+    for cand in adapted:
+        try:
+            persisted.append(service.create(cand, thresholds=thresholds))
+        except TargetNotRegisteredError:
+            skipped_c4.append(cand.target)
+    return persisted, skipped_c4
+
+
 def annotate_mapping_candidates(
     source: dict,
     registry: Registry,
@@ -481,21 +561,11 @@ def annotate_mapping_candidates(
       detected_links（fk_detection.detect_links 输出）；
       alias_result（alias_matcher.match_aliases 输出，可 None）；
       des_mappings（DES 语义已知映射：[{kind, target, source_field?}]）。
-    返回成功落表的候选；C4 未注册 target（对象/属性）的候选跳过（P3 待补录处理）。
+    返回成功落表的候选；C4 未注册 target（对象/属性）的候选跳过（P3 待补录处理），
+    skipped 明细由 run_mapping_pipeline（PipelineReport.skipped_c4）显式收集。
     """
     service = MappingCandidateService(store or Store(), registry)
-    source_table = source["source_table"]
-    adapted: list[MappingCandidate] = []
-    adapted.extend(adapt_naming_attributes(source.get("columns") or [], source_table))
-    adapted.extend(adapt_fk_links(source.get("detected_links") or [], source_table))
-    adapted.extend(adapt_alias_matches(source.get("alias_result"), source_table))
-    adapted.extend(adapt_des_semantics(source.get("des_mappings") or [], source_table))
-    persisted: list[MappingCandidate] = []
-    for cand in adapted:
-        try:
-            persisted.append(service.create(cand))
-        except TargetNotRegisteredError:
-            continue  # C4 未注册 target：跳过（P3 待补录处理）
+    persisted, _skipped = _persist_candidates(service, _adapt_all(source))
     return persisted
 
 
@@ -515,6 +585,8 @@ __all__ = [
     "MappingKind",
     "ReviewStatus",
     "TargetNotRegisteredError",
+    "_adapt_all",
+    "_persist_candidates",
     "adapt_alias_matches",
     "adapt_des_semantics",
     "adapt_fk_links",

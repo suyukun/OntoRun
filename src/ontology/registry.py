@@ -76,6 +76,12 @@ class Registry:
         ]
         return before - len(self._links)
 
+    def unregister_link_type(self, name: str) -> bool:
+        """按名删除单条 link（P2-7 发布 self_check 失败回滚用，与 unregister_object_type 对称）。"""
+        before = len(self._links)
+        self._links = [l for l in self._links if l.name != name]
+        return len(self._links) < before
+
     def has_object_type(self, name: str) -> bool:
         return name in self._objects
 

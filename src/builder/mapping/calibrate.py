@@ -5,9 +5,13 @@
 - recall_at_k（= full_recall@5，门禁口径）：GT 真值命中候选按 score 降序 top-k 的比例，
   阈值无关（人工审核可补齐），不设硬门之外只显式报告；
 - auto_coverage(high)：GT 目标被 score≥high 的候选覆盖的比例 = 人工负载反向指标；
-- auto_precision(high)：自动过（score≥high）的 GT 键中命中真值的比例，防自动错批扩散；
+- auto_precision(high)：全部 score≥high 的自动过候选（含非 GT 键）中命中真值的比例，
+  命中真值（key 在 GT 且 target 一致）才计 TP，防自动错批扩散（red-team P2-5）；
+- GT 覆盖之外自动过候选显式列入报告 unvalidated_auto_approved（不假乐观）；
 - 网格扫描：high ∈ [0.70,0.95] × medium ∈ [0.40,0.70] step 0.05，约束 medium≤high，
-  在 full_recall@5 ≥ 0.80 前提下选 auto_coverage 最大；无解如实回退默认 (0.9,0.6)；
+  在 full_recall@5 ≥ 0.80 前提下选 auto_coverage 最大；选优仅由 high 决定（P2-9：
+  medium/low 路由均进审核队列，medium 无下游影响，只校准 high，报告注明）；
+  无解如实回退默认 (0.9,0.6)；
 - 输出 mapping_thresholds.yaml（配置不写死，C2）+ CalibrationReport dict。
 """
 
@@ -139,20 +143,59 @@ def auto_coverage(store: Store, gt: dict[str, str], high: float) -> float:
     return covered / len(gt)
 
 
-def auto_precision(store: Store, gt: dict[str, str], high: float) -> float:
-    """auto_precision：score≥high 的 GT 键中命中真值的比例（防自动错批扩散）。"""
-    if not gt:
+def _auto_candidates(store: Store, high: float) -> list[MappingCandidate]:
+    """全部 score≥high 的候选（含非 GT 键；P2-5 防错批扩散的分母）。"""
+    conn = store.ontology_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM mapping_candidates WHERE confidence_score >= ? "
+            "ORDER BY source_table, source_field, kind, confidence_score DESC",
+            (high,),
+        ).fetchall()
+        return [_candidate_from_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def auto_precision_from(auto_cands: list[MappingCandidate], gt: dict[str, str]) -> float:
+    """auto_precision 纯函数：全部自动过候选中命中 GT 真值的比例（命中真值才 TP）。"""
+    if not auto_cands:
         return 0.0
-    tp = 0
-    auto_total = 0
-    for key, target in gt.items():
-        auto = [c for c in candidates_for(store, *_parse_key(key)) if c.confidence_score >= high]
-        if not auto:
-            continue
-        auto_total += 1
-        if any(c.target == target for c in auto):
-            tp += 1
-    return tp / auto_total if auto_total else 0.0
+    hits = 0
+    for c in auto_cands:
+        key = f"{c.source_table}|{c.source_field}|{c.kind}"
+        gt_target = gt.get(key)
+        if gt_target is not None and c.target == gt_target:
+            hits += 1
+    return hits / len(auto_cands)
+
+
+def auto_precision(store: Store, gt: dict[str, str], high: float) -> float:
+    """auto_precision：score≥high 的全部 auto_approved 候选中命中真值的比例。
+
+    red-team P2-5：分母 = 全部自动过候选（含非 GT 键），命中真值（key 在 GT 且 target
+    一致）才计 TP——GT 之外自动错批也会拉低精度，防「防错批扩散」假乐观。
+    """
+    return auto_precision_from(_auto_candidates(store, high), gt)
+
+
+def unvalidated_auto_approved(store: Store, gt: dict[str, str], high: float) -> list[dict]:
+    """GT 覆盖之外自动过候选（P2-5：显式列入报告，防未验证自动过被乐观统计掩盖）。"""
+    out: list[dict] = []
+    for c in _auto_candidates(store, high):
+        key = f"{c.source_table}|{c.source_field}|{c.kind}"
+        if key not in gt:
+            out.append(
+                {
+                    "candidate_id": c.candidate_id,
+                    "source_table": c.source_table,
+                    "source_field": c.source_field,
+                    "kind": c.kind,
+                    "target": c.target,
+                    "confidence_score": c.confidence_score,
+                }
+            )
+    return out
 
 
 def _frange(start: float, stop: float, step: float) -> list[float]:
@@ -180,24 +223,37 @@ def grid_scan(
     recall_gate: float = RECALL_GATE,
     k: int = RECALL_K,
 ) -> dict[str, Any]:
-    """网格扫描：medium≤high 下逐 (high, medium) 计三口径，选满 recall 下 auto_coverage 最大。"""
+    """网格扫描：medium≤high 下逐 (high, medium) 计三口径，选满 recall 下 auto_coverage 最大。
+
+    P2-9：选优仅由 high 决定（auto_coverage 只依赖 high）——medium/low 路由均进审核队列，
+    medium 无下游影响，故不参与选优，作为伴随值报告（report 注明，防「medium 摆设」）。
+    auto_precision 按 high 预取一次全部自动过候选（P2-5 分母含非 GT 键），避免逐格重复扫表。
+    """
     full_recall = recall_at_k(store, gt, k=k)
     rows: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     for high in _frange(high_min, high_max, step):
+        precision = auto_precision_from(_auto_candidates(store, high), gt)
+        coverage = auto_coverage(store, gt, high)
         for medium in _frange(medium_min, medium_max, step):
             if medium > high:
                 continue
             row = {
                 "high": high,
                 "medium": medium,
-                "auto_coverage": round(auto_coverage(store, gt, high), 4),
+                "auto_coverage": round(coverage, 4),
                 "full_recall_at_5": round(full_recall, 4),
-                "auto_precision": round(auto_precision(store, gt, high), 4),
+                "auto_precision": round(precision, 4),
             }
             rows.append(row)
+            # 选优：满 recall 下 auto_coverage 最大；并列取更低 high（更多自动化，确定性）
             if full_recall >= recall_gate and (
-                best is None or row["auto_coverage"] > best["auto_coverage"]
+                best is None
+                or row["auto_coverage"] > best["auto_coverage"]
+                or (
+                    row["auto_coverage"] == best["auto_coverage"]
+                    and row["high"] < best["high"]
+                )
             ):
                 best = row
     return {
@@ -205,6 +261,12 @@ def grid_scan(
         "rows": rows,
         "best": best,
     }
+
+
+SELECTION_NOTE = (
+    "选优仅由 high 决定（P2-9）：medium/low 路由均进审核队列，medium 无下游影响，"
+    "只校准 high 并报告；medium 为伴随值"
+)
 
 
 def _build_report(
@@ -220,6 +282,8 @@ def _build_report(
         "recommended_thresholds": {"high": best["high"], "medium": best["medium"]},
         "auto_coverage": best["auto_coverage"],
         "auto_precision": best["auto_precision"],
+        "unvalidated_auto_approved": unvalidated_auto_approved(store, gt, best["high"]),
+        "selection_note": SELECTION_NOTE,
         "fallback": bool(best.get("fallback")),
         "grid_rows": scan["rows"],
         "calibrated_at": _now(),
@@ -238,8 +302,11 @@ def _write_thresholds(
         "gt_size": report["gt_size"],
         "full_recall_at_5": report["full_recall_at_5"],
         "auto_coverage": report["auto_coverage"],
+        "auto_precision": report["auto_precision"],
+        "unvalidated_auto_approved": report["unvalidated_auto_approved"],
         "thresholds": thresholds,
         "selection": "满 full_recall@5>=0.80 下 auto_coverage 最大；无解回退 0.9/0.6（C2 不写死）",
+        "selection_note": SELECTION_NOTE,
         "fallback": report["fallback"],
     }
     Path(out_path).write_text(
@@ -282,11 +349,14 @@ def calibrate(
 
 __all__ = [
     "FALLBACK_THRESHOLDS",
+    "SELECTION_NOTE",
     "auto_coverage",
     "auto_precision",
+    "auto_precision_from",
     "calibrate",
     "candidates_for",
     "grid_scan",
     "load_ground_truth",
     "recall_at_k",
+    "unvalidated_auto_approved",
 ]

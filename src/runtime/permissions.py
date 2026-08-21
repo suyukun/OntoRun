@@ -153,6 +153,22 @@ class PermissionDecision(BaseModel):
     matched_policy_ids: list[str] = Field(default_factory=list)
 
 
+def resolve_human_subject(ref: str) -> PermissionSubject:
+    """把 CLI 审核/发布 actor 引用解析为 PermissionSubject（P1-3 approve 权限门）。
+
+    - 纯字符串（'jack'/'cli'）→ 视为 human id；
+    - 显式 'human:jack' → human；显式 'agent:x' → 拒绝（V9 审=人专属）。
+    审核/发布是治理动作，只能由 human 执行——agent 一律拒。
+    """
+    if ":" in ref:
+        kind, _, rid = ref.partition(":")
+        if kind == "human" and rid:
+            return PermissionSubject(kind="human", id=rid)
+        if kind == "agent" and rid:
+            raise ValueError(f"V9 审=人专属: agent 不可执行审核/发布（ref={ref!r}）")
+    return PermissionSubject(kind="human", id=ref)
+
+
 def _subject_matches(
     policy: PermissionPolicy,
     subject: PermissionSubject,
@@ -452,6 +468,16 @@ class PermissionService:
     def perm_registry(self) -> PermissionRegistry:
         return self._perm
 
+    def decide(
+        self,
+        subject: PermissionSubject,
+        object_type: str,
+        operation: PermissionOperation,
+        attribute: str | None = None,
+    ) -> PermissionDecision:
+        """权限判定（委托内存镜像；P1-3 approve 门 / P2 读侧共用入口）。"""
+        return self._perm.decide(subject, object_type, operation, attribute)
+
     # ---- 策略 CRUD ----
     def _validate(
         self, policy: PermissionPolicy, *, exclude_self: bool = False
@@ -533,5 +559,6 @@ __all__ = [
     "PolicyScope",
     "SubjectKind",
     "decide",
+    "resolve_human_subject",
     "validate_policy",
 ]

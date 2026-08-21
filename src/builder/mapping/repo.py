@@ -75,7 +75,9 @@ def create(
     fk_mappings: list[dict] | None = None,
     cardinalities: dict | None = None,
     status: str = DRAFT,
+    commit: bool = True,
 ) -> MappingRow:
+    """落血缘行；commit=False 时由调用方在同一事务内批量提交（P2-7 发布血缘先落同事务）。"""
     new_id = _new_id()
     now = _now()
     conn.execute(
@@ -95,7 +97,8 @@ def create(
             now,
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return get(conn, new_id)  # type: ignore[return-value]
 
 

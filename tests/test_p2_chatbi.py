@@ -19,6 +19,7 @@ Store（tmp_path 双库，不污染真实 ontology.db）；物化在会话级跑
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -43,6 +44,7 @@ from src.des.metrics_materialize import (
     MetricsMaterializationResult,
     check_metrics_version,
     materialize_metrics,
+    reconcile_inventory_r2,
     reconcile_metrics,
 )
 from src.ontology import build_registry
@@ -276,6 +278,22 @@ def _load_single(metric: dict) -> MetricRegistry:
             },
             "M6",  # M6 维度名重复
         ),
+        (
+            {"dimension_fields": [{"name": "matnr", "source": "VBAP.MATNR", "transform": "evil(1,2)"}]},
+            "M8",  # M8 transform 函数名白名单（P2-8 防注入面）
+        ),
+        (
+            {"dimension_fields": [{"name": "matnr", "source": "VBAP.MATNR", "transform": "substr(1;7)"}]},
+            "M8",  # M8 transform 参数须数字/纯逗号分隔
+        ),
+        (
+            {"dimension_fields": [{"name": "Bad-Name", "source": "VBAP.MATNR"}]},
+            "M8",  # M8 dimension name 须 snake_case
+        ),
+        (
+            {"measure": {"name": "Bad-Name", "source": "VBAP.NETWR"}},
+            "M8",  # M8 measure name 须 snake_case
+        ),
     ],
     ids=[
         "m1_unknown_object",
@@ -286,6 +304,10 @@ def _load_single(metric: dict) -> MetricRegistry:
         "m5_star_non_count",
         "m6_empty_dims",
         "m6_dup_dim_name",
+        "m8_bad_transform_func",
+        "m8_bad_transform_args",
+        "m8_bad_dim_name",
+        "m8_bad_measure_name",
     ],
 )
 def test_metric_validation_rejects(mutate: dict, expect: str) -> None:
@@ -369,6 +391,38 @@ def test_reconcile_metrics_all_diff_zero(
         assert r.ok is True, f"reconcile 未全绿: {r.differences}"
         assert r.expected_count == r.actual_count
         assert r.differences == []
+
+
+def test_reconcile_inventory_r2_diff_zero(mat_result: MetricsMaterializationResult) -> None:
+    """P2-3 R2 物化层跨指标自洽：C1 库存账面 vs C3 流水净变，按地点 diff=0（升级自 D10）。
+
+    R1 同源 SQL 检不出系统性口径错误，R2 基于 metrics.db 物化表做第二道防线（red-team P2-3）。
+    """
+    r2 = reconcile_inventory_r2(ENTERPRISE_CODE)
+    assert r2.ok is True, f"R2 未全绿: {r2.differences}"
+    assert r2.differences == []
+    assert r2.expected_count > 0 and r2.actual_count == r2.expected_count
+
+
+def test_reconcile_detects_meta_row_count_mismatch(mat_result, tmp_path) -> None:
+    """P2-3 ②：篡改 metric_meta.row_count → reconcile 检出「物化表行数 ≠ meta.row_count」。"""
+    work = tmp_path / "meta_tamper"
+    work.mkdir()
+    shutil.copy(METRICS_DB_PATH, work / METRICS_DB)
+    for name in ("erp.db", "mes.db", "wms.db", "scm.db", "fin.db", "manifest.json"):
+        os.symlink(ENTERPRISE_DIR / name, work / name)
+    con = duckdb.connect(str(work / METRICS_DB))
+    try:
+        con.execute(
+            "UPDATE metric_meta SET row_count = 999 "
+            "WHERE metric_id='sales_amount_by_mat_month'"
+        )
+    finally:
+        con.close()
+    results = reconcile_metrics(ENTERPRISE_CODE, out_dir=work)
+    bad = [r for r in results if not r.ok]
+    assert bad, "篡改 meta.row_count 后 reconcile 应检出（物化表行数 ≠ meta.row_count）"
+    assert any("metric_meta.row_count" in d for d in bad[0].differences)
 
 
 def test_check_metrics_version_ok(

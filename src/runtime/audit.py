@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -114,6 +115,48 @@ def _retention_source_validate(record: AuditRecord) -> None:
         raise ValueError(f"非法 source: {record.source}")
 
 
+def _audit_row(record: AuditRecord) -> dict:
+    """AuditRecord → 审计行 dict（哈希内容来源，链元数据列 seq/prev_hash/record_hash 由追加方补）。"""
+    return {
+        "audit_id": record.audit_id,
+        "ts": record.ts.strftime("%Y-%m-%d %H:%M:%S"),
+        "action_name": record.action_name,
+        "actor": record.actor,
+        "actor_detail": record.actor_detail,
+        "request_id": record.request_id,
+        "params_json": record.params_json,
+        "preconditions_json": record.preconditions_json,
+        "effects_json": record.effects_json,
+        "writeback_json": record.writeback_json,
+        "outcome": record.outcome,
+        "error_code": record.error_code,
+        "message": record.message,
+        "detail_json": record.detail_json,
+        "duration_ms": record.duration_ms,
+        "retention_class": record.retention_class,
+        "source": record.source,
+    }
+
+
+def _append_mirrors(conn, record: AuditRecord, row: dict, effects) -> None:
+    """字段级镜像（同一事务，记录 + 镜像原子；镜像行不入链，跟随母记录）。"""
+    for e in effects or []:
+        conn.execute(
+            "INSERT INTO audit_field_mirror (mirror_id, audit_id, object_type, pk, "
+            "prop, old_value, new_value, ts) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                new_ulid(),
+                record.audit_id,
+                e.object_type,
+                e.pk,
+                e.prop,
+                None if e.old is None else str(e.old),
+                None if e.new is None else str(e.new),
+                row["ts"],
+            ),
+        )
+
+
 class AuditLog:
     """审计日志：追加（append）/ 查询（query）/ 单条（get）。"""
 
@@ -132,78 +175,56 @@ class AuditLog:
           同一事务内落 audit_field_mirror（记录 + 镜像原子，设计 2.4）；
         - retention_class/source 默认 sensitive/action，枚举非法即拒绝（机验 ⑤）。
         """
-        _retention_source_validate(record)
         conn = self._store.ontology_conn()
         try:
-            row = {
-                "audit_id": record.audit_id,
-                "ts": record.ts.strftime("%Y-%m-%d %H:%M:%S"),
-                "action_name": record.action_name,
-                "actor": record.actor,
-                "actor_detail": record.actor_detail,
-                "request_id": record.request_id,
-                "params_json": record.params_json,
-                "preconditions_json": record.preconditions_json,
-                "effects_json": record.effects_json,
-                "writeback_json": record.writeback_json,
-                "outcome": record.outcome,
-                "error_code": record.error_code,
-                "message": record.message,
-                "detail_json": record.detail_json,
-                "duration_ms": record.duration_ms,
-                "retention_class": record.retention_class,
-                "source": record.source,
-            }
-            seq = self._next_seq(conn)
-            prev_hash = self._prev_hash(conn)
-            record_hash = _hash_chain(prev_hash, _content_of(row))
-            conn.execute(
-                "INSERT INTO audit_log (audit_id, seq, ts, action_name, actor, actor_detail, "
-                "request_id, params_json, preconditions_json, effects_json, writeback_json, "
-                "outcome, error_code, message, detail_json, duration_ms, prev_hash, record_hash, "
-                "retention_class, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    row["audit_id"],
-                    seq,
-                    row["ts"],
-                    row["action_name"],
-                    row["actor"],
-                    row["actor_detail"],
-                    row["request_id"],
-                    row["params_json"],
-                    row["preconditions_json"],
-                    row["effects_json"],
-                    row["writeback_json"],
-                    row["outcome"],
-                    row["error_code"],
-                    row["message"],
-                    row["detail_json"],
-                    row["duration_ms"],
-                    prev_hash,
-                    record_hash,
-                    row["retention_class"],
-                    row["source"],
-                ),
-            )
-            # 字段级镜像（同一事务，记录 + 镜像原子；镜像行不入链，跟随母记录）
-            for e in effects or []:
-                conn.execute(
-                    "INSERT INTO audit_field_mirror (mirror_id, audit_id, object_type, pk, "
-                    "prop, old_value, new_value, ts) VALUES (?,?,?,?,?,?,?,?)",
-                    (
-                        new_ulid(),
-                        record.audit_id,
-                        e.object_type,
-                        e.pk,
-                        e.prop,
-                        None if e.old is None else str(e.old),
-                        None if e.new is None else str(e.new),
-                        row["ts"],
-                    ),
-                )
+            self.append_on(conn, record, effects)
             conn.commit()
         finally:
             conn.close()
+        return record.audit_id
+
+    def append_on(
+        self, conn: sqlite3.Connection, record: AuditRecord, effects: list[FieldEffect] | None = None
+    ) -> str:
+        """追加核心（接受外部连接，供 P2-6 审核导入单连接单事务复用）。
+
+        与 append 同一实现（链序/哈希/镜像原子），但不负责 commit——由调用方在同一事务内
+        组合「改 target + 流转 + history + audit」并一次性提交（red-team P2-6）。
+        """
+        _retention_source_validate(record)
+        row = _audit_row(record)
+        seq = self._next_seq(conn)
+        prev_hash = self._prev_hash(conn)
+        record_hash = _hash_chain(prev_hash, _content_of(row))
+        conn.execute(
+            "INSERT INTO audit_log (audit_id, seq, ts, action_name, actor, actor_detail, "
+            "request_id, params_json, preconditions_json, effects_json, writeback_json, "
+            "outcome, error_code, message, detail_json, duration_ms, prev_hash, record_hash, "
+            "retention_class, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                row["audit_id"],
+                seq,
+                row["ts"],
+                row["action_name"],
+                row["actor"],
+                row["actor_detail"],
+                row["request_id"],
+                row["params_json"],
+                row["preconditions_json"],
+                row["effects_json"],
+                row["writeback_json"],
+                row["outcome"],
+                row["error_code"],
+                row["message"],
+                row["detail_json"],
+                row["duration_ms"],
+                prev_hash,
+                record_hash,
+                row["retention_class"],
+                row["source"],
+            ),
+        )
+        _append_mirrors(conn, record, row, effects)
         return record.audit_id
 
     def _next_seq(self, conn) -> int:

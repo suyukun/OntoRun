@@ -1,9 +1,10 @@
-"""P2 ChatBI 指标注册表加载 + 校验（M1-M7）。
+"""P2 ChatBI 指标注册表加载 + 校验（M1-M8）。
 
-依据 docs/P2-ChatBI闭环设计_v0.1.md §1（指标模型 7 字段 / 校验 M1-M7 / 5 组 15 指标清单 §1.5）：
+依据 docs/P2-ChatBI闭环设计_v0.1.md §1（指标模型 7 字段 / 校验 M1-M8 / 5 组 15 指标清单 §1.5）：
 - 指标 = 挂在本体对象上的可预聚合度量（对象 → 指标定义 → 物化结果），本注册表 = 单一事实来源；
 - 加载即校验，任一违规 fail-fast（对齐 contract.py V1-V5 与 config.py 的 fail-fast 纪律）；
-- M1-M7 机器校验（对象白名单 / 来源表白名单 / 字段存在 / 聚合合法 / 类型兼容 / 粒度唯一 / id 唯一）；
+- M1-M8 机器校验（对象白名单 / 来源表白名单 / 字段存在 / 聚合合法 / 类型兼容 / 粒度唯一 /
+  id 唯一 / 命名与 transform 白名单——M8 防未来注册表成为半可信输入时的物化 SQL 注入面）；
 - 4 个待注册主体对象（Customer/Vendor/InventoryLocation/FinanceEntry）注册等 Jack 拍板（§1.5），
   M1 对 planned 对象放行但记 pending_registration —— 无这些对象注册也可正常加载。
 """
@@ -23,7 +24,7 @@ if TYPE_CHECKING:  # Registry 仅类型提示（可选注入），运行期不�
     from src.ontology.registry import Registry
 
 # ---------------------------------------------------------------------------
-# 常量（M1-M7 校验白名单 / 18 表列契约，设计 §1.2/§1.3 + P1b §2/§3.1）
+# 常量（M1-M8 校验白名单 / 18 表列契约，设计 §1.2/§1.3 + P1b §2/§3.1）
 # ---------------------------------------------------------------------------
 DEFAULT_METRICS_FILE = DES_DATA_DIR / "des_metrics.yaml"
 
@@ -189,7 +190,7 @@ SOURCE_COLUMNS: dict[str, dict[str, str]] = {
     },
 }
 
-# metric_id 命名契约（snake_case，§1.2）
+# metric_id / dimension / measure 命名契约（snake_case，§1.2 + M8）
 _METRIC_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 # ---------------------------------------------------------------------------
@@ -200,6 +201,21 @@ METRIC_TABLE_PREFIX = "metric_"  # 物化表名前缀（§2.1，metric_<id> 由�
 METRIC_META_TABLE = "metric_meta"  # 物化元表（§2.1，版本/口径锚，读侧 T3 守卫同源引用）
 DATE_TRANSFORM_FUNCS = ("substr",)  # 时间派生 transform（substr(1,7) → YYYY-MM 月粒度）
 _SUBSTR_LEN_RE = re.compile(r"^substr\(\s*1\s*,\s*(\d+)\s*\)$")
+
+
+# M8 transform 白名单正则（函数名 ∈ DATE_TRANSFORM_FUNCS + 参数为数字/纯逗号分隔，防注入面）
+_TRANSFORM_FUNC_ALT = "|".join(re.escape(f) for f in DATE_TRANSFORM_FUNCS)
+_TRANSFORM_RE = re.compile(rf"^({_TRANSFORM_FUNC_ALT})\(\s*\d+\s*(?:,\s*\d+\s*)*\)$")
+
+
+def _check_transform_m8(transform: str) -> str | None:
+    """M8 transform 校验：函数名 ∈ DATE_TRANSFORM_FUNCS 白名单 + 参数为数字/纯逗号分隔。"""
+    if _TRANSFORM_RE.match(transform.strip()) is None:
+        return (
+            f"transform 非法（M8）：函数名须 ∈ {list(DATE_TRANSFORM_FUNCS)}"
+            f" 且参数为数字/逗号分隔: {transform!r}"
+        )
+    return None
 
 
 def metric_table_name(metric_id: str) -> str:
@@ -308,7 +324,7 @@ def _source_table_whitelist(config: dict | None) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# 校验 M1-M7（fail-fast）
+# 校验 M1-M8（fail-fast）
 # ---------------------------------------------------------------------------
 def _resolve_source(
     source: str, source_tables: tuple[str, ...]
@@ -475,6 +491,27 @@ def _check_m6_grain_m7(
     return v
 
 
+def _check_m8_naming_transform(raw: dict, idx: int) -> list[str]:
+    """M8 命名 + transform 白名单（red-team P2-8 纵深防御）：dimension/measure name 须
+    snake_case（^[a-z][a-z0-9_]*$，复用 metric_id 正则）；transform 函数名 ∈ 白名单且
+    参数为数字/纯逗号分隔——防未来注册表成为半可信输入时的物化 SQL 注入面。"""
+    v: list[str] = []
+    for pos, d in enumerate(raw["dimension_fields"]):
+        name = d.get("name")
+        if isinstance(name, str) and not _METRIC_ID_RE.match(name):
+            v.append(f"指标 #{idx}: dimension name 命名须为 snake_case（M8）: {name!r}")
+        tr = d.get("transform")
+        if isinstance(tr, str):
+            err = _check_transform_m8(tr)
+            if err:
+                v.append(f"指标 #{idx}: dimension_fields[{pos}] {err}")
+    m = raw["measure"]
+    mname = m.get("name") if isinstance(m, dict) else None
+    if isinstance(mname, str) and not _METRIC_ID_RE.match(mname):
+        v.append(f"指标 #{idx}: measure name 命名须为 snake_case（M8）: {mname!r}")
+    return v
+
+
 def _to_metric(raw: dict) -> MetricDef:
     """把通过校验的裸 dict 转成不可变 MetricDef。"""
     dims = tuple(
@@ -501,7 +538,7 @@ def load_metrics(
     registry: Registry | None = None,
     config: dict | None = None,
 ) -> MetricRegistry:
-    """加载指标注册表 YAML 并执行 M1-M7 校验（fail-fast，任一违规抛 MetricError）。
+    """加载指标注册表 YAML 并执行 M1-M8 校验（fail-fast，任一违规抛 MetricError）。
 
     参数：
         path：注册表 YAML 路径（默认 data/des/des_metrics.yaml）；
@@ -527,6 +564,7 @@ def load_metrics(
             violations.extend(_check_m1_m2_m4(valid, idx, registered, whitelist))
             violations.extend(_check_m3_m5(valid, idx))
             violations.extend(_check_m6_grain_m7(valid, idx, seen_grains, seen_ids))
+            violations.extend(_check_m8_naming_transform(valid, idx))
         if violations:
             raise MetricError(
                 f"{yaml_path}: 指标 #{idx} 校验失败: " + "; ".join(violations)

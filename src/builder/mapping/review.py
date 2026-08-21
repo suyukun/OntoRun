@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +24,10 @@ from src.builder.mapping.annotate import (
     REVIEWING,
     MappingCandidateService,
 )
+from src.ontology import build_registry
 from src.ontology.registry import Registry
 from src.runtime.audit import AuditLog, AuditRecord
+from src.runtime.permissions import PermissionService, resolve_human_subject
 from src.runtime.store import Store
 
 # 导出列（只读快照；导入仅用 candidate_id 回锚，decision/corrected_target/note 为裁决列）
@@ -48,16 +51,16 @@ AUDIT_ACTION_REVIEW = "mapping_review"
 AUDIT_SOURCE_REVIEW = "review"
 PAGE_ALL = 1_000_000
 
-
-def _now() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+# corrected_target 格式白名单（P1-3 ③：写入前格式 + C4 注册表校验）
+_OBJECT_TARGET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_ATTR_TARGET_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_LINK_TARGET_RE = re.compile(r"^[a-z][a-z0-9_.]*$")
 
 
 def _service(store: Store) -> MappingCandidateService:
-    """CLI 只用 list/get/transition，不触 C4 校验，registry 传空即可。"""
-    return MappingCandidateService(store, Registry())
+    """CLI 服务：registry 用 build_registry（本体已知对象集），供 corrected_target 的 C4
+    校验（P1-3 ③）对「已注册对象/字段」放行；list/get/transition 不依赖 registry。"""
+    return MappingCandidateService(store, build_registry())
 
 
 def export_candidates(
@@ -96,10 +99,16 @@ def import_decisions(
     in_path: str | Path,
     *,
     reviewer: str = REVIEWER_CLI,
+    permission: PermissionService | None = None,
 ) -> dict[str, Any]:
-    """导入裁决 CSV，逐候选原子更新；失败行记入 failures 不静默。"""
+    """导入裁决 CSV，逐候选原子更新；失败行记入 failures 不静默。
+
+    permission：approve 权限门判定器（P1-3 ①）；不传时从 store 的 permission_policies
+    表自动加载（gate 恒开，fail-closed：无 approve 策略即拒）。
+    """
     audit = AuditLog(store)
     service = _service(store)
+    perm = permission or _permission_service(store)
     report: dict[str, Any] = {
         "processed": 0,
         "accepted": 0,
@@ -120,11 +129,39 @@ def import_decisions(
                 continue
             try:
                 _apply_decision(
-                    store, service, audit, candidate_id, decision, corrected, note, reviewer, report
+                    store, service, audit, perm, candidate_id, decision, corrected, note,
+                    reviewer, report,
                 )
             except Exception as exc:  # noqa: BLE001 —— 逐行原子，异常记失败不中断批次
                 _fail(report, line_no, f"{type(exc).__name__}: {exc}")
     return report
+
+
+def _permission_service(store: Store) -> PermissionService:
+    """默认 approve 权限判定器：从 store 的 permission_policies 表加载（gate 恒开）。"""
+    return PermissionService(store, Registry())
+
+
+def _validate_corrected_target(
+    service: MappingCandidateService, cand, corrected: str
+) -> None:
+    """corrected_target 写入前校验（P1-3 ③）：格式白名单 + C4 注册表（复用 check_c4）。"""
+    if not corrected:
+        raise ValueError("corrected_target 不能为空")
+    if cand.kind == "object":
+        if not _OBJECT_TARGET_RE.match(corrected):
+            raise ValueError(f"object 目标格式非法: {corrected!r}")
+        errors = service.check_c4("object", corrected)
+    elif cand.kind == "attribute":
+        if not _ATTR_TARGET_RE.match(corrected):
+            raise ValueError(f"attribute 目标格式非法: {corrected!r}")
+        errors = service.check_c4("attribute", corrected)
+    else:  # link：C4 不校验（publish 阶段校验端点），只查格式
+        if not _LINK_TARGET_RE.match(corrected):
+            raise ValueError(f"link 目标格式非法: {corrected!r}")
+        errors = []
+    if errors:
+        raise ValueError("；".join(errors))
 
 
 def _fail(report: dict[str, Any], line_no: int, reason: str) -> None:
@@ -136,6 +173,7 @@ def _apply_decision(
     store: Store,
     service: MappingCandidateService,
     audit: AuditLog,
+    perm: PermissionService,
     candidate_id: str,
     decision: str,
     corrected: str | None,
@@ -143,9 +181,11 @@ def _apply_decision(
     reviewer: str,
     report: dict[str, Any],
 ) -> None:
+    """逐候选原子应用裁决：approve 权限门 + corrected 校验 + 单连接单事务（P1-3/P2-6）。"""
     cand = service.get(candidate_id)
     if cand is None:
         raise KeyError(f"候选不存在: {candidate_id}")
+    subject = _preflight(service, perm, cand, decision, corrected, reviewer)
     detail = {
         "candidate_id": candidate_id,
         "kind": cand.kind,
@@ -155,50 +195,83 @@ def _apply_decision(
         "corrected_target": corrected,
         "note": note,
     }
-    if decision == "accept":
-        if cand.review_status == APPROVED:
-            # approved 为终态：接受为幂等确认；改 target 则拒绝（变更走新候选重审）
-            if corrected and corrected != cand.target:
-                raise ValueError(f"approved 终态不可改 target，变更须新建候选: {candidate_id}")
-            _audit_review(audit, reviewer, "applied", detail, note)
-        else:
-            if corrected:
-                _update_target(store, candidate_id, corrected)
-            service.transition(candidate_id, APPROVED, reviewer, note)
-            _audit_review(audit, reviewer, "applied", detail, note)
-        report["accepted"] += 1
-    elif decision == "reject":
-        if cand.review_status == "draft":
-            # 状态机无 draft→rejected，先转 reviewing 再拒绝（设计 §2.1）
-            service.transition(candidate_id, REVIEWING, reviewer, "draft→reviewing 前置流转")
-        service.transition(candidate_id, REJECTED, reviewer, note)
-        _audit_review(audit, reviewer, "rejected", detail, note)
-        report["rejected"] += 1
-    else:  # conflict：不流转，留队列 + MAPPING_CONFLICT 审计（设计 §2.4）
-        _audit_review(
-            audit, reviewer, "rejected", detail, note,
-            error_code="MAPPING_CONFLICT",
-        )
-        report["conflicts"] += 1
-    report["processed"] += 1
-
-
-def _update_target(store: Store, candidate_id: str, target: str) -> None:
-    """服务层无改 target 方法（annotate.py 不做改动，设计 §0.2），CLI 直写映射表。"""
-    if not target:
-        raise ValueError("corrected_target 不能为空")
     conn = store.ontology_conn()
     try:
-        conn.execute(
-            "UPDATE mapping_candidates SET target=?, updated_at=? WHERE candidate_id=?",
-            (target, _now(), candidate_id),
+        _apply_decision_txn(
+            conn, service, audit, cand, decision, corrected, note, reviewer, subject, detail, report,
         )
-        conn.commit()
+        report["processed"] += 1
+        conn.commit()  # 改 target + 流转 + history + audit 单事务提交（P2-6 原子）
+    except Exception:
+        conn.rollback()  # 任一步失败整体回滚，不落中间态
+        raise
     finally:
         conn.close()
 
 
+def _preflight(service, perm, cand, decision, corrected, reviewer) -> Any:
+    """P1-3 前置校验：approved 终态锁 target → corrected 格式/C4 → approve 权限门（human 专属）。"""
+    if (
+        decision == "accept"
+        and cand.review_status == APPROVED
+        and corrected
+        and corrected != cand.target
+    ):
+        raise ValueError(f"approved 终态不可改 target，变更须新建候选: {cand.candidate_id}")
+    if decision == "accept" and corrected:
+        _validate_corrected_target(service, cand, corrected)
+    subject = resolve_human_subject(reviewer)  # V9：agent 一律拒
+    effective_target = corrected if (decision == "accept" and corrected) else cand.target
+    if not perm.decide(subject, effective_target, "approve").allowed:
+        raise ValueError(
+            f"approve 权限不足: {subject.id} 对 {effective_target} 无 approve 权限"
+        )
+    return subject
+
+
+def _apply_decision_txn(
+    conn, service, audit, cand, decision, corrected, note, reviewer, subject, detail, report,
+) -> None:
+    """单连接单事务内应用裁决（accept/reject/conflict + 审计）；commit/rollback 由调用方负责。"""
+    if decision == "accept":
+        if cand.review_status == APPROVED:
+            # approved 为终态：接受为幂等确认（改 target 已在前置校验拒绝）
+            _audit_review(conn, audit, reviewer, "applied", detail, note)
+        else:
+            if corrected:
+                service.update_target_on(conn, cand.candidate_id, corrected)
+            service.transition_on(
+                conn, cand.candidate_id, APPROVED, reviewer, note, from_status=cand.review_status
+            )
+            _audit_review(conn, audit, reviewer, "applied", detail, note)
+        report["accepted"] += 1
+    elif decision == "reject":
+        if cand.review_status == "draft":
+            # 状态机无 draft→rejected，先转 reviewing 再拒绝（设计 §2.1）；
+            # 事务内两跳，from_status 显式传值防重读新连接看不到中间态
+            service.transition_on(
+                conn, cand.candidate_id, REVIEWING, reviewer,
+                "draft→reviewing 前置流转", from_status=cand.review_status,
+            )
+            service.transition_on(
+                conn, cand.candidate_id, REJECTED, reviewer, note, from_status=REVIEWING
+            )
+        else:
+            service.transition_on(
+                conn, cand.candidate_id, REJECTED, reviewer, note, from_status=cand.review_status
+            )
+        _audit_review(conn, audit, reviewer, "rejected", detail, note)
+        report["rejected"] += 1
+    else:  # conflict：不流转，留队列 + MAPPING_CONFLICT 审计（设计 §2.4）
+        _audit_review(
+            conn, audit, reviewer, "rejected", detail, note,
+            error_code="MAPPING_CONFLICT",
+        )
+        report["conflicts"] += 1
+
+
 def _audit_review(
+    conn,
     audit: AuditLog,
     reviewer: str,
     outcome: str,
@@ -207,7 +280,9 @@ def _audit_review(
     *,
     error_code: str | None = None,
 ) -> None:
-    audit.append(
+    """落 source='review' 审计（P2-6：走调用方单连接单事务，commit 由外部负责）。"""
+    audit.append_on(
+        conn,
         AuditRecord(
             action_name=AUDIT_ACTION_REVIEW,
             actor=AUDIT_ACTOR,
@@ -217,7 +292,7 @@ def _audit_review(
             message=note or None,
             detail_json=json.dumps(detail, ensure_ascii=False),
             source=AUDIT_SOURCE_REVIEW,
-        )
+        ),
     )
 
 
