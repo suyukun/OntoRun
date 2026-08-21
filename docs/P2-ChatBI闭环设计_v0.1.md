@@ -1,12 +1,12 @@
 # P2 ChatBI 闭环设计 v0.1（上篇：指标模型 + DuckDB 物化）
 
-> 编制：架构角色（本体论方向）｜ 日期：2026-08-21 ｜ 状态：设计稿（本轮仅上篇）
+> 编制：架构角色（本体论方向）｜ 日期：2026-08-21（上篇）；2026-08-21（下篇 §3-6 本次追加）｜ 状态：设计稿（上篇 §1-2 已交付；下篇 §3-6 追加待验收）
 > 关联：docs/S2-议题清单_v0.1.md（§3.5.5 议题1 形态 v2 / §3.18 C4 双引擎一致性 / §3.5 量级真相）、
 > docs/S2-开发计划_v0.1草案.md（阶段 P2 门禁）、docs/P1b-DES-横向铺开设计_v0.1.md（18 表字段 / §6.2 Q2 基线）、
 > docs/S2-P1b-横向铺开完成记录.md（Q2 实测 98ms / 基线需重定义）、docs/P1a-本体映射与查询契约设计_v0.1.md（契约 v0.1 / reconcile 范式）、
 > src/des/materialize.py + src/des/contract.py（现有物化/契约接口）
 > 产出：本文档（单文件 md，设计规格）；实现由 P2 编码活落地
-> 范围（重要）：**本次只覆盖「本体读侧指标模型 + DuckDB 物化」**；「契约 v0.2 + head-to-head 实验设计」在下一版（下篇）补充，本篇不展开。
+> 范围（重要）：**上篇（§1-2）覆盖「本体读侧指标模型 + DuckDB 物化」**；**下篇（§3-6，本次追加）覆盖「契约 v0.2 + head-to-head 实验规格 + Plan B + 门禁断言」**。
 
 ---
 
@@ -22,7 +22,7 @@ P2（ChatBI 最小闭环，S2 开发计划阶段 P2）包含四件事：
 - ④ head-to-head 实验设计需要 ① 的指标语义面作实验集底座，先定指标面、后定实验面，顺序自洽；
 - ①② 是 ③④ 的语义与数据前提：**对象→指标→物化结果**这条读侧链路先落定，契约 v0.2 的聚合执行才有落点（命中物化表而非裸表现场算）。
 
-下篇待补内容（本篇不展开，仅登记）：契约 v0.2 schema 演进（含 count_distinct、时间范围过滤、物化表命中路由）、head-to-head 实验设计（30 问 / 指标 / 成功率 / P95 / 成本 / 拒答率）、终版决策与 Plan B。
+下篇待补内容（原登记，已在本轮 §3-6 落地）：契约 v0.2 schema 演进（含时间范围过滤、物化表命中路由、属性级权限接入）、head-to-head 实验设计（30 问 / 指标 / 成功率 / P95 / 成本 / 拒答率）、终版决策与 Plan B、门禁断言。
 
 ### 0.2 一句话设计
 
@@ -343,3 +343,200 @@ metric_id, data_version, config_sha256, refresh_mode, refresh_ts, row_count, sou
 ## 附：本设计对「研究对象锚定」的回答
 
 这份指标模型 + 物化设计不为造指标而造指标：它把 ChatBI 读侧从「LLM 轮询 50 条数据」（ChatBI 方向文档，真实量级不可行）升级为「**对象→指标→物化结果**」的语义接口链路——本体对象是语义入口（选对象/选指标），DuckDB 预聚合是执行落点（空间换时间），C4 流转契约 + reconcile 是双引擎一致性的机器保证。这正是议题 1 形态 v2 的落地：**本体不取代数仓，是把数仓成果（物化指标）加语义外壳**；「对象<~1 万动态派生、指标走预聚合」的边界划分，对齐 Palantir pre-computed vs dynamically-derived 的成熟范式，OntoRun 只做差异化的「本体↔物化指标」映射层。契约 v0.2 与 head-to-head 实验设计在下一版（下篇）补充，本上篇为它们提供了已落定的指标语义面与物化数据面。
+---
+
+## 3. 契约 v0.1 → v0.2 扩展
+
+> 本篇落地上篇 R5 待办：契约 v0.2 形态 + head-to-head 实验集。代码演进落点 = src/des/contract.py（当前 v0.1：CONTRACT_KEYS={contract_version, object_type, filters, aggregations, group_by, link_traversal}，AGG_FUNCS=(count,sum,avg,min,max)，V1-V5 fail-closed，契约值永不拼 SQL）。
+
+### 3.1 v0.2 schema（向后兼容扩展）
+
+在 v0.1 五键之上扩展三处，**老契约（v0.1）原样可执行**：
+
+| 扩展 | 说明 | 判定（可机验） |
+|---|---|---|
+| `metric` 字段 | 指标请求 `{metric_id, dimension_filters, time_range}`，命中 metrics.db 物化指标表——语义是「查指标」而非「拼对象聚合」 | contract 含 metric 键 → v0.2 物化路径 |
+| 聚合函数 `count_distinct` | AGG_FUNCS 追加 count_distinct（D3 大 DISTINCT 与去重计数所需，覆盖非 metric 的普通契约） | func ∈ AGG_FUNCS_v0.2 = v0.1 ∪ {count_distinct} |
+| 时间范围 `time_range` | filters 之外的时间过滤 `{from, to}`（ISO 日期字符串，from ≤ to），可与 dimension_filters 并存 | 日期格式 + from ≤ to 校验 |
+
+v0.2 契约实例（指标命中物化表）：
+
+```json
+{
+  "contract_version": "0.2",
+  "metric": {
+    "metric_id": "b1_material_month_value",
+    "dimension_filters": {"material_category": {"op": "eq", "value": "electronics"}},
+    "time_range": {"from": "2026-01-01", "to": "2026-06-30"},
+    "group_by": ["month"]
+  }
+}
+```
+
+规则：
+- `metric` 存在时不再要求 object_type/aggregations（口径由指标注册表单点定义，禁双源，对上篇 §2.3 R3 纪律）；允许 group_by 取物化表维度子集；
+- `metric` 缺席时退化为「v0.1 扩展」普通契约（可用 count_distinct / time_range），老 v0.1 契约零改动通过。
+
+### 3.2 执行路径（metric 分派）
+
+| 路径 | 触发 | 执行 | 语义面 |
+|---|---|---|---|
+| 物化路径 | contract 含 metric | 查 metrics.db 物化表：dimension_filters + time_range 过滤、group_by/聚合**在物化表上完成，不现场算** | 指标语义面（上篇 §2 的 15 指标 + 4 个重聚合锚 B1/C2/D2/D3） |
+| 动态路径 | 无 metric | 走 v0.1 执行器（DuckDB sqlite_scan 动态派生，≤1 跳 link_traversal，过滤/聚合现场算） | 对象语义面（实体查询，上篇 §2.4 规则②） |
+
+接线点：`validate_contract` 在 v0.1 的 V1-V5 之上追加 M 系列指标校验（metric_id ∈ 指标注册表 / dimension_filters 键 ∈ 物化表维度列白名单 / time_range 合法）；`execute_contract` 按 has_metric 分派。物化 SQL 与 reconcile SQL 由注册表同源派生（§2.3 纪律，禁两处手写）。
+
+### 3.3 属性级权限接入（P1.5 decide(read)）
+
+- 钩子：契约执行器**前置**（validate 后、execute 前）调 `decide(actor, resource=object_type|metric_id, action="read")` → 返回可见列集 `visible_attributes`；
+- 过滤：返回列 = 契约请求列 ∩ visible_attributes；
+- fail-closed：请求列触及不可见列 → 拒答（不静默裁剪——「裁剪掉权限列」会造成语义偏差与推断泄漏，宁可拒绝也不给残缺答案）。
+
+---
+
+## 4. head-to-head 实验规格（D3，30 问）
+
+> 对齐决策包「决策 4 D3」：30 个分析问题，A=NL2SQL 直查 SQL（多层守卫）vs B=本体版受限结构化查询契约，量化成功率/延迟/成本/可控性/拒答率后再定契约终版；20% 冷问题允许 Plan B（§5）。
+
+### 4.1 问题集（5 组 × 6 问 = 30）
+
+分组与锚点：
+
+| 组 | 主题 | 问题编号 |
+|---|---|---|
+| G1 | 跨库 join（5 源库：order/inventory/customer/vendor/finance） | J1-J6 |
+| G2 | 聚合（含 4 个重聚合指标口径 B1/C2/D2/D3） | A1-A6 |
+| G3 | 过滤（多条件组合） | F1-F6 |
+| G4 | 链路/关系（≤1 跳） | L1-L6 |
+| G5 | 时间趋势（time_range） | T1-T6 |
+
+5 个锚问题（标记 锚Q1-锚Q5）复用 **DES 切片 §6 Q1-Q5** 作跨形态对标锚（口径/数据集对齐 P1b 基线 §6.1；若 §6 问题清单与下表映射有出入，以 §6 为准修订映射）。中文业务问法，每问给「问法 / 期望口径 / 契约实例 / Baseline SQL 形态」。
+
+**G1 跨库 join**：
+
+| # | 问法 | 期望口径 | 契约 | Baseline SQL 形态 |
+|---|---|---|---|---|
+| J1 锚Q1 | 「每个客户各下过多少单？」 | 客户 → 订单数（order_id 去重） | v0.1 扩展：link 1 跳 order + count_distinct(order_id) | `SELECT c.customer_id, COUNT(DISTINCT o.order_id) FROM customer c JOIN orders o ON ... GROUP BY 1` |
+| J2 | 「各品类库存金额排行」 | 品类 → Σ(库存量×单价) | metric b1（物化命中） | `SELECT m.category, SUM(iv.qty*m.price) FROM inventory iv JOIN material m ON ... GROUP BY 1` |
+| J3 | 「哪些供应商到货准时率最高？」 | 供应商 → 准时订单/总订单 | metric c2（三列口径） | `SELECT v.vendor_id, SUM(CASE WHEN ontime THEN 1 END)/COUNT(*) FROM vendor v JOIN orders o ON ... GROUP BY 1` |
+| J4 | 「退款金额 Top5 客户」 | 客户 → Σ退款，排序取前 5 | metric（finance 物化 + 截断） | `SELECT c.customer_id, SUM(f.refund_amt) FROM finance f JOIN customer c ON ... GROUP BY 1 ORDER BY 2 DESC LIMIT 5` |
+| J5 | 「各仓库库存水位」 | 仓库 → Σ库存量 | metric（inventory_location 维度） | `SELECT loc.warehouse, SUM(iv.qty) FROM inventory iv JOIN inventory_location loc ON ... GROUP BY 1` |
+| J6 锚Q3 | 「有多少一物多码的物料？」 | old_code 非空物料计数 | DQ01 契约 v0.1（老契约锚） | `SELECT COUNT(*) FROM material WHERE old_code IS NOT NULL` |
+
+**G2 聚合**：
+
+| # | 问法 | 期望口径 | 契约 | Baseline SQL 形态 |
+|---|---|---|---|---|
+| A1 锚Q2 | 「各月各物料库存金额合计」 | 物料×月 → Σ金额（约 9.6 万分组键，对齐 P1b §6.2 Q2 大聚合 401k 行） | metric b1/d2（物化大分组） | `SELECT material_id, month, SUM(value) FROM mv GROUP BY 1,2` |
+| A2 | 「品类×仓库×月三维汇总」 | 三列 GROUP BY → 计数/金额 | metric c2（三列口径物化） | `SELECT category, warehouse, month, COUNT(*) FROM mv GROUP BY 1,2,3` |
+| A3 | 「各月下单客户数」 | 月 → COUNT(DISTINCT customer_id) | v0.2：count_distinct + time_range | `SELECT month, COUNT(DISTINCT customer_id) FROM orders GROUP BY 1` |
+| A4 | 「整体客单价」 | 总金额 / 去重客户数 | v0.1：sum/avg + count_distinct | `SELECT SUM(amt)/COUNT(DISTINCT customer_id) FROM orders` |
+| A5 | 「物料价格区间」 | MIN/MAX 单价 | v0.1：min + max | `SELECT MIN(price), MAX(price) FROM material` |
+| A6 | 「各月订单量与金额趋势」 | 月 → 计数 + Σ金额 | metric 物化 + time_range | `SELECT month, COUNT(*), SUM(amt) FROM orders GROUP BY 1` |
+
+**G3 过滤**：
+
+| # | 问法 | 期望口径 | 契约 | Baseline SQL 形态 |
+|---|---|---|---|---|
+| F1 | 「corporate 客户的高额订单」 | segment=corporate ∧ 金额>阈值 | v0.1 filters 组合 | `SELECT ... WHERE c.segment='corporate' AND o.amt > N` |
+| F2 | 「低于安全库存的物料清单」 | 库存量 ≤ 安全库存 | v0.1 filters（le） | `SELECT ... WHERE iv.qty <= m.safety_stock` |
+| F3 | 「已发货未送达的订单」 | 状态=shipped ∧ 送达为空 | v0.1 filters in + is_null | `SELECT ... WHERE o.status='shipped' AND o.delivered IS NULL` |
+| F4 | 「退款超过阈值的订单」 | 退款金额 > 阈值 | v0.1 filters | `SELECT ... WHERE f.refund_amt > N` |
+| F5 | 「指定品类×仓库组合的库存」 | 多列过滤组合 | v0.1 filters 多键 | `SELECT ... WHERE m.category IN (...) AND loc.warehouse IN (...)` |
+| F6 | 「含多码物料明细」 | old_code 非空明细 | DQ01 v0.1 | `SELECT ... WHERE old_code IS NOT NULL` |
+
+**G4 链路**：
+
+| # | 问法 | 期望口径 | 契约 | Baseline SQL 形态 |
+|---|---|---|---|---|
+| L1 锚Q4 | 「某物料的供应商是谁」 | ≤1 跳 material.vendor | v0.1 link_traversal 1 跳 | `SELECT v.* FROM material m JOIN vendor v ON m.vendor_id=v.vendor_id` |
+| L2 | 「订单对应客户及金额」 | ≤1 跳 order.customer | v0.1 link | `SELECT c.name, o.amt FROM orders o JOIN customer c ON ...` |
+| L3 | 「物料多码全码列表」 | 1 跳 material.codes | DQ01 契约（link codes） | `SELECT m.*, c.code FROM material m JOIN codes c ON ...` |
+| L4 | 「库存位置-物料-库存量」 | ≤1 跳 inventory_location.material | v0.1 link | `SELECT loc.*, m.name, iv.qty FROM inventory iv JOIN inventory_location loc JOIN material m ON ...` |
+| L5 | 「订单→退款链路」 | 1 跳 order.finance | v0.1 link | `SELECT o.order_id, f.refund_amt FROM orders o JOIN finance f ON ...` |
+| L6 | 「财务条目对应订单来源」 | 1 跳 finance.order | v0.1 link | `SELECT f.*, o.order_id FROM finance f JOIN orders o ON ...` |
+
+**G5 时间趋势**：
+
+| # | 问法 | 期望口径 | 契约 | Baseline SQL 形态 |
+|---|---|---|---|---|
+| T1 | 「月订单量趋势」 | 月 → 计数 | v0.2：time_range + count | `SELECT month, COUNT(*) FROM orders WHERE date BETWEEN ... GROUP BY 1 ORDER BY 1` |
+| T2 锚Q5 | 「月库存金额趋势」 | 月 → Σ金额 | metric b1/d2（物化 + time_range） | `SELECT month, SUM(value) FROM mv GROUP BY 1 ORDER BY 1` |
+| T3 | 「近 30 天日销售」 | 日 → Σ金额 | v0.2：time_range 过滤 | `SELECT date, SUM(amt) FROM orders WHERE date >= CURDATE()-30 GROUP BY 1` |
+| T4 | 「本月 vs 上月退款对比」 | 两段 time_range 分别 Σ | v0.2：time_range 参数化 ×2 | `SELECT 'cur', SUM(x) FROM ... WHERE date >= month_start UNION ALL SELECT 'prev', SUM(x) WHERE date < month_start ...` |
+| T5 | 「平均到货时长趋势」 | 月 → AVG(到货时长) | v0.1：avg + time_range | `SELECT month, AVG(delivery_days) FROM orders GROUP BY 1` |
+| T6 | 「季度汇总」 | 季度 → Σ金额/计数 | v0.2：time_range + group_by(quarter) | `SELECT quarter, SUM(amt), COUNT(*) FROM orders GROUP BY 1` |
+
+### 4.2 两形态与评测协议
+
+- **A=Baseline 直查 SQL**：LLM 按问法直接生成 SQL（多层守卫：只读白名单表/参数化/结果护栏/V4 防注入/单查询超时，见 §5），直查 5 源库；
+- **B=本体版**：LLM 只输出契约 JSON（v0.1/v0.2），本地校验 + 本地执行；
+- 同问法、同期望口径、同数据集（1M 行 demo 库）；两形态顺序打乱防疲劳偏差；
+- 成功率：期望口径为金标准——数值型按容差比对、集合型按子集判定，30 问全自动断言 + 30% 抽样人工复核；
+- 延迟 P95：预热 1 次 + 重复 ≥10 次取 P95（对齐 P1b §6.1 方法）；
+- 成本：统计每次 LLM 调用 token（含失败重试），记输入/输出分项；
+- 可控性：可审计（契约/SQL 全文落审计日志，可追溯可回滚）+ 可枚举（B 的契约语义面可枚举、A 的 SQL 文本不可枚举）；
+- 拒答率：守卫/校验主动拒答的样本占比（fail-closed 存在性的定量度量）。
+
+### 4.3 靶值（同数据集 1M 行 demo 库）
+
+| 指标 | A=Baseline | B=本体版 | 判定 |
+|---|---|---|---|
+| 成功率 | ≥ 70% | ≥ 85% | Δ = B − A ≥ 10 百分点 |
+| 单次延迟 P95 | ≤ 500ms | ≤ 500ms | 两形态同口径同数据集 |
+| 单次成本 token | 记录 | 记录 | 报告不设硬门，供成本决策 |
+| 可控性 | 审计+回滚 | 审计+回滚+语义可枚举 | 定性比较 |
+| 拒答率 | > 0 | > 0 | 存在性：至少 1 例注入/非法契约被 fail-closed 拒答 |
+
+### 4.4 LLM 用量与成本估算（待 Jack 确认）
+
+| 形态 | 每问预估 token | 30 问合计 | 说明 |
+|---|---|---|---|
+| A=NL2SQL | 1-2k token/问（输入：问法+schema 提示 ~0.8-1.5k；输出：SQL ~0.3-0.5k；含失败重试 ×1.5） | **3-6 万 token** | 每问一次 LLM 生成 |
+| B=契约 | ~0.3-0.6k token/问（输入同 A，输出仅契约 JSON 更短） | 1-2 万 token | 输出短、重试少 |
+
+合计 ~4-8 万 token，按 DeepSeek 当前市价量级为**个位数人民币**，远低于一次人工标注实验成本。**具体套餐额度与计费口径与 Jack 确认后锁定**（对齐「优先已付费套餐模型、plan 外仅兜底」纪律，启用前告知）。
+
+---
+
+## 5. Plan B（实验失败兜底）
+
+触发：head-to-head 结论为 **B 本体版成功率 < 85%**，或 30 问中 ≥20% 冷问题受限 IR 无法表达（对齐决策包 D3「20% 冷问题允许 LLM 生成经安全校验的 SQL」）。
+
+路径：LLM 直接生成 SQL + 多层守卫（fail-closed）：
+
+| 守卫层 | 内容 | 判定（可机验） |
+|---|---|---|
+| 只读白名单表 | SQL 只能 FROM 5 源库白名单表集合（config.py 表注册表 ∩ 只读标记），禁写表/系统表 | 解析后 FROM 表 ∈ 白名单 |
+| 参数化 | LLM 只产出 SQL 模板 + 参数绑定，值参数化传递，永不拼进 SQL 文本（对齐 V4） | 语句无用户值字面量拼接 |
+| 结果护栏 | 行数/列数上限（对齐 V5 语义，上限从配置派生，禁硬编码） | 行数 ≤ 护栏 |
+| V4 防注入 | SQL 解析器校验：单语句、只读（SELECT/WITH）、无 DDL/DML/多语句、词法排除注释/分号技巧 | 解析树校验通过 |
+| 单查询超时 | 执行超时强杀（防失控/恶意查询） | 超时强制终止 |
+
+职责边界：Plan B 只服务 20% 冷问题，**契约路径仍为主路径**；Plan B 审计粒度从「契约语义」降级为「SQL 文本」（可控性劣于 B，报告中如实标注）。若 Plan B 守卫拒答率过高或注入风险不可控 → 停止，把结论与证据写回决策包 D3，交 Jack 拍板形态 v2 终版（不自行扩大守卫绕过）。
+
+---
+
+## 6. 门禁断言（P2 五门禁 → pytest）
+
+P2 五门禁 → tests/test_p2_chatbi.py 断言清单：
+
+| 门禁 | 断言（pytest） | 数据/夹具 | 判定 |
+|---|---|---|---|
+| ① head-to-head 靶值 | test_head_to_head_targets：baseline 成功率 ≥ 0.70；ontology ≥ 0.85；Δ ≥ 0.10 | 30 问 × 2 形态结果表（results.json 落盘，可复算） | 全部通过 |
+| ② P95 延迟 | test_p95_latency：物化查询 P95 ≤ 500ms（1M 行 demo 库，预热 1 次 + 重复 ≥10 次） | 指标物化命中集 | ≤ 500ms |
+| ③ 拒答率 > 0 | test_refusal_rate：注入/非法契约/越权列至少 1 例被 fail-closed 拒答 | 负面用例集（V1-V5 + M 系列 + P1.5 越权） | 拒答样本 > 0 |
+| ④ C4 reconcile | test_c4_reconcile：契约结果 = metrics.db 物化 = 数据侧注入集 三方对账（对齐 reconcile_dq01 形态） | 物化 SQL 同源（§2.3 R3） | 三方一致 |
+| ⑤ S1 全量零回归 | test_s1_no_regression：S1 全量测试零失败 | S1 基线测试集 | 全绿 |
+
+补充断言（兼容性护栏）：test_contract_v01_compat——老 v0.1 契约（含 DQ01_CONTRACT）在 v0.2 执行器下原样通过且结果一致；test_metric_registry——metric_id 不在注册表 → 拒答。
+
+> 门禁边界：上篇 §2.5 的物化引擎门禁（P95 ≤100ms、加速比 ≥10×，落 tests/test_des_p2_scale.py）与本篇 §4.3 的 head-to-head 靶值（P95 ≤500ms）是**两套不同门禁**——前者测物化引擎性能，后者测 ChatBI 查询形态对比，同跑 1M 行 demo 库但度量对象不同，不冲突，验收时分别呈现。
+
+---
+
+## 附：下篇追加状态更新
+
+- R5「指标语义面 vs 30 问实验集」→ **已处理**（§3 契约 v0.2 形态、§4 30 问集与本篇同步落地）；
+- 30 问锚映射（锚Q1-Q5）为提案，以 DES 切片 §6 问题清单为准修订；
+- §4.4 token/成本估算为量级预估，**计费口径待 Jack 确认**后锁定。
