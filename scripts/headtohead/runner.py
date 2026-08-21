@@ -277,7 +277,7 @@ def run_a(provider, q, gt_rows, gt_meta) -> dict:
 # ---------------- B 形态：契约校验 + 执行（allow_all） ----------------
 def run_b(provider, q, gt_rows, gt_meta, executor, surface) -> dict:
     rec = {"form": "B", "qid": q["id"], "ask": q["ask"]}
-    messages = build_b_prompt(q["ask"], surface)
+    messages = build_b_prompt(q["ask"], surface, q.get("adapted_note", ""))
     content, llm_ms, usage = llm_call(provider, messages)
     rec["llm_ms"] = round(llm_ms, 1)
     rec["usage"] = usage
@@ -370,6 +370,12 @@ def extract_b_rows(q, result) -> list[list]:
             return out
         if qid == "L3":
             return extract_codes(result)
+        if qid == "L6":  # FinanceEntry 对象路径明细 → GT 列序 [BELNR, POSNR, RACCT, REF_DOC, WSL]
+            out = []
+            for it in result["items"]:
+                p = it.get("properties", {})
+                out.append([p.get("belnr"), p.get("posnr"), p.get("account"), p.get("ref_doc"), p.get("amount")])
+            return out
     if "aggregations" in result and isinstance(result["aggregations"], list):
         return [[a["value"]] for a in result["aggregations"]]
     return []

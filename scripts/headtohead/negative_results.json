@@ -69,22 +69,22 @@
    "violations": "契约校验失败（fail-closed 拒答）: object_type 未注册或非法（V1 白名单）: 'FooObject'"
   },
   {
-   "name": "已注册对象但源表未接线（fail-closed）",
+   "name": "对象过滤字段不在白名单（V2）",
    "contract": {
     "contract_version": "0.1",
     "object_type": "Vendor",
-    "filters": {},
-    "aggregations": [
-     {
-      "function": "count",
-      "field": "*"
+    "filters": {
+     "not_a_field": {
+      "op": "eq",
+      "value": "x"
      }
-    ],
+    },
+    "aggregations": [],
     "group_by": [],
     "link_traversal": null
    },
    "rejected": true,
-   "violations": "契约执行失败（fail-closed 拒答）: Catalog Error: Table with name \"scm.LFA1\" does not exist because schema \"scm\" does not exist.\n\nLINE 1: SELECT * FROM scm.LFA1 WHERE 1=1 ORDER BY vendor_id\n "
+   "violations": "契约校验失败（fail-closed 拒答）: 过滤字段不在 Vendor 白名单: not_a_field"
   },
   {
    "name": "非 metric 契约带 time_range（P2-2 fail-closed）",

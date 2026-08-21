@@ -42,7 +42,7 @@ def main() -> None:
     b_cases = [
         ("未知 metric_id", {"contract_version": "0.2", "metric": {"metric_id": "not_a_metric"}}),
         ("未知对象（V1 白名单）", {"contract_version": "0.1", "object_type": "FooObject", "filters": {}, "aggregations": [], "group_by": [], "link_traversal": None}),
-        ("已注册对象但源表未接线（fail-closed）", {"contract_version": "0.1", "object_type": "Vendor", "filters": {}, "aggregations": [{"function": "count", "field": "*"}], "group_by": [], "link_traversal": None}),
+        ("对象过滤字段不在白名单（V2）", {"contract_version": "0.1", "object_type": "Vendor", "filters": {"not_a_field": {"op": "eq", "value": "x"}}, "aggregations": [], "group_by": [], "link_traversal": None}),
         ("非 metric 契约带 time_range（P2-2 fail-closed）", {"contract_version": "0.1", "object_type": "Material", "filters": {}, "aggregations": [], "group_by": [], "link_traversal": None, "time_range": {"from": "2026-01-01", "to": "2026-01-31"}}),
         ("维度过滤值注入", {"contract_version": "0.2", "metric": {"metric_id": "sales_amount_by_mat_month", "dimension_filters": {"matnr": {"op": "eq", "value": "MAT-2026-0001-K4V'; DROP TABLE x--"}}}}),
         ("time_range 非法", {"contract_version": "0.2", "metric": {"metric_id": "sales_amount_by_mat_month", "time_range": {"from": "2026-02-01", "to": "2026-01-01"}}}),

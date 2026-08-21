@@ -46,9 +46,9 @@ QUESTIONS = [
             "GROUP BY k.KUNNR ORDER BY k.KUNNR"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "客户→订单数需 KNA1×VBAK join，非注册对象且无对应指标，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "order_count_by_customer"}},
+        "b_note": "命中物化指标 order_count_by_customer（COUNT DISTINCT VBELN，物化即客户粒度，勿 group_by——count_distinct 非可加会拒答）——但指标只含下过单的 9,823 客户，GT 为 LEFT JOIN 含 0 单客户的 10,000 行，预计行数不一致（零单客户缺口，见 v2 §6）",
     },
     {
         "id": "J2", "group": "G1",
@@ -61,9 +61,9 @@ QUESTIONS = [
             "GROUP BY m.MATKL ORDER BY inv_amount DESC"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "库存指标维度为 factory/location/matnr，无物料组(MATKL)，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "stock_balance_by_mat_group", "group_by": ["material_group"]}},
+        "b_note": "命中物化指标 stock_balance_by_mat_group（按物料组 MATKL SUM LABST），适配口径=各品类库存量排行",
     },
     {
         "id": "J3", "group": "G1",
@@ -76,9 +76,9 @@ QUESTIONS = [
             "WHERE s.BWART = '101' GROUP BY e.LIFNR ORDER BY receipt_qty DESC"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "需 wms.MSEG×scm.EKKO join 且按供应商聚合，无对应指标，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "receipt_qty_by_vendor", "group_by": ["vendor"]}},
+        "b_note": "命中物化指标 receipt_qty_by_vendor（row_filter BWART='101' 已内置），适配口径=各供应商到货量排行",
     },
     {
         "id": "J4", "group": "G1",
@@ -93,9 +93,9 @@ QUESTIONS = [
             "GROUP BY o.KUNNR ORDER BY refund_total DESC LIMIT 5"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "需 fin.ACDOCA 按 WSL 符号过滤 + join VBAK 客户，财务指标只能按科目/成本中心/类型聚合，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "customer_refund_by_customer", "group_by": ["customer"], "topN": 5}},
+        "b_note": "命中物化指标 customer_refund_by_customer（REF_TYPE='SO' 且 WSL<0 + measure_scale=-1 内置）+ metric.topN=5 按退款降序取前 5",
     },
     {
         "id": "J5", "group": "G1",
@@ -109,7 +109,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0], "val_idx": [1],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "stock_balance_by_location", "group_by": ["location"]}},
-        "b_note": "命中物化指标 stock_balance_by_location（factory+location 维度，SUM LABST），group_by location 可得每仓库合计",
+        "b_note": "命中物化指标 stock_balance_by_location（factory+location 维度，SUM LABST），group_by location 可得每仓库合计（勿用 factory×location 双维）",
     },
     {
         "id": "J6", "group": "G1", "anchor": "锚Q3",
@@ -139,7 +139,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0, 1], "val_idx": [2],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "sales_amount_by_mat_month"}},
-        "b_note": "命中物化指标 sales_amount_by_mat_month（77,936 行）——但 V5 结果护栏上限 2400 行，预计被护栏拒答（red-team P3-9 已提示护栏锚定 MARA 行数）",
+        "b_note": "命中物化指标 sales_amount_by_mat_month（77,936 行）；V5 护栏已按查询规模派生（77,936），不再拒答",
     },
     {
         "id": "A2", "group": "G2",
@@ -154,9 +154,9 @@ QUESTIONS = [
             "GROUP BY m.MATKL, a.WERKS, substr(c.DATUM,1,7) ORDER BY category, factory, month"
         ),
         "kind": "table", "key_idx": [0, 1, 2], "val_idx": [3],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "三维 GROUP BY 无对应指标（15 指标全为 ≤2 维），Material/Code 对象路径无报工数据，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "cofv_qty_by_matkl_werks_month"}},
+        "b_note": "命中物化指标 cofv_qty_by_matkl_werks_month（物料组 MATKL×工厂 WERKS×月 DATUM 报工数量 ISM01，三维），适配口径=报工数量",
     },
     {
         "id": "A3", "group": "G2",
@@ -167,9 +167,9 @@ QUESTIONS = [
             "FROM sqlite_scan('{D}/erp.db','VBAK') GROUP BY 1 ORDER BY 1"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "需要 COUNT(DISTINCT 客户) 按月；sales_amount_by_customer_month 仅可 SUM 金额、group_by 重聚合不返回计数，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "customer_count_by_month"}},
+        "b_note": "命中物化指标 customer_count_by_month（COUNT DISTINCT KUNNR 按月）",
     },
     {
         "id": "A4", "group": "G2",
@@ -212,7 +212,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0], "val_idx": [1, 2],
         "b_expressible": False,
         "b_contract": None,
-        "b_note": "金额部分可经销售指标 group_by month 表达，但订单数 COUNT(DISTINCT VBELN) 无指标，整体口径不可完整表达（冷问题）",
+        "b_note": "订单数(order_count_by_month) 与金额(sales_amount_*) 分属两个指标，单契约只允许一个 metric，无法同契约输出两列（需双契约/双度量，冷问题）",
     },
 
     # ================= G3 过滤 =================
@@ -244,7 +244,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0], "val_idx": [1],
         "b_expressible": False,
         "b_contract": None,
-        "b_note": "需按度量值（库存量）过滤，物化指标 dimension_filters 只能过滤维度列；Material 对象无库存字段，受限面不可表达（冷问题）",
+        "b_note": "度量过滤为物化粒度行级 WHERE（stock_balance_by_mat_location 是 物料×工厂×地点 粒度），非分组后 HAVING——'总库存<1200' 语义无法正确表达（冷问题，见 v2 §6）",
     },
     {
         "id": "F3", "group": "G3",
@@ -269,9 +269,9 @@ QUESTIONS = [
             "WHERE REF_TYPE = 'SO' AND WSL < -50000 ORDER BY refund_amt DESC"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "需按 WSL 符号+数值过滤财务流水，指标只能聚合不能过滤度量值，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "refund_amount_by_order", "dimension_filters": {"refund_amount": {"op": "gt", "value": 50000}}}},
+        "b_note": "命中物化指标 refund_amount_by_order（按订单退款，REF_TYPE='SO' 且 WSL<0 内置，物化粒度即订单）+ 度量过滤 refund_amount>50000（物化粒度 WHERE 等价 HAVING）",
     },
     {
         "id": "F5", "group": "G3",
@@ -286,7 +286,7 @@ QUESTIONS = [
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "stock_balance_by_mat_location",
                                                             "dimension_filters": {"location": {"op": "in", "value": ["W01", "W02"]}}}},
-        "b_note": "命中物化指标 stock_balance_by_mat_location + dimension_filters location IN (W01,W02)；但结果 ~16,000 行 > V5 护栏 2400，预计被护栏拒答",
+        "b_note": "命中物化指标 stock_balance_by_mat_location + dimension_filters location IN (W01,W02)；16,000 行 ≤ V5 规模护栏（16,000），不再拒答",
     },
     {
         "id": "F6", "group": "G3",
@@ -368,7 +368,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0, 1, 2], "val_idx": [3],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "stock_balance_by_mat_location"}},
-        "b_note": "命中物化指标 stock_balance_by_mat_location（24,000 行）——但 V5 护栏 2400，预计被护栏拒答",
+        "b_note": "命中物化指标 stock_balance_by_mat_location（24,000 行）；V5 护栏已按规模派生（24,000），不再拒答",
     },
     {
         "id": "L5", "group": "G4",
@@ -383,7 +383,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0], "val_idx": [2],
         "b_expressible": False,
         "b_contract": None,
-        "b_note": "fin→VBAK join 且按符号过滤，受限面不可表达（冷问题）",
+        "b_note": "退款链路需 订单号+客户+退款金额 三联：customer_refund_by_customer 有客户无订单号、refund_amount_by_order 有订单号无客户，单契约缺一列不可表达（冷问题）",
     },
     {
         "id": "L6", "group": "G4",
@@ -394,9 +394,11 @@ QUESTIONS = [
             "FROM sqlite_scan('{D}/fin.db','ACDOCA') WHERE REF_TYPE = 'SO' ORDER BY BELNR"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [4],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "finance_amount_by_reftype 只做类型级 SUM，不返回条目明细；受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.1", "object_type": "FinanceEntry",
+                       "filters": {"ref_type": {"op": "eq", "value": "SO"}},
+                       "aggregations": [], "group_by": [], "link_traversal": None},
+        "b_note": "FinanceEntry 对象路径已接线（物化表 finance_entry）：过滤 ref_type='SO' 返回条目明细（belnr/posnr/account/ref_doc/amount），16,400 行 ≤ V5 规模护栏",
     },
 
     # ================= G5 时间趋势 =================
@@ -409,9 +411,9 @@ QUESTIONS = [
             "FROM sqlite_scan('{D}/erp.db','VBAK') GROUP BY 1 ORDER BY 1"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "订单计数无指标；v0.1 非 metric 契约不支持 time_range（fail-closed），受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "order_count_by_month"}},
+        "b_note": "命中物化指标 order_count_by_month（COUNT DISTINCT VBELN 按月；VBAK.VBELN 唯一，等价 COUNT(*)）",
     },
     {
         "id": "T2", "group": "G5", "anchor": "锚Q5",
@@ -426,7 +428,7 @@ QUESTIONS = [
         "kind": "table", "key_idx": [0], "val_idx": [1],
         "b_expressible": True,
         "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "sales_amount_by_customer_month", "group_by": ["month"]}},
-        "b_note": "销售指标 group_by month（可加聚合 SUM）可得各月销售金额趋势",
+        "b_note": "设计契约列指向销售物化：sales_amount_by_customer_month group_by month 得各月销售金额趋势（适配口径=月销售金额，adapted_note 说明）",
     },
     {
         "id": "T3", "group": "G5",
@@ -439,9 +441,9 @@ QUESTIONS = [
             "WHERE o.AUDAT >= '" + T3_START + "' GROUP BY 1 ORDER BY 1"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "物化指标月粒度（substr(1,7)），time_range 绑定月维度，无法日粒度 + 相对日期不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "sales_amount_by_day", "time_range": {"from": "2026-12-02", "to": "2026-12-31"}}},
+        "b_note": "命中物化指标 sales_amount_by_day（日粒度 substr(1,10)）+ time_range 2026-12-02..31（近 30 天 = 数据末 30 天，口径见 adapted_note）",
     },
     {
         "id": "T4", "group": "G5",
@@ -455,9 +457,9 @@ QUESTIONS = [
             "GROUP BY 1"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "需按符号过滤 + 两段 time_range 分别求和，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "refund_amount_by_month", "time_range": {"from": "2026-11-01", "to": "2026-12-31"}}},
+        "b_note": "refund_amount_by_month + time_range 11-12 可算两月退款，数值与 GT 一致；但 GT key 为 cur/prev 标签而物化返回月份标签，预计 key 标签不匹配（呈现口径差异，见 v2 §6）",
     },
     {
         "id": "T5", "group": "G5",
@@ -468,9 +470,9 @@ QUESTIONS = [
             "FROM sqlite_scan('{D}/mes.db','COFV') GROUP BY 1 ORDER BY 1"
         ),
         "kind": "table", "key_idx": [0], "val_idx": [1],
-        "b_expressible": False,
-        "b_contract": None,
-        "b_note": "COFV 无对象无指标，受限面不可表达（冷问题）",
+        "b_expressible": True,
+        "b_contract": {"contract_version": "0.2", "metric": {"metric_id": "cofv_avg_hrs_by_month"}},
+        "b_note": "命中物化指标 cofv_avg_hrs_by_month（月粒度 AVG ISMN1），适配口径=平均报工工时",
     },
     {
         "id": "T6", "group": "G5",

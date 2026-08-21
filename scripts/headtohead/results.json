@@ -2,468 +2,135 @@
  "runs": [
   {
    "form": "A",
-   "qid": "L6",
-   "ask": "财务条目对应订单来源",
-   "llm_ms": 1559.7,
+   "qid": "T3",
+   "ask": "近 30 天日销售",
+   "llm_ms": 1421.6,
    "usage": {
-    "prompt": 1336,
-    "completion": 50
+    "prompt": 1339,
+    "completion": 87
    },
    "llm_err": null,
-   "sql": "SELECT BELNR, POSNR, RACCT, REF_DOC AS vbeln, ROUND(WSL, 2) AS wsl FROM ACDOCA WHERE REF_TYPE = 'SO'",
-   "exec_ms": 34.8,
+   "sql": "SELECT CAST(AUDAT AS DATE) AS day, ROUND(SUM(VBAP.NETWR), 2) AS amount FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN WHERE VBAK.AUDAT BETWEEN '2026-12-02' AND '2026-12-31' GROUP BY CAST(AUDAT AS DATE) ORDER BY day",
+   "exec_ms": 129.0,
    "outcome": "correct",
    "detail": "",
-   "ans_row_count": 16400
+   "ans_row_count": 30
   },
   {
    "form": "B",
-   "qid": "L6",
-   "ask": "财务条目对应订单来源",
-   "llm_ms": 1073.5,
+   "qid": "T3",
+   "ask": "近 30 天日销售",
+   "llm_ms": 857.4,
    "usage": {
-    "prompt": 1035,
-    "completion": 75
+    "prompt": 3074,
+    "completion": 42
    },
    "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要关联财务条目（FinanceEntry）与订单来源（SalesOrder），但本体对象路径仅覆盖 Material/Code 及 material.codes 链路，且指标注册表中财务指标维度仅为 account/cost_center/ref_type，不包含订单来源语义，受限面外，禁止编造。"
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "sales_amount_by_day",
+     "time_range": {
+      "from": "2026-12-02",
+      "to": "2026-12-31"
+     }
+    }
+   },
+   "exec_ms": 19.6,
+   "outcome": "correct",
+   "detail": ""
   },
   {
    "form": "A",
-   "qid": "J1",
-   "ask": "每个客户各下过多少单？",
-   "llm_ms": 684.4,
+   "qid": "T5",
+   "ask": "平均到货时长趋势",
+   "llm_ms": 841.1,
    "usage": {
-    "prompt": 1300,
-    "completion": 24
+    "prompt": 1332,
+    "completion": 76
    },
    "llm_err": null,
-   "sql": "SELECT KUNNR, COUNT(*) AS order_count FROM VBAK GROUP BY KUNNR",
-   "exec_ms": 12.6,
-   "outcome": "wrong",
-   "detail": "行数不一致: GT 10000 vs answer 9823",
-   "ans_row_count": 9823
-  },
-  {
-   "form": "B",
-   "qid": "J1",
-   "ask": "每个客户各下过多少单？",
-   "llm_ms": 1529.5,
-   "usage": {
-    "prompt": 1037,
-    "completion": 79
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要按客户统计订单数量。订单计数语义不在给定的对象路径（Material/Code + material.codes）内，且指标注册表中没有按客户统计订单数的指标（sales_amount_by_customer_month 是金额而非订单数）。受限面外无法表达，故拒绝。"
-  },
-  {
-   "form": "A",
-   "qid": "A6",
-   "ask": "各月订单量与金额趋势",
-   "llm_ms": 955.2,
-   "usage": {
-    "prompt": 1299,
-    "completion": 70
-   },
-   "llm_err": null,
-   "sql": "SELECT substr(AUDAT, 1, 7) AS month, COUNT(DISTINCT VBAK.VBELN) AS order_count, ROUND(SUM(VBAK.NETWR), 2) AS amount FROM VBAK GROUP BY substr(AUDAT, 1, 7) ORDER BY month",
-   "exec_ms": 17.9,
-   "outcome": "wrong",
-   "detail": "GT key ('2025-01',) 值不匹配",
-   "ans_row_count": 24
-  },
-  {
-   "form": "B",
-   "qid": "A6",
-   "ask": "各月订单量与金额趋势",
-   "llm_ms": 1738.7,
-   "usage": {
-    "prompt": 1036,
-    "completion": 96
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要按月份聚合订单数量与订单金额，但本体重未提供订单主体(Order)及订单数量/金额的指标注册；本体仅支持销售(sales_*)、采购(purchase_*)、库存(stock_*)、财务(finance_*)及物料计数等指标，且不存在包含订单量与金额的指标，无法表达该语义。"
-  },
-  {
-   "form": "A",
-   "qid": "T1",
-   "ask": "月订单量趋势",
-   "llm_ms": 819.5,
-   "usage": {
-    "prompt": 1295,
-    "completion": 45
-   },
-   "llm_err": null,
-   "sql": "SELECT substr(AUDAT, 1, 7) AS month, COUNT(*) AS order_count FROM VBAK GROUP BY substr(AUDAT, 1, 7) ORDER BY month",
-   "exec_ms": 9.0,
+   "sql": "SELECT substr(DATUM,1,7) AS month, ROUND(AVG(ISMN1),2) AS avg_hrs FROM mes.COFV WHERE DATUM >= '2025-01-01' AND DATUM <= '2026-12-31' GROUP BY substr(DATUM,1,7) ORDER BY month",
+   "exec_ms": 186.1,
    "outcome": "correct",
    "detail": "",
    "ans_row_count": 24
   },
   {
    "form": "B",
-   "qid": "T1",
-   "ask": "月订单量趋势",
-   "llm_ms": 1419.8,
+   "qid": "T5",
+   "ask": "平均到货时长趋势",
+   "llm_ms": 1477.0,
    "usage": {
-    "prompt": 1034,
-    "completion": 81
+    "prompt": 3064,
+    "completion": 38
    },
    "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "cofv_avg_hrs_by_month",
+     "group_by": [
+      "month"
+     ]
+    }
+   },
+   "exec_ms": 0.1,
    "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要『月订单量』（订单/销售单据计数按时间趋势），但受限指标注册表中无按订单计数或月订单量的指标（sales_* 为金额/数量，且主体为 Material/Customer，无单据计数语义）；对象路径仅覆盖 Material/Code，不支持订单主体，无法表达该语义。"
+   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: 聚合 avg 非可加，禁物化表子集重聚合 group_by: cofv_avg_hrs_by_month"
   },
   {
    "form": "A",
-   "qid": "L2",
-   "ask": "订单对应客户及金额",
-   "llm_ms": 1069.0,
+   "qid": "J2",
+   "ask": "各品类库存金额排行",
+   "llm_ms": 1091.1,
    "usage": {
-    "prompt": 1325,
-    "completion": 82
-   },
-   "llm_err": null,
-   "sql": "SELECT VBAK.VBELN, VBAK.KUNNR, KNA1.NAME1 AS customer_name, ROUND(VBAK.NETWR, 2) AS amount FROM VBAK JOIN KNA1 ON VBAK.KUNNR = KNA1.KUNNR WHERE VBAK.VBELN = 'SO-2026-000001'",
-   "exec_ms": 12.0,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 1
-  },
-  {
-   "form": "B",
-   "qid": "L2",
-   "ask": "订单对应客户及金额",
-   "llm_ms": 1560.3,
-   "usage": {
-    "prompt": 1035,
-    "completion": 91
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题'订单对应客户及金额'需要的语义（订单-客户关联、订单金额字段、客户维度）不在给定本体对象路径（Material/Code）和指标注册表（sales_amount_by_customer_month 可提供客户月度销售金额，但缺少订单维度；且无订单对象/路径）的受限面内，无法表达，故拒答。"
-  },
-  {
-   "form": "A",
-   "qid": "J5",
-   "ask": "各仓库库存水位",
-   "llm_ms": 817.8,
-   "usage": {
-    "prompt": 1296,
-    "completion": 37
-   },
-   "llm_err": null,
-   "sql": "SELECT LGORT AS location, ROUND(SUM(LABST), 2) AS stock_balance FROM MARD GROUP BY LGORT ORDER BY LGORT",
-   "exec_ms": 6.4,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 3
-  },
-  {
-   "form": "B",
-   "qid": "J5",
-   "ask": "各仓库库存水位",
-   "llm_ms": 843.6,
-   "usage": {
-    "prompt": 1034,
+    "prompt": 1357,
     "completion": 61
    },
    "llm_err": null,
-   "contract": {
-    "contract_version": "0.2",
-    "metric": {
-     "metric_id": "stock_balance_by_location",
-     "dimension_filters": {},
-     "group_by": [
-      "factory",
-      "location"
-     ]
-    }
-   },
-   "exec_ms": 18.9,
-   "outcome": "wrong",
-   "detail": "GT key 缺失: ('W01',)"
-  },
-  {
-   "form": "A",
-   "qid": "F4",
-   "ask": "退款超过阈值的订单",
-   "llm_ms": 869.7,
-   "usage": {
-    "prompt": 1327,
-    "completion": 67
-   },
-   "llm_err": null,
-   "sql": "SELECT REF_DOC AS vbeln, ROUND(SUM(WSL), 2) AS refund_amt FROM ACDOCA WHERE REF_TYPE = 'SO' AND WSL < 0 GROUP BY REF_DOC HAVING ABS(SUM(WSL)) > 50000 ORDER BY vbeln",
-   "exec_ms": 17.2,
-   "outcome": "wrong",
-   "detail": "GT key ('SO-2026-012627',) 值不匹配",
-   "ans_row_count": 4100
-  },
-  {
-   "form": "B",
-   "qid": "F4",
-   "ask": "退款超过阈值的订单",
-   "llm_ms": 1174.4,
-   "usage": {
-    "prompt": 1035,
-    "completion": 66
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 退款订单及其金额、阈值比较不属于给定本体对象（Material/Code 对象路径）或指标注册表（sales/stock/purchase/finance/mat_count）的受限语义范围，无法表达退款订单实体及按退款金额阈值过滤的查询。"
-  },
-  {
-   "form": "A",
-   "qid": "T5",
-   "ask": "平均到货时长趋势",
-   "llm_ms": 862.9,
-   "usage": {
-    "prompt": 1332,
-    "completion": 68
-   },
-   "llm_err": null,
-   "sql": "SELECT substr(CAST(DATUM AS VARCHAR), 1, 7) AS month, ROUND(AVG(ISMN1), 2) AS avg_hrs FROM COFV GROUP BY substr(CAST(DATUM AS VARCHAR), 1, 7) ORDER BY month",
-   "exec_ms": 44.6,
+   "sql": "SELECT M.MATKL AS category, ROUND(SUM(D.LABST), 2) AS inv_amount FROM MARD D JOIN MARA M ON D.MATNR = M.MATNR GROUP BY M.MATKL ORDER BY inv_amount DESC",
+   "exec_ms": 12.2,
    "outcome": "correct",
    "detail": "",
-   "ans_row_count": 24
-  },
-  {
-   "form": "B",
-   "qid": "T5",
-   "ask": "平均到货时长趋势",
-   "llm_ms": 1375.4,
-   "usage": {
-    "prompt": 1035,
-    "completion": 85
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要'平均到货时长趋势'语义（按时间趋势计算到货时长均值），该语义（字段/聚合/时间维度）不在受限指标注册表或对象路径中，无法表达；且指标注册表仅支持物化预聚合指标，不支持按度量值聚合计算平均到货时长。"
-  },
-  {
-   "form": "A",
-   "qid": "T2",
-   "ask": "月库存金额趋势",
-   "llm_ms": 1005.7,
-   "usage": {
-    "prompt": 1345,
-    "completion": 77
-   },
-   "llm_err": null,
-   "sql": "SELECT substr(VBAK.AUDAT, 1, 7) AS month, ROUND(SUM(VBAP.NETWR), 2) AS amount FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN GROUP BY substr(VBAK.AUDAT, 1, 7) ORDER BY month",
-   "exec_ms": 38.2,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 24
-  },
-  {
-   "form": "B",
-   "qid": "T2",
-   "ask": "月库存金额趋势",
-   "llm_ms": 1155.3,
-   "usage": {
-    "prompt": 1034,
-    "completion": 77
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 本体和指标注册表均不提供按月的库存金额趋势：stock_balance_* 指标只支持按地点/物料维度（无月份维度），且度量是 stock_balance 不是金额；也没有任何库存金额（金额×库存量）的月趋势指标。"
-  },
-  {
-   "form": "A",
-   "qid": "L1",
-   "ask": "某物料的供应商是谁？",
-   "llm_ms": 1175.2,
-   "usage": {
-    "prompt": 1348,
-    "completion": 73
-   },
-   "llm_err": null,
-   "sql": "SELECT DISTINCT e.LIFNR, l.NAME1 AS vendor_name FROM EKPO ep JOIN EKKO e ON ep.EBELN = e.EBELN JOIN LFA1 l ON e.LIFNR = l.LIFNR WHERE ep.MATNR = 'MAT-2026-0001-K4V'",
-   "exec_ms": 27.3,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 10
-  },
-  {
-   "form": "B",
-   "qid": "L1",
-   "ask": "某物料的供应商是谁？",
-   "llm_ms": 1235.3,
-   "usage": {
-    "prompt": 1035,
-    "completion": 69
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要查询物料与供应商的关联（Material-Vendor 关系），该语义不在给定的对象路径（Material/Code + material.codes）和指标注册表（v0.2）的受限面内，无法通过现有本体对象或指标表达，禁止编造。"
-  },
-  {
-   "form": "A",
-   "qid": "J2",
-   "ask": "各品类库存金额排行",
-   "llm_ms": 1020.5,
-   "usage": {
-    "prompt": 1357,
-    "completion": 41
-   },
-   "llm_err": null,
-   "sql": "SELECT MATKL AS category, ROUND(SUM(LABST), 2) AS inv_amount FROM MARD GROUP BY MATKL ORDER BY inv_amount DESC",
-   "exec_ms": 1.0,
-   "outcome": "error",
-   "detail": "执行错误: Binder Error: Referenced column \"MATKL\" not found in FROM clause!\nCandidate bindings: \"MATNR\"\n\nLINE 1: ..., ROUND(SUM(LABST), 2) AS inv_amount FROM MARD GROUP BY MATKL ORDER BY inv_amount DESC\n                                                                   ^"
+   "ans_row_count": 250
   },
   {
    "form": "B",
    "qid": "J2",
    "ask": "各品类库存金额排行",
-   "llm_ms": 994.3,
+   "llm_ms": 1028.6,
    "usage": {
-    "prompt": 1035,
-    "completion": 45
-   },
-   "llm_err": null,
-   "contract": {
-    "contract_version": "0.2",
-    "metric": {
-     "metric_id": "stock_balance_by_mat_location",
-     "group_by": [
-      "material_type"
-     ]
-    }
-   },
-   "exec_ms": 0.1,
-   "outcome": "refusal",
-   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: metric.group_by 不在 stock_balance_by_mat_location 维度白名单: 'material_type'"
-  },
-  {
-   "form": "A",
-   "qid": "A1",
-   "ask": "各月各物料销售金额合计",
-   "llm_ms": 1276.1,
-   "usage": {
-    "prompt": 1344,
-    "completion": 94
-   },
-   "llm_err": null,
-   "sql": "SELECT VBAP.MATNR AS matnr, substr(VBAK.AUDAT, 1, 7) AS month, ROUND(SUM(VBAP.NETWR), 2) AS sales_amount FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN GROUP BY VBAP.MATNR, substr(VBAK.AUDAT, 1, 7)",
-   "exec_ms": 165.9,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 77936
-  },
-  {
-   "form": "B",
-   "qid": "A1",
-   "ask": "各月各物料销售金额合计",
-   "llm_ms": 772.5,
-   "usage": {
-    "prompt": 1037,
-    "completion": 69
-   },
-   "llm_err": null,
-   "contract": {
-    "contract_version": "0.2",
-    "metric": {
-     "metric_id": "sales_amount_by_mat_month",
-     "dimension_filters": {},
-     "time_range": null,
-     "group_by": [
-      "matnr",
-      "month"
-     ]
-    }
-   },
-   "exec_ms": 164.6,
-   "outcome": "refusal",
-   "detail": "校验/执行拒答(fail-closed): 结果行数 77936 超过护栏上限 2400（V5，请加过滤）"
-  },
-  {
-   "form": "A",
-   "qid": "F5",
-   "ask": "指定品类×仓库组合的库存",
-   "llm_ms": 863.3,
-   "usage": {
-    "prompt": 1349,
+    "prompt": 3091,
     "completion": 44
    },
    "llm_err": null,
-   "sql": "SELECT MATNR, WERKS, LGORT, ROUND(LABST, 2) AS stock_balance FROM MARD WHERE LGORT IN ('W01', 'W02')",
-   "exec_ms": 25.1,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 16000
-  },
-  {
-   "form": "B",
-   "qid": "F5",
-   "ask": "指定品类×仓库组合的库存",
-   "llm_ms": 1332.4,
-   "usage": {
-    "prompt": 1037,
-    "completion": 88
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要按“品类×仓库组合”查询库存，但“仓库组合”这一语义（仓库组合的维度或字段）不在给定的受限面内；给定指标 stock_balance_by_mat_location 仅支持按 matnr/factory/location 维度，缺少“品类”维度且不支持组合语义，无法表达该查询。"
-  },
-  {
-   "form": "A",
-   "qid": "A2",
-   "ask": "品类×工厂×月三维汇总",
-   "llm_ms": 1031.7,
-   "usage": {
-    "prompt": 1358,
-    "completion": 97
-   },
-   "llm_err": null,
-   "sql": "SELECT m.MATKL AS category, c.WERKS AS factory, substr(c.DATUM, 1, 7) AS month, ROUND(SUM(c.ISM01), 2) AS qty FROM mes.db.COFC c JOIN erp.db.MARC m ON c.MATNR = m.MATNR GROUP BY m.MATKL, c.WERKS, substr(c.DATUM, 1, 7)",
-   "outcome": "refusal",
-   "detail": "守卫拒答: 引用非白名单表: ['erp.db', 'mes.db']",
-   "exec_ms": null
-  },
-  {
-   "form": "B",
-   "qid": "A2",
-   "ask": "品类×工厂×月三维汇总",
-   "llm_ms": 1000.8,
-   "usage": {
-    "prompt": 1037,
-    "completion": 66
-   },
-   "llm_err": null,
    "contract": {
     "contract_version": "0.2",
     "metric": {
-     "metric_id": "mat_count_by_type_factory",
-     "dimension_filters": {},
+     "metric_id": "stock_balance_by_mat_group",
      "group_by": [
-      "material_type",
-      "factory",
-      "month"
-     ]
+      "material_group"
+     ],
+     "topN": 1000
     }
    },
-   "exec_ms": 0.1,
-   "outcome": "refusal",
-   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: metric.group_by 不在 mat_count_by_type_factory 维度白名单: 'month'"
+   "exec_ms": 18.6,
+   "outcome": "correct",
+   "detail": ""
   },
   {
    "form": "A",
    "qid": "F1",
    "ask": "corporate 客户的高额订单",
-   "llm_ms": 1200.2,
+   "llm_ms": 877.2,
    "usage": {
     "prompt": 1350,
-    "completion": 79
+    "completion": 84
    },
    "llm_err": null,
-   "sql": "SELECT VBELN, KUNNR, ROUND(SUM(NETWR), 2) AS amount FROM VBAK WHERE KUNNR IN (SELECT KUNNR FROM KNA1 WHERE KTOKD = '0003') GROUP BY VBELN, KUNNR HAVING SUM(NETWR) > 90000 ORDER BY amount DESC",
-   "exec_ms": 17.6,
+   "sql": "SELECT vbak.VBELN, vbak.KUNNR, ROUND(vbak.NETWR, 2) AS amount FROM VBAK vbak JOIN KNA1 kna1 ON vbak.KUNNR = kna1.KUNNR WHERE kna1.KTOKD = '0003' AND vbak.NETWR > 90000 ORDER BY vbak.VBELN",
+   "exec_ms": 24.6,
    "outcome": "correct",
    "detail": "",
    "ans_row_count": 1281
@@ -472,67 +139,82 @@
    "form": "B",
    "qid": "F1",
    "ask": "corporate 客户的高额订单",
-   "llm_ms": 1673.1,
+   "llm_ms": 1922.0,
    "usage": {
-    "prompt": 1037,
-    "completion": 120
+    "prompt": 3079,
+    "completion": 125
    },
    "llm_err": null,
    "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题要求查询‘corporate客户的高额订单’，涉及Customer和订单明细。给定本体对象仅覆盖Material/Code，指标注册表中虽有sales_amount_by_customer_month（客户维度的销售金额），但该指标是月度聚合，无法表达‘订单’粒度的‘高额订单’（需按订单筛选或排序），且‘corporate’客户类型不在任何维度列中。所需语义（订单实体、客户类型过滤、按订单金额"
+   "detail": "LLM 拒答(受限面不可表达): 问题需要按客户账户组 KTOKD='0003'（corporate）过滤订单，并统计 NETWR > 90000 的高额订单数量。但本体客户路径（Customer）未暴露客户账户组字段（KTOKD），且指标注册表中没有按客户账户组过滤的高额订单数口径（order_count_by_customer/order_count_by_month 均无账户组维度或 NETWR 阈值过滤）。该语义（客户账户"
   },
   {
    "form": "A",
-   "qid": "J4",
-   "ask": "退款金额 Top5 客户",
-   "llm_ms": 1234.9,
+   "qid": "T2",
+   "ask": "月库存金额趋势",
+   "llm_ms": 1342.0,
    "usage": {
-    "prompt": 1350,
-    "completion": 115
+    "prompt": 1345,
+    "completion": 77
    },
    "llm_err": null,
-   "sql": "SELECT KNA1.NAME1 AS customer, ROUND(SUM(ABS(ACDOCA.WSL)), 2) AS refund_total FROM ACDOCA JOIN VBAK ON ACDOCA.REF_DOC = VBAK.VBELN JOIN KNA1 ON VBAK.KUNNR = KNA1.KUNNR WHERE ACDOCA.REF_TYPE = 'SO' AND ACDOCA.WSL < 0 GROUP BY KNA1.NAME1 ORDER BY refund_total DESC LIMIT 5",
-   "exec_ms": 25.7,
-   "outcome": "wrong",
-   "detail": "GT key 缺失: ('CU-00007687',)",
-   "ans_row_count": 5
+   "sql": "SELECT substr(VBAK.AUDAT, 1, 7) AS month, ROUND(SUM(VBAP.NETWR), 2) AS amount FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN GROUP BY substr(VBAK.AUDAT, 1, 7) ORDER BY month",
+   "exec_ms": 39.2,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 24
   },
   {
    "form": "B",
-   "qid": "J4",
-   "ask": "退款金额 Top5 客户",
-   "llm_ms": 1238.9,
+   "qid": "T2",
+   "ask": "月库存金额趋势",
+   "llm_ms": 1332.1,
    "usage": {
-    "prompt": 1036,
-    "completion": 80
+    "prompt": 3080,
+    "completion": 75
    },
    "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 请求涉及'退款金额'语义，不在给定本体对象（Material/Code）及指标注册表（sales_*/stock_*/purchase_*/finance_*/mat_count_*）的受限表达范围内；且缺少支持客户维度与退款金额的指标，无法编造映射。"
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "sales_amount_by_mat_month",
+     "group_by": [
+      "month"
+     ],
+     "time_range": {
+      "from": "2024-01-01",
+      "to": "2024-12-31"
+     }
+    }
+   },
+   "exec_ms": 15.8,
+   "outcome": "wrong",
+   "detail": "行数不一致: GT 24 vs answer 0"
   },
   {
    "form": "A",
    "qid": "L3",
    "ask": "物料多码全码列表",
-   "llm_ms": 1209.0,
+   "llm_ms": 1391.3,
    "usage": {
     "prompt": 1328,
-    "completion": 69
+    "completion": 74
    },
    "llm_err": null,
-   "sql": "SELECT matnr, 'system' AS code_space, matnr AS value FROM MARA WHERE BISMT IS NOT NULL UNION ALL SELECT matnr, 'legacy' AS code_space, BISMT AS value FROM MARA WHERE BISMT IS NOT NULL ORDER BY matnr, code_space DESC, value",
-   "outcome": "refusal",
-   "detail": "守卫拒答: 含禁用片段: 'system'",
-   "exec_ms": null
+   "sql": "SELECT MATNR AS matnr, 'old_code' AS code_space, BISMT AS value FROM MARA WHERE BISMT IS NOT NULL UNION ALL SELECT MATNR AS matnr, 'matnr' AS code_space, MATNR AS value FROM MARA WHERE BISMT IS NOT NULL ORDER BY matnr, code_space, value",
+   "exec_ms": 7.3,
+   "outcome": "wrong",
+   "detail": "行数不一致: GT 6000 vs answer 2400",
+   "ans_row_count": 2400
   },
   {
    "form": "B",
    "qid": "L3",
    "ask": "物料多码全码列表",
-   "llm_ms": 1102.7,
+   "llm_ms": 903.7,
    "usage": {
-    "prompt": 1036,
-    "completion": 126
+    "prompt": 3059,
+    "completion": 94
    },
    "llm_err": null,
    "contract": {
@@ -544,71 +226,267 @@
      }
     },
     "aggregations": [],
-    "group_by": [
-     "matnr",
-     "name",
-     "material_type",
-     "plm_code",
-     "mes_code",
-     "old_code",
-     "base_unit",
-     "material_group",
-     "created_date"
-    ],
+    "group_by": [],
     "link_traversal": {
-     "path": "material.codes",
-     "fields": [
-      "code_id",
-      "code_space",
-      "value"
-     ]
+     "link": "material.codes",
+     "hops": 1
     }
    },
-   "exec_ms": 0.1,
-   "outcome": "refusal",
-   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: group_by 超过上限 4（V5）; link_traversal 未知键: ['fields', 'path']; 链接未注册或不可从 Material 遍历: None; link_traversal.hops 必须为 1（v0.1 单跳封顶）: None"
+   "exec_ms": 81.0,
+   "outcome": "correct",
+   "detail": ""
   },
   {
    "form": "A",
-   "qid": "A5",
-   "ask": "物料价格区间",
-   "llm_ms": 703.3,
+   "qid": "A6",
+   "ask": "各月订单量与金额趋势",
+   "llm_ms": 1406.1,
    "usage": {
-    "prompt": 1330,
-    "completion": 51
+    "prompt": 1299,
+    "completion": 101
    },
    "llm_err": null,
-   "sql": "SELECT ROUND(MIN(NETWR / MENGE), 2) AS min_price, ROUND(MAX(NETWR / MENGE), 2) AS max_price FROM EKPO WHERE MENGE > 0",
-   "exec_ms": 14.1,
+   "sql": "SELECT substr(VBAK.AUDAT, 1, 7) AS month, COUNT(DISTINCT VBAK.VBELN) AS order_count, ROUND(SUM(VBAK.NETWR), 2) AS amount FROM VBAK WHERE VBAK.AUDAT BETWEEN '2025-01-01' AND '2026-12-31' GROUP BY substr(VBAK.AUDAT, 1, 7) ORDER BY month",
+   "exec_ms": 20.9,
    "outcome": "wrong",
-   "detail": "GT 行无匹配: [0.0064, 7969.4779]",
+   "detail": "GT key ('2025-01',) 值不匹配",
+   "ans_row_count": 24
+  },
+  {
+   "form": "B",
+   "qid": "A6",
+   "ask": "各月订单量与金额趋势",
+   "llm_ms": 1157.0,
+   "usage": {
+    "prompt": 3031,
+    "completion": 42
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "order_count_by_month",
+     "group_by": [
+      "month"
+     ]
+    }
+   },
+   "exec_ms": 0.0,
+   "outcome": "refusal",
+   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: 聚合 count_distinct 非可加，禁物化表子集重聚合 group_by: order_count_by_month"
+  },
+  {
+   "form": "A",
+   "qid": "F3",
+   "ask": "已发货未送达的订单",
+   "llm_ms": 822.5,
+   "usage": {
+    "prompt": 1352,
+    "completion": 32
+   },
+   "llm_err": null,
+   "sql": "SELECT AUFNR, MATNR, WERKS, FTRMS, STATUS FROM AUFK WHERE STATUS = 'REL'",
+   "exec_ms": 115.9,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 22574
+  },
+  {
+   "form": "B",
+   "qid": "F3",
+   "ask": "已发货未送达的订单",
+   "llm_ms": 1525.6,
+   "usage": {
+    "prompt": 3074,
+    "completion": 90
+   },
+   "llm_err": null,
+   "outcome": "refusal",
+   "detail": "LLM 拒答(受限面不可表达): 问题要求的语义（生产工单状态 AUFK.STATUS='REL'、未达 DLV/CLSD）涉及生产订单对象，不在本体对象（Material/Code/Customer/Vendor/InventoryLocation/FinanceEntry）及指标注册表范围内，且无对应指标可表达'已发货未送达/已下达未关闭工单'状态，禁止编造。"
+  },
+  {
+   "form": "A",
+   "qid": "F6",
+   "ask": "含多码物料明细",
+   "llm_ms": 1053.5,
+   "usage": {
+    "prompt": 1304,
+    "completion": 38
+   },
+   "llm_err": null,
+   "sql": "SELECT MATNR, MAKTX, MTART, BISMT AS old_code FROM MARA WHERE BISMT IS NOT NULL AND BISMT <> ''",
+   "exec_ms": 8.4,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 1200
+  },
+  {
+   "form": "B",
+   "qid": "F6",
+   "ask": "含多码物料明细",
+   "llm_ms": 856.3,
+   "usage": {
+    "prompt": 3030,
+    "completion": 71
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.1",
+    "object_type": "Material",
+    "filters": {
+     "old_code": {
+      "op": "is_not_null"
+     }
+    },
+    "aggregations": [],
+    "group_by": [],
+    "link_traversal": {
+     "link": "material.codes",
+     "hops": 1
+    }
+   },
+   "exec_ms": 76.9,
+   "outcome": "correct",
+   "detail": ""
+  },
+  {
+   "form": "A",
+   "qid": "A4",
+   "ask": "整体客单价",
+   "llm_ms": 1132.7,
+   "usage": {
+    "prompt": 1323,
+    "completion": 54
+   },
+   "llm_err": null,
+   "sql": "SELECT ROUND(SUM(VBAP.NETWR) / COUNT(DISTINCT VBAK.KUNNR), 2) AS atv FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN",
+   "exec_ms": 53.6,
+   "outcome": "correct",
+   "detail": "",
    "ans_row_count": 1
   },
   {
    "form": "B",
-   "qid": "A5",
-   "ask": "物料价格区间",
-   "llm_ms": 1162.7,
+   "qid": "A4",
+   "ask": "整体客单价",
+   "llm_ms": 1686.5,
    "usage": {
-    "prompt": 1033,
-    "completion": 75
+    "prompt": 3059,
+    "completion": 108
    },
    "llm_err": null,
    "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题'物料价格区间'需要按价格字段过滤或聚合（如价格区间分组/计数），而当前本体对象Material中不存在价格字段（如price/cost等），指标注册表中也无价格相关指标。该语义不在受限本体支持范围内，无法表达。"
+   "detail": "LLM 拒答(受限面不可表达): 问题需要计算客单价（Σ金额 / COUNT(DISTINCT 客户）），该语义需要同时聚合金额与去重客户数并做除法，且金额口径为订单项目销售金额（VBAP.NETWR）。指标注册表中无对应指标（如含客单价的指标，或 sum+count_distinct 且无除法的组合算子），且 v0.1 对象路径不支持代价除表达式。受限面内无法表达，禁止编造。"
+  },
+  {
+   "form": "A",
+   "qid": "T6",
+   "ask": "季度汇总",
+   "llm_ms": 1306.9,
+   "usage": {
+    "prompt": 1328,
+    "completion": 111
+   },
+   "llm_err": null,
+   "sql": "SELECT (SUBSTR(AUDAT,1,4) || 'Q' || (FLOOR((CAST(SUBSTR(AUDAT,6,2) AS INTEGER)-1)/3)+1)) AS quarter, COUNT(DISTINCT VBAK.VBELN) AS order_count, ROUND(SUM(VBAK.NETWR),2) AS amount FROM VBAK WHERE AUDAT BETWEEN '2025-01-01' AND '2026-12-31' GROUP BY quarter ORDER BY quarter",
+   "exec_ms": 34.8,
+   "outcome": "wrong",
+   "detail": "GT key 缺失: ('2025Q1',)",
+   "ans_row_count": 8
+  },
+  {
+   "form": "B",
+   "qid": "T6",
+   "ask": "季度汇总",
+   "llm_ms": 1602.9,
+   "usage": {
+    "prompt": 3060,
+    "completion": 117
+   },
+   "llm_err": null,
+   "outcome": "refusal",
+   "detail": "LLM 拒答(受限面不可表达): 季度汇总需要按季度维度（年+Q+季度序号）对订单数与销售金额做聚合，但给定指标注册表中仅有按物料×月、客户×月的销售金额（sales_amount_by_mat_month / sales_amount_by_customer_month），以及按月的订单数（order_count_by_month），缺少按季度的销售金额与订单数指标，且无法基于现有月度指标直接重聚合为季度；该语义（季度聚合）不在"
+  },
+  {
+   "form": "A",
+   "qid": "L2",
+   "ask": "订单对应客户及金额",
+   "llm_ms": 838.3,
+   "usage": {
+    "prompt": 1325,
+    "completion": 48
+   },
+   "llm_err": null,
+   "sql": "SELECT VBELN, KUNNR, NAME1 AS customer_name, ROUND(NETWR, 2) AS amount FROM VBAK WHERE VBELN = 'SO-2026-000001'",
+   "exec_ms": 12.4,
+   "outcome": "error",
+   "detail": "执行错误: Binder Error: Referenced column \"NAME1\" not found in FROM clause!\nCandidate bindings: \"AUDAT\"\n\nLINE 1: SELECT VBELN, KUNNR, NAME1 AS customer_name, ROUND(NETWR, 2) AS amount FROM VBAK...\n                             ^"
+  },
+  {
+   "form": "B",
+   "qid": "L2",
+   "ask": "订单对应客户及金额",
+   "llm_ms": 2217.1,
+   "usage": {
+    "prompt": 3051,
+    "completion": 141
+   },
+   "llm_err": null,
+   "outcome": "refusal",
+   "detail": "LLM 拒答(受限面不可表达): 问题需要按订单关联客户并取金额的语义，该语义无法由给定的对象路径（Material/Code + material.codes）或指标注册表表达。指标注册表中的销售金额按'物料/客户/日'维度聚合（如 sales_amount_by_mat_month 等），不含'按订单维度给出客户名称及其金额'的字段组合；对象路径中 Customer 没有订单链接，FinanceEntry 的 ref_doc（"
+  },
+  {
+   "form": "A",
+   "qid": "A1",
+   "ask": "各月各物料销售金额合计",
+   "llm_ms": 1014.0,
+   "usage": {
+    "prompt": 1344,
+    "completion": 92
+   },
+   "llm_err": null,
+   "sql": "SELECT VBAP.MATNR AS matnr, SUBSTR(VBAK.AUDAT, 1, 7) AS month, ROUND(SUM(VBAP.NETWR), 2) AS sales_amount FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN GROUP BY VBAP.MATNR, SUBSTR(VBAK.AUDAT, 1, 7)",
+   "exec_ms": 280.5,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 77936
+  },
+  {
+   "form": "B",
+   "qid": "A1",
+   "ask": "各月各物料销售金额合计",
+   "llm_ms": 882.7,
+   "usage": {
+    "prompt": 3075,
+    "completion": 29
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "sales_amount_by_mat_month",
+     "group_by": [
+      "matnr",
+      "month"
+     ]
+    }
+   },
+   "exec_ms": 192.0,
+   "outcome": "correct",
+   "detail": ""
   },
   {
    "form": "A",
    "qid": "F2",
    "ask": "低于安全库存的物料清单",
-   "llm_ms": 731.7,
+   "llm_ms": 853.6,
    "usage": {
     "prompt": 1333,
-    "completion": 47
+    "completion": 43
    },
    "llm_err": null,
-   "sql": "SELECT MATNR, ROUND(SUM(LABST), 2) AS total_stock FROM MARD GROUP BY MATNR HAVING SUM(LABST) < 1200 ORDER BY MATNR",
-   "exec_ms": 7.6,
+   "sql": "SELECT MATNR, ROUND(SUM(LABST), 2) AS total_stock FROM MARD GROUP BY MATNR HAVING SUM(LABST) < 1200",
+   "exec_ms": 19.3,
    "outcome": "correct",
    "detail": "",
    "ans_row_count": 9
@@ -617,56 +495,44 @@
    "form": "B",
    "qid": "F2",
    "ask": "低于安全库存的物料清单",
-   "llm_ms": 2092.1,
+   "llm_ms": 1677.4,
    "usage": {
-    "prompt": 1036,
-    "completion": 60
+    "prompt": 3065,
+    "completion": 167
    },
    "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "stock_balance_by_mat_location",
+     "group_by": [
+      "matnr"
+     ],
+     "dimension_filters": {
+      "stock_balance": {
+       "op": "lt",
+       "value": 1200
+      }
+     }
+    },
+    "note": "按适配口径：物料总库存账面 LABST < 1200 的物料清单。由于指标 stock_balance_by_mat_location 已按物料+工厂+地点粒度物化，这里 group_by 只取 matnr 会在非可加粒度上请求额外聚合，存在 fail-closed 风险。若需严格按行数过滤物料，建议改为 v0.1 对象路径直接过滤。"
+   },
+   "exec_ms": 0.1,
    "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 安全库存字段不在受限本体（Material/Code + material.codes）及指标注册表维度/度量中，且无法通过现有指标（如 stock_balance_by_mat_location）表达安全库存比较语义，故拒绝生成契约。"
-  },
-  {
-   "form": "A",
-   "qid": "L5",
-   "ask": "订单→退款链路",
-   "llm_ms": 1169.4,
-   "usage": {
-    "prompt": 1331,
-    "completion": 90
-   },
-   "llm_err": null,
-   "sql": "SELECT A.VBELN AS vbeln, A.KUNNR, ROUND(SUM(F.WSL) * -1, 2) AS refund_amt FROM VBAK A JOIN ACDOCA F ON F.REF_DOC = CAST(A.VBELN AS VARCHAR) AND F.REF_TYPE = 'SO' AND F.WSL < 0 GROUP BY A.VBELN, A.KUNNR",
-   "exec_ms": 27.4,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 8216
-  },
-  {
-   "form": "B",
-   "qid": "L5",
-   "ask": "订单→退款链路",
-   "llm_ms": 1021.2,
-   "usage": {
-    "prompt": 1034,
-    "completion": 56
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题涉及'订单→退款链路'，其语义（订单与退款实体及其关联、时间范围等）不在给定的本体对象路径（Material/Code）和指标注册表范围内，无法用受限面表达。"
+   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: 未知顶层键（additionalProperties:false）: ['note']"
   },
   {
    "form": "A",
    "qid": "J6",
    "ask": "有多少一物多码的物料？",
-   "llm_ms": 826.4,
+   "llm_ms": 893.2,
    "usage": {
     "prompt": 1297,
     "completion": 33
    },
    "llm_err": null,
    "sql": "SELECT COUNT(DISTINCT MATNR) AS multi_code_count FROM MARA WHERE BISMT IS NOT NULL AND BISMT <> ''",
-   "exec_ms": 3.3,
+   "exec_ms": 5.8,
    "outcome": "correct",
    "detail": "",
    "ans_row_count": 1
@@ -675,9 +541,9 @@
    "form": "B",
    "qid": "J6",
    "ask": "有多少一物多码的物料？",
-   "llm_ms": 794.3,
+   "llm_ms": 1068.7,
    "usage": {
-    "prompt": 1037,
+    "prompt": 3032,
     "completion": 66
    },
    "llm_err": null,
@@ -698,7 +564,7 @@
     "group_by": [],
     "link_traversal": null
    },
-   "exec_ms": 7.8,
+   "exec_ms": 11.2,
    "outcome": "correct",
    "detail": ""
   },
@@ -706,14 +572,14 @@
    "form": "A",
    "qid": "L4",
    "ask": "库存位置-物料-库存量",
-   "llm_ms": 656.4,
+   "llm_ms": 652.4,
    "usage": {
     "prompt": 1307,
     "completion": 32
    },
    "llm_err": null,
    "sql": "SELECT MATNR, WERKS, LGORT, ROUND(LABST, 2) AS stock_balance FROM MARD",
-   "exec_ms": 29.8,
+   "exec_ms": 51.1,
    "outcome": "correct",
    "detail": "",
    "ans_row_count": 24000
@@ -722,17 +588,16 @@
    "form": "B",
    "qid": "L4",
    "ask": "库存位置-物料-库存量",
-   "llm_ms": 795.4,
+   "llm_ms": 677.3,
    "usage": {
-    "prompt": 1037,
-    "completion": 66
+    "prompt": 3032,
+    "completion": 51
    },
    "llm_err": null,
    "contract": {
     "contract_version": "0.2",
     "metric": {
      "metric_id": "stock_balance_by_mat_location",
-     "dimension_filters": {},
      "group_by": [
       "matnr",
       "factory",
@@ -740,220 +605,64 @@
      ]
     }
    },
-   "exec_ms": 59.0,
-   "outcome": "refusal",
-   "detail": "校验/执行拒答(fail-closed): 结果行数 24000 超过护栏上限 2400（V5，请加过滤）"
-  },
-  {
-   "form": "A",
-   "qid": "T3",
-   "ask": "近 30 天日销售",
-   "llm_ms": 1006.8,
-   "usage": {
-    "prompt": 1339,
-    "completion": 62
-   },
-   "llm_err": null,
-   "sql": "SELECT AUDAT AS day, ROUND(SUM(NETWR), 2) AS amount FROM VBAK WHERE AUDAT >= DATE '2026-12-02' AND AUDAT <= DATE '2026-12-31' GROUP BY AUDAT ORDER BY AUDAT",
-   "exec_ms": 0.9,
-   "outcome": "error",
-   "detail": "执行错误: Binder Error: Cannot compare values of type VARCHAR and type DATE - an explicit cast is required\n\nLINE 1: ... AS day, ROUND(SUM(NETWR), 2) AS amount FROM VBAK WHERE AUDAT >= DATE '2026-12-02' AND AUDAT <= DATE '2026-12-31' GROUP...\n                                                                         ^"
-  },
-  {
-   "form": "B",
-   "qid": "T3",
-   "ask": "近 30 天日销售",
-   "llm_ms": 1460.7,
-   "usage": {
-    "prompt": 1037,
-    "completion": 84
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要按天粒度统计销售（日销售），而指标注册表中最细的销售时间维度为 month（月），不具备 day 粒度；且对象路径（v0.1）仅支持静态属性与 codes 链接，不支持时间序列聚合。故日维度销售统计不在受限语义面内，禁止编造。"
-  },
-  {
-   "form": "A",
-   "qid": "A4",
-   "ask": "整体客单价",
-   "llm_ms": 714.7,
-   "usage": {
-    "prompt": 1323,
-    "completion": 54
-   },
-   "llm_err": null,
-   "sql": "SELECT ROUND(SUM(VBAP.NETWR) / COUNT(DISTINCT VBAK.KUNNR), 2) AS atv FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN",
-   "exec_ms": 36.0,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 1
-  },
-  {
-   "form": "B",
-   "qid": "A4",
-   "ask": "整体客单价",
-   "llm_ms": 1249.6,
-   "usage": {
-    "prompt": 1033,
-    "completion": 83
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 整体客单价（客单价=销售总额/订单数或/客户数）需要的语义（订单数/客户数计数）不在给定的对象路径（Material/Code）或指标注册表（sales_* 仅有销售金额/数量聚合，无订单数或客户去重计数）受限面内，无法表达，禁止编造。"
-  },
-  {
-   "form": "A",
-   "qid": "F6",
-   "ask": "含多码物料明细",
-   "llm_ms": 941.1,
-   "usage": {
-    "prompt": 1304,
-    "completion": 38
-   },
-   "llm_err": null,
-   "sql": "SELECT MATNR, MAKTX, MTART, BISMT AS old_code FROM MARA WHERE BISMT IS NOT NULL AND BISMT <> ''",
-   "exec_ms": 5.1,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 1200
-  },
-  {
-   "form": "B",
-   "qid": "F6",
-   "ask": "含多码物料明细",
-   "llm_ms": 876.0,
-   "usage": {
-    "prompt": 1035,
-    "completion": 66
-   },
-   "llm_err": null,
-   "contract": {
-    "contract_version": "0.1",
-    "object_type": "Material",
-    "filters": {
-     "old_code": {
-      "op": "is_not_null"
-     }
-    },
-    "aggregations": [],
-    "group_by": [],
-    "link_traversal": null
-   },
-   "exec_ms": 10.7,
+   "exec_ms": 74.9,
    "outcome": "correct",
    "detail": ""
   },
   {
    "form": "A",
-   "qid": "T4",
-   "ask": "本月 vs 上月退款对比",
-   "llm_ms": 990.8,
+   "qid": "F4",
+   "ask": "退款超过阈值的订单",
+   "llm_ms": 688.1,
    "usage": {
     "prompt": 1327,
-    "completion": 82
+    "completion": 67
    },
    "llm_err": null,
-   "sql": "SELECT substr(BUDAT,1,7) AS period, ROUND(SUM(WSL),2) AS refund_amt FROM ACDOCA WHERE REF_TYPE='SO' AND WSL<0 AND substr(BUDAT,1,7) IN ('2026-11','2026-12') GROUP BY substr(BUDAT,1,7) ORDER BY period",
-   "exec_ms": 12.7,
+   "sql": "SELECT REF_DOC AS vbeln, ROUND(SUM(WSL), 2) AS refund_amt FROM ACDOCA WHERE REF_TYPE = 'SO' AND WSL < 0 GROUP BY REF_DOC HAVING ABS(SUM(WSL)) > 50000 ORDER BY vbeln",
+   "exec_ms": 41.7,
    "outcome": "wrong",
-   "detail": "GT key 缺失: ('cur',)",
-   "ans_row_count": 2
+   "detail": "GT key ('SO-2026-012627',) 值不匹配",
+   "ans_row_count": 4100
   },
   {
    "form": "B",
-   "qid": "T4",
-   "ask": "本月 vs 上月退款对比",
-   "llm_ms": 1132.2,
+   "qid": "F4",
+   "ask": "退款超过阈值的订单",
+   "llm_ms": 833.2,
    "usage": {
-    "prompt": 1036,
-    "completion": 76
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要‘退款’相关指标（如退款金额/退款数量），该语义不在给定的指标注册表（sales_*/stock_*/purchase_*/finance_*/mat_count_*）中，也未在 v0.1 对象路径 Material/Code 的可表达字段内，禁止编造。"
-  },
-  {
-   "form": "A",
-   "qid": "A3",
-   "ask": "各月下单客户数",
-   "llm_ms": 1116.7,
-   "usage": {
-    "prompt": 1296,
-    "completion": 58
-   },
-   "llm_err": null,
-   "sql": "SELECT substr(AUDAT, 1, 7) AS month, COUNT(DISTINCT KUNNR) AS customer_count FROM VBAK GROUP BY substr(AUDAT, 1, 7) ORDER BY month",
-   "exec_ms": 15.2,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 24
-  },
-  {
-   "form": "B",
-   "qid": "A3",
-   "ask": "各月下单客户数",
-   "llm_ms": 827.1,
-   "usage": {
-    "prompt": 1035,
-    "completion": 66
+    "prompt": 3059,
+    "completion": 37
    },
    "llm_err": null,
    "contract": {
     "contract_version": "0.2",
     "metric": {
-     "metric_id": "sales_amount_by_customer_month",
-     "dimension_filters": {},
-     "time_range": null,
-     "group_by": [
-      "month"
-     ]
+     "metric_id": "refund_amount_by_order",
+     "dimension_filters": {
+      "refund_amount": {
+       "op": "gt",
+       "value": 50000
+      }
+     }
     }
    },
-   "exec_ms": 22.5,
-   "outcome": "wrong",
-   "detail": "GT key ('2025-01',) 值不匹配"
-  },
-  {
-   "form": "A",
-   "qid": "F3",
-   "ask": "已发货未送达的订单",
-   "llm_ms": 836.4,
-   "usage": {
-    "prompt": 1352,
-    "completion": 31
-   },
-   "llm_err": null,
-   "sql": "SELECT AUFNR, MATNR, WERKS, FTRMS, STATUS FROM AUFK WHERE STATUS = 'REL'",
-   "exec_ms": 59.2,
+   "exec_ms": 20.8,
    "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 22574
-  },
-  {
-   "form": "B",
-   "qid": "F3",
-   "ask": "已发货未送达的订单",
-   "llm_ms": 1178.4,
-   "usage": {
-    "prompt": 1036,
-    "completion": 55
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 问题需要订单（Order）及其发货/送达状态（shipped/delivered）语义，该语义不在给定的本体对象路径（Material/Code）或指标注册表内，无法用受限面表达。"
+   "detail": ""
   },
   {
    "form": "A",
    "qid": "J3",
    "ask": "哪些供应商到货准时率最高？",
-   "llm_ms": 1018.5,
+   "llm_ms": 976.5,
    "usage": {
     "prompt": 1359,
-    "completion": 99
+    "completion": 84
    },
    "llm_err": null,
-   "sql": "SELECT LFA1.NAME1 AS vendor, ROUND(SUM(MSEG.MENGE), 2) AS receipt_qty FROM MSEG JOIN EKKO ON MSEG.EBELN = EKKO.EBELN AND MSEG.BWART = '101' JOIN LFA1 ON EKKO.LIFNR = LFA1.LIFNR GROUP BY LFA1.NAME1 ORDER BY receipt_qty DESC",
-   "exec_ms": 60.1,
+   "sql": "SELECT l.NAME1 AS vendor, ROUND(SUM(m.MENGE), 2) AS receipt_qty FROM MSEG m JOIN EKKO e ON m.EBELN = e.EBELN JOIN LFA1 l ON e.LIFNR = l.LIFNR WHERE m.BWART = '101' GROUP BY l.NAME1 ORDER BY receipt_qty DESC",
+   "exec_ms": 200.5,
    "outcome": "wrong",
    "detail": "行数不一致: GT 4962 vs answer 60",
    "ans_row_count": 60
@@ -962,62 +671,491 @@
    "form": "B",
    "qid": "J3",
    "ask": "哪些供应商到货准时率最高？",
-   "llm_ms": 1508.9,
+   "llm_ms": 716.7,
    "usage": {
-    "prompt": 1037,
-    "completion": 81
-   },
-   "llm_err": null,
-   "outcome": "refusal",
-   "detail": "LLM 拒答(受限面不可表达): 需要供应商到货准时率（基于采购订单的到货时间与计划时间的比较）这一语义，但当前指标注册表只有采购金额/数量/订单数，无到货准时率指标，且本体对象路径（Material/Code + material.codes）无法表达供应商绩效/准时率语义，故受限拒答。"
-  },
-  {
-   "form": "A",
-   "qid": "T6",
-   "ask": "季度汇总",
-   "llm_ms": 1523.2,
-   "usage": {
-    "prompt": 1328,
-    "completion": 128
-   },
-   "llm_err": null,
-   "sql": "SELECT (substr(CAST(VBAK.AUDAT AS VARCHAR),1,4) || 'Q' || CAST(FLOOR((CAST(substr(CAST(VBAK.AUDAT AS VARCHAR),6,2) AS INTEGER) - 1) / 3) + 1 AS INTEGER)) AS quarter, COUNT(DISTINCT VBAK.VBELN) AS order_count, ROUND(SUM(VBAP.NETWR), 2) AS amount FROM VBAK JOIN VBAP ON VBAK.VBELN = VBAP.VBELN GROUP BY quarter ORDER BY quarter",
-   "exec_ms": 56.4,
-   "outcome": "correct",
-   "detail": "",
-   "ans_row_count": 8
-  },
-  {
-   "form": "B",
-   "qid": "T6",
-   "ask": "季度汇总",
-   "llm_ms": 863.2,
-   "usage": {
-    "prompt": 1032,
-    "completion": 64
+    "prompt": 3092,
+    "completion": 33
    },
    "llm_err": null,
    "contract": {
     "contract_version": "0.2",
     "metric": {
-     "metric_id": "sales_amount_by_mat_month",
+     "metric_id": "receipt_qty_by_vendor",
+     "group_by": [
+      "vendor"
+     ],
+     "topN": 10
+    }
+   },
+   "exec_ms": 22.2,
+   "outcome": "wrong",
+   "detail": "行数不一致: GT 4962 vs answer 10"
+  },
+  {
+   "form": "A",
+   "qid": "A2",
+   "ask": "品类×工厂×月三维汇总",
+   "llm_ms": 1426.3,
+   "usage": {
+    "prompt": 1358,
+    "completion": 115
+   },
+   "llm_err": null,
+   "sql": "SELECT MARA.MATKL AS category, COFV.WERKS AS factory, substr(COFV.DATUM,1,7) AS month, ROUND(SUM(COFV.ISM01),2) AS qty FROM mes.db.COFV AS COFV JOIN erp.db.MARA AS MARA ON COFV.MATNR = MARA.MATNR GROUP BY MARA.MATKL, COFV.WERKS, substr(COFV.DATUM,1,7) ORDER BY category, factory, month",
+   "outcome": "refusal",
+   "detail": "守卫拒答: 引用非白名单表: ['erp.db', 'mes.db']"
+  },
+  {
+   "form": "B",
+   "qid": "A2",
+   "ask": "品类×工厂×月三维汇总",
+   "llm_ms": 1013.5,
+   "usage": {
+    "prompt": 3088,
+    "completion": 85
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "cofv_qty_by_matkl_werks_month",
+     "dimension_filters": {},
      "time_range": {
-      "from": null,
-      "to": null
+      "from": "1970-01-01",
+      "to": "2070-12-31"
      },
      "group_by": [
-      "matnr"
+      "material_group",
+      "factory",
+      "month"
+     ],
+     "topN": null
+    }
+   },
+   "exec_ms": 43.5,
+   "outcome": "wrong",
+   "detail": "GT key ('Z-FERT-01', 'PL01', '2025-01') 值不匹配"
+  },
+  {
+   "form": "A",
+   "qid": "A5",
+   "ask": "物料价格区间",
+   "llm_ms": 872.7,
+   "usage": {
+    "prompt": 1330,
+    "completion": 45
+   },
+   "llm_err": null,
+   "sql": "SELECT ROUND(MIN(NETWR / MENGE), 2) AS min_price, ROUND(MAX(NETWR / MENGE), 2) AS max_price FROM EKPO",
+   "exec_ms": 71.1,
+   "outcome": "wrong",
+   "detail": "GT 行无匹配: [0.0064, 7969.4779]",
+   "ans_row_count": 1
+  },
+  {
+   "form": "B",
+   "qid": "A5",
+   "ask": "物料价格区间",
+   "llm_ms": 1553.3,
+   "usage": {
+    "prompt": 3063,
+    "completion": 124
+   },
+   "llm_err": null,
+   "outcome": "refusal",
+   "detail": "LLM 拒答(受限面不可表达): 问题需要物料价格（采购订单项目单位价格 EKPO.NETWR/MENGE 的 MIN/MAX）的聚合计算，而指标注册表中没有 price_min/price_max 相关的指标，且 EKPO.NETWR 已按月聚合为采购金额（purchase_amount_by_vendor_month / purchase_qty_by_mat_month），不支持在行级计算单价后再聚合 MIN/MAX；v0."
+  },
+  {
+   "form": "A",
+   "qid": "A3",
+   "ask": "各月下单客户数",
+   "llm_ms": 715.0,
+   "usage": {
+    "prompt": 1296,
+    "completion": 51
+   },
+   "llm_err": null,
+   "sql": "SELECT substr(AUDAT, 1, 7) AS month, COUNT(DISTINCT KUNNR) AS customer_count FROM VBAK GROUP BY substr(AUDAT, 1, 7) ORDER BY month",
+   "exec_ms": 24.3,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 24
+  },
+  {
+   "form": "B",
+   "qid": "A3",
+   "ask": "各月下单客户数",
+   "llm_ms": 649.1,
+   "usage": {
+    "prompt": 3030,
+    "completion": 25
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "customer_count_by_month",
+     "group_by": [
+      "month"
      ]
     }
    },
-   "exec_ms": 0.2,
+   "exec_ms": 0.1,
    "outcome": "refusal",
-   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: time_range.from 必须为 ISO 日期 YYYY-MM-DD: None; time_range.to 必须为 ISO 日期 YYYY-MM-DD: None"
+   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: 聚合 count_distinct 非可加，禁物化表子集重聚合 group_by: customer_count_by_month"
+  },
+  {
+   "form": "A",
+   "qid": "J1",
+   "ask": "每个客户各下过多少单？",
+   "llm_ms": 845.3,
+   "usage": {
+    "prompt": 1300,
+    "completion": 29
+   },
+   "llm_err": null,
+   "sql": "SELECT KUNNR, COUNT(*) AS order_count FROM VBAK GROUP BY KUNNR ORDER BY KUNNR",
+   "exec_ms": 16.4,
+   "outcome": "wrong",
+   "detail": "行数不一致: GT 10000 vs answer 9823",
+   "ans_row_count": 9823
+  },
+  {
+   "form": "B",
+   "qid": "J1",
+   "ask": "每个客户各下过多少单？",
+   "llm_ms": 674.7,
+   "usage": {
+    "prompt": 3032,
+    "completion": 34
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "order_count_by_customer",
+     "group_by": [
+      "customer"
+     ]
+    }
+   },
+   "exec_ms": 0.0,
+   "outcome": "refusal",
+   "detail": "校验/执行拒答(fail-closed): 契约校验失败（fail-closed 拒答）: 聚合 count_distinct 非可加，禁物化表子集重聚合 group_by: order_count_by_customer"
+  },
+  {
+   "form": "A",
+   "qid": "L6",
+   "ask": "财务条目对应订单来源",
+   "llm_ms": 984.5,
+   "usage": {
+    "prompt": 1336,
+    "completion": 46
+   },
+   "llm_err": null,
+   "sql": "SELECT BELNR, POSNR, RACCT, REF_DOC AS vbeln, ROUND(WSL, 2) AS wsl FROM ACDOCA WHERE REF_TYPE = 'SO'",
+   "exec_ms": 58.9,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 16400
+  },
+  {
+   "form": "B",
+   "qid": "L6",
+   "ask": "财务条目对应订单来源",
+   "llm_ms": 1192.1,
+   "usage": {
+    "prompt": 3059,
+    "completion": 71
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.1",
+    "object_type": "FinanceEntry",
+    "filters": {
+     "ref_type": {
+      "op": "eq",
+      "value": "SO"
+     }
+    },
+    "aggregations": [],
+    "group_by": [],
+    "link_traversal": null
+   },
+   "exec_ms": 86.1,
+   "outcome": "correct",
+   "detail": ""
+  },
+  {
+   "form": "A",
+   "qid": "T4",
+   "ask": "本月 vs 上月退款对比",
+   "llm_ms": 991.3,
+   "usage": {
+    "prompt": 1327,
+    "completion": 82
+   },
+   "llm_err": null,
+   "sql": "SELECT substr(BUDAT,1,7) AS period, ROUND(SUM(WSL),2) AS refund_amt FROM ACDOCA WHERE REF_TYPE='SO' AND WSL<0 AND substr(BUDAT,1,7) IN ('2026-11','2026-12') GROUP BY substr(BUDAT,1,7) ORDER BY period",
+   "exec_ms": 12.3,
+   "outcome": "wrong",
+   "detail": "GT key 缺失: ('cur',)",
+   "ans_row_count": 2
+  },
+  {
+   "form": "B",
+   "qid": "T4",
+   "ask": "本月 vs 上月退款对比",
+   "llm_ms": 803.8,
+   "usage": {
+    "prompt": 3060,
+    "completion": 75
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "refund_amount_by_month",
+     "time_range": {
+      "from": "2026-11-01",
+      "to": "2026-12-31"
+     },
+     "group_by": [
+      "month"
+     ]
+    }
+   },
+   "exec_ms": 15.4,
+   "outcome": "wrong",
+   "detail": "GT key 缺失: ('cur',)"
+  },
+  {
+   "form": "A",
+   "qid": "L5",
+   "ask": "订单→退款链路",
+   "llm_ms": 1161.7,
+   "usage": {
+    "prompt": 1331,
+    "completion": 87
+   },
+   "llm_err": null,
+   "sql": "SELECT v.VBELN AS vbeln, v.KUNNR, ROUND(SUM(f.WSL) * -1, 2) AS refund_amt FROM VBAK v JOIN ACDOCA f ON f.REF_DOC = v.VBELN AND f.REF_TYPE = 'SO' WHERE f.WSL < 0 GROUP BY v.VBELN, v.KUNNR",
+   "exec_ms": 33.6,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 8216
+  },
+  {
+   "form": "B",
+   "qid": "L5",
+   "ask": "订单→退款链路",
+   "llm_ms": 1499.4,
+   "usage": {
+    "prompt": 3059,
+    "completion": 118
+   },
+   "llm_err": null,
+   "outcome": "refusal",
+   "detail": "LLM 拒答(受限面不可表达): 问题需要“订单号 + 客户 + 退款金额”的链路明细，其中“客户”是 Customer 维度，但指标注册表中无同时返回订单号(vbeln)和客户(customer)的退款指标；customer_refund_by_customer 仅按客户汇总退款，refund_amount_by_order 仅按订单汇总退款，两者均无法提供订单号+客户+退款金额的三列明细。该跨级明细组合不在受限指标面内，禁止编"
+  },
+  {
+   "form": "A",
+   "qid": "T1",
+   "ask": "月订单量趋势",
+   "llm_ms": 659.0,
+   "usage": {
+    "prompt": 1295,
+    "completion": 45
+   },
+   "llm_err": null,
+   "sql": "SELECT substr(AUDAT, 1, 7) AS month, COUNT(*) AS order_count FROM VBAK GROUP BY substr(AUDAT, 1, 7) ORDER BY month",
+   "exec_ms": 8.3,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 24
+  },
+  {
+   "form": "B",
+   "qid": "T1",
+   "ask": "月订单量趋势",
+   "llm_ms": 1200.0,
+   "usage": {
+    "prompt": 3029,
+    "completion": 54
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "order_count_by_month",
+     "time_range": {
+      "from": "2024-01-01",
+      "to": "2024-12-31"
+     }
+    }
+   },
+   "exec_ms": 16.1,
+   "outcome": "wrong",
+   "detail": "行数不一致: GT 24 vs answer 0"
+  },
+  {
+   "form": "A",
+   "qid": "L1",
+   "ask": "某物料的供应商是谁？",
+   "llm_ms": 1175.4,
+   "usage": {
+    "prompt": 1348,
+    "completion": 88
+   },
+   "llm_err": null,
+   "sql": "SELECT DISTINCT EKKO.LIFNR AS LIFNR, LFA1.NAME1 AS vendor_name FROM EKPO JOIN EKKO ON EKPO.EBELN = EKKO.EBELN JOIN LFA1 ON EKKO.LIFNR = LFA1.LIFNR WHERE EKPO.MATNR = 'MAT-2026-0001-K4V'",
+   "exec_ms": 117.4,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 10
+  },
+  {
+   "form": "B",
+   "qid": "L1",
+   "ask": "某物料的供应商是谁？",
+   "llm_ms": 1599.3,
+   "usage": {
+    "prompt": 3080,
+    "completion": 68
+   },
+   "llm_err": null,
+   "outcome": "refusal",
+   "detail": "LLM 拒答(受限面不可表达): 问题需要按物料查询其采购订单供应商（EKPO→EKKO→LFA1 关联链），但给定本体中 Material/Vendor 之间没有定义的链接路径，且指标注册表中无按物料取供应商的指标，该语义不在受限面内。"
+  },
+  {
+   "form": "A",
+   "qid": "J5",
+   "ask": "各仓库库存水位",
+   "llm_ms": 1044.5,
+   "usage": {
+    "prompt": 1296,
+    "completion": 37
+   },
+   "llm_err": null,
+   "sql": "SELECT LGORT AS location, ROUND(SUM(LABST), 2) AS stock_balance FROM MARD GROUP BY LGORT ORDER BY LGORT",
+   "exec_ms": 9.7,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 3
+  },
+  {
+   "form": "B",
+   "qid": "J5",
+   "ask": "各仓库库存水位",
+   "llm_ms": 901.7,
+   "usage": {
+    "prompt": 3029,
+    "completion": 46
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "stock_balance_by_location",
+     "group_by": [
+      "factory",
+      "location"
+     ]
+    }
+   },
+   "exec_ms": 16.2,
+   "outcome": "wrong",
+   "detail": "GT key 缺失: ('W01',)"
+  },
+  {
+   "form": "A",
+   "qid": "J4",
+   "ask": "退款金额 Top5 客户",
+   "llm_ms": 1204.5,
+   "usage": {
+    "prompt": 1350,
+    "completion": 97
+   },
+   "llm_err": null,
+   "sql": "SELECT k.KUNNR AS customer, ROUND(SUM(ABS(a.WSL)), 2) AS refund_total FROM ACDOCA a JOIN VBAK v ON a.REF_DOC = v.VBELN AND a.REF_TYPE = 'SO' JOIN KNA1 k ON v.KUNNR = k.KUNNR WHERE a.WSL < 0 GROUP BY k.KUNNR ORDER BY refund_total DESC LIMIT 5",
+   "exec_ms": 36.6,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 5
+  },
+  {
+   "form": "B",
+   "qid": "J4",
+   "ask": "退款金额 Top5 客户",
+   "llm_ms": 724.7,
+   "usage": {
+    "prompt": 3084,
+    "completion": 48
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "customer_refund_by_customer",
+     "group_by": [
+      "customer"
+     ],
+     "topN": 5
+    }
+   },
+   "exec_ms": 19.6,
+   "outcome": "correct",
+   "detail": ""
+  },
+  {
+   "form": "A",
+   "qid": "F5",
+   "ask": "指定品类×仓库组合的库存",
+   "llm_ms": 743.2,
+   "usage": {
+    "prompt": 1349,
+    "completion": 44
+   },
+   "llm_err": null,
+   "sql": "SELECT MATNR, WERKS, LGORT, ROUND(LABST, 2) AS stock_balance FROM MARD WHERE LGORT IN ('W01', 'W02')",
+   "exec_ms": 25.7,
+   "outcome": "correct",
+   "detail": "",
+   "ans_row_count": 16000
+  },
+  {
+   "form": "B",
+   "qid": "F5",
+   "ask": "指定品类×仓库组合的库存",
+   "llm_ms": 1196.7,
+   "usage": {
+    "prompt": 3074,
+    "completion": 78
+   },
+   "llm_err": null,
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "stock_balance_by_location",
+     "dimension_filters": {
+      "location": {
+       "op": "in",
+       "value": [
+        "W01",
+        "W02"
+       ]
+      }
+     }
+    }
+   },
+   "exec_ms": 16.1,
+   "outcome": "wrong",
+   "detail": "answer 列数不足 (need 4)"
   }
  ],
  "negative": [],
  "meta": {
-  "seed": 20260821,
+  "seed": 20260822,
   "n": 30
  }
 }

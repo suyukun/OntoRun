@@ -104,19 +104,36 @@ B_OBJECT_SURFACE = (
     "- Material（material）：matnr, name, material_type(FERT/HALB/ROH/VERP/HAWA), plm_code, mes_code, "
     "old_code(仅一物多码非空), base_unit, material_group, created_date。链接 material.codes（1 跳）。\n"
     "- Code（code）：code_id, code_space(plm/erp/mes/wms/legacy), value, material_matnr。\n"
+    "- Customer（customer）：customer_id, name, segment, risk_level。\n"
+    "- Vendor（vendor）：vendor_id, name, city, country。\n"
+    "- InventoryLocation（inventory_location）：location_id, factory, location。\n"
+    "- FinanceEntry（finance_entry）：entry_id, belnr, posnr, account, cost_center, amount(借正贷负), "
+    "post_date, ref_type(SO/PO/MV), ref_doc(SO=订单号)。\n"
 )
 
 B_CONTRACT_SCHEMA = (
     "## 契约 schema（v0.1/v0.2）\n"
     "- v0.1 对象路径：{\"contract_version\": \"0.1\", \"object_type\": \"Material\", \"filters\": {...}, "
     "\"aggregations\": [{\"function\": ..., \"field\": ...}], \"group_by\": [...], \"link_traversal\": {...}|null}\n"
-    "  - filters 操作符：eq/ne/is_null/is_not_null/in；如 {\"old_code\": {\"op\": \"is_not_null\"}}\n"
+    "  - filters 操作符：eq/ne/gt/ge/lt/le/is_null/is_not_null/in；如 {\"old_code\": {\"op\": \"is_not_null\"}}\n"
     "  - aggregations.function ∈ count/sum/avg/min/max/count_distinct；field 可为字段名或 \"*\"（仅 count）\n"
+    "  - 对象路径适合明细/计数查询（Material/Code/Customer/Vendor/InventoryLocation/FinanceEntry）\n"
     "- v0.2 指标路径：{\"contract_version\": \"0.2\", \"metric\": {\"metric_id\": ..., "
     "\"dimension_filters\": {...}, \"time_range\": {\"from\": \"YYYY-MM-DD\", \"to\": \"YYYY-MM-DD\"}, "
-    "\"group_by\": [...]}}\n"
+    "\"group_by\": [...], \"topN\": N}}\n"
     "  - metric 存在时不要求 object_type/aggregations；group_by 只能取该指标维度字段子集；\n"
-    "  - 非 metric 契约（v0.1 对象路径）不支持 time_range（会 fail-closed 拒答）。\n"
+    "  - dimension_filters 可过滤维度列，也可过滤度量列（数值比较，如 {\"refund_amount\": {\"op\": \"gt\", \"value\": 50000}}）；\n"
+    "  - count_distinct/avg 聚合指标已按指标自身粒度物化，勿对其 group_by（非可加会 fail-closed 拒答），直接查询即可；\n"
+    "  - topN：正整数 ≤1000，按度量值降序截断前 N（如退款 Top5 客户）；\n"
+    "  - time_range 需指标含日期维度；非 metric 契约（v0.1 对象路径）不支持 time_range（fail-closed 拒答）。\n"
+    "契约示例：\n"
+    "- 对象明细（多码物料全码）：{\"contract_version\":\"0.1\",\"object_type\":\"Material\","
+    "\"filters\":{\"old_code\":{\"op\":\"is_not_null\"}},\"aggregations\":[],\"group_by\":[],"
+    "\"link_traversal\":{\"link\":\"material.codes\",\"hops\":1}}\n"
+    "- 指标+TopN（退款 Top5 客户）：{\"contract_version\":\"0.2\",\"metric\":{\"metric_id\":\"customer_refund_by_customer\","
+    "\"group_by\":[\"customer\"],\"topN\":5}}\n"
+    "- 指标+度量过滤（退款超阈值订单）：{\"contract_version\":\"0.2\",\"metric\":{\"metric_id\":\"refund_amount_by_order\","
+    "\"dimension_filters\":{\"refund_amount\":{\"op\":\"gt\",\"value\":50000}}}}\n"
 )
 
 B_METRIC_CATALOG = (
@@ -129,14 +146,20 @@ def build_b_surface(metrics: MetricRegistry) -> str:
     for m in metrics.metrics:
         dims = ", ".join(f"{d.name}" for d in m.dimension_fields)
         lines.append(
-            f"- {m.metric_id}: 主体 {m.object_type}，维度 [{dims}]，度量 {m.measure.name}，聚合 {m.agg_function}"
+            f"- {m.metric_id}: 主体 {m.object_type}，维度 [{dims}]，度量 {m.measure.name}，聚合 {m.agg_function}。{m.definition}"
         )
     lines.append("")
     lines.append(
-        "### 指标语义\n"
-        "- sales_*: 销售金额/数量（VBAK 月 AUDAT）；stock_*: 库存账面(月/不按月)；purchase_*: 采购（EKKO 月 AEDAT）；"
-        "finance_*: 财务（ACDOCA 月 BUDAT）；mat_count_*: 物料计数。\n"
-        "- 物化指标表预聚合，维度过滤只能作用在维度列上，不能按度量值过滤。"
+        "### 指标语义（按业务含义选指标；物化表预聚合，度量过滤在物化粒度行级生效）\n"
+        "- sales_amount_by_*: 销售金额（VBAP.NETWR）；sales_qty_by_mat_month: 销售数量；sales_amount_by_day: 日粒度销售金额（配 time_range 用近 30 天）。\n"
+        "- stock_balance_by_*: 库存账面（LABST）——by_location(工厂×地点)/by_mat_location(物料×工厂×地点)/by_mat_group(物料组/品类)；stock_flow_by_location: 库存流水净变。\n"
+        "- purchase_*: 采购金额/数量（EKKO/EKPO，月 AEDAT）；purchase_order_count_by_vendor_month: 供应商采购订单数。\n"
+        "- finance_amount_by_*: 财务金额（WSL 借正贷负）按科目/成本中心/参考类型（SO/PO/MV）。\n"
+        "- order_count_by_customer: 每客户下单数；order_count_by_month: 各月订单量；customer_count_by_month: 各月下单客户数。\n"
+        "- customer_refund_by_customer: 各客户退款金额；refund_amount_by_order: 按订单退款（配度量过滤取超阈值）；refund_amount_by_month: 各月退款金额（均含 SO 负向分录+符号翻转）。\n"
+        "- receipt_qty_by_vendor: 各供应商采购收货量（已含 BWART='101' 收货过滤）。\n"
+        "- cofv_qty_by_matkl_werks_month: 物料组×工厂×月报工数量；cofv_avg_hrs_by_month: 各月平均报工工时。\n"
+        "- mat_count_*: 物料计数（类型×工厂 / ABC×工厂 / 物料组）。"
     )
     return "\n".join(lines)
 
@@ -153,8 +176,12 @@ B_SYSTEM = (
 )
 
 
-def build_b_prompt(ask: str, surface: str) -> list[dict]:
+def build_b_prompt(ask: str, surface: str, extra: str = "") -> list[dict]:
     return [
         {"role": "system", "content": B_SYSTEM + "\n\n" + surface + "\n" + B_CONTRACT_SCHEMA},
-        {"role": "user", "content": f"题目：{ask}\n请生成契约 JSON 或 refusal。"},
+        {"role": "user", "content": (
+            f"题目：{ask}\n"
+            f"{('补充口径：' + extra + chr(10)) if extra else ''}"
+            "请生成契约 JSON 或 refusal。"
+        )},
     ]
