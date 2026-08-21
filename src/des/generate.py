@@ -396,9 +396,21 @@ def _distribute_counts(
 ) -> list[int]:
     """把 total 行数分配到 n 个父单据（每份 ∈ [lo,hi] 且步长 step），确定性收敛。
 
-    父子单据比率（§3.3）落地：先按 seed 随机给初值，再单向微调索引使 Σ = total 精确；
-    要求 lo*n ≤ total ≤ hi*n 且 total 与初值之和同余（step），否则进入无限循环（fail-fast 由调用方保证）。
+    父子单据比率（§3.3）落地：先按 seed 随机给初值，再单向微调索引使 Σ = total 精确。
+    scale 鲁棒性（§7.2 scale 扩展）：小 scale 下 round(scale×row_count) 的目标 total 可能
+    越出 [lo·n, hi·n] 或与 n·lo 不同余（step>1）——此时不存在可行分配，原实现会死循环；
+    这里先把 total 吸附到最近可行值（可行和的取值集合 = {lo·n + k·step, k=0..n·(hi-lo)/step}）：
+    - 越界钳制 total ∈ [lo·n, hi·n]；
+    - 同余对齐 (total - lo·n) % step == 0。
+    全量（scale=None）时各目标天然可行，吸附分支不触发 → 输出与既往完全一致。
     """
+    lo, hi, step = int(lo), int(hi), int(step)
+    if n <= 0:
+        return []
+    min_total = lo * n
+    max_total = hi * n
+    total = max(min_total, min(total, max_total))
+    total -= (total - min_total) % step  # 同余对齐（吸附后必在 [min_total, max_total]）
     counts = [rng.randrange(lo, hi + 1, step) for _ in range(n)]
     diff = total - sum(counts)
     while diff > 0:
@@ -497,6 +509,8 @@ def generate_mast_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     """ERP.MAST BOM 链接表（§2.1）：10,000 BOM 头 BO-YYYY-NNNNNN，父物料取 FERT/HALB。"""
     year = ctx["year"]
     parents = [m["MATNR"] for m in ctx["erp.MARA"] if m["MTART"] in BOM_PARENT_TYPES]
+    if not parents:
+        return []  # 小 scale 下无 FERT/HALB 父物料：BOM 空（全量时必非空，行为不变）
     rows: list[dict[str, Any]] = []
     for seq in range(1, _row_count(ctx, "erp.MAST") + 1):
         rows.append(
@@ -517,13 +531,16 @@ def generate_stpo_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     parent_idx = {matnr: i for i, matnr in enumerate(all_matnrs)}
     meins_by_matnr = {m["MATNR"]: m["MEINS"] for m in mara}
     n = len(all_matnrs)
+    # 组件数上限 = 可采样候选数（排除父物料自身）：小 scale 下物料过少时截断，避免
+    # sample(range(n-1), 5) 越界（全量 n=8000 → 恒为 STPO_ITEMS_PER_BOM，行为不变）
+    comps_per_bom = min(STPO_ITEMS_PER_BOM, n - 1)
     rows: list[dict[str, Any]] = []
     for mast in ctx["erp.MAST"]:
         pidx = parent_idx[mast["MATNR"]]
         # 排除父物料自身：从 n-1 个候选索引采样，>= pidx 顺移 1 位（O(1) 排除，确定性）
         comps = [
             all_matnrs[i if i < pidx else i + 1]
-            for i in rng.sample(range(n - 1), STPO_ITEMS_PER_BOM)
+            for i in rng.sample(range(n - 1), comps_per_bom)
         ]
         for idx, matnr in enumerate(comps, start=1):
             rows.append(
@@ -838,12 +855,17 @@ def generate_acdoca_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[s
     """
     year = ctx["year"]
     total = _row_count(ctx, "fin.ACDOCA")
-    so_n = round(total * ACDOCA_REF_SPLIT[0])
-    po_n = round(total * ACDOCA_REF_SPLIT[1])
-    mv_n = total - so_n - po_n
-    so_refs = rng.sample(sorted(v["VBELN"] for v in ctx["erp.VBAK"]), so_n)
-    po_refs = rng.sample(sorted(e["EBELN"] for e in ctx["scm.EKKO"]), po_n)
-    mv_refs = rng.sample(sorted(m["MBLNR"] for m in ctx["wms.MSEG"]), mv_n)
+    so_pool = sorted(v["VBELN"] for v in ctx["erp.VBAK"])
+    po_pool = sorted(e["EBELN"] for e in ctx["scm.EKKO"])
+    mv_pool = sorted(m["MBLNR"] for m in ctx["wms.MSEG"])
+    # 抽样量按固定比例取整；小 scale 下钳到源表容量内（min），避免 sample 越界
+    # （全量时 0.4/0.3×ACDOCA 恒远小于源表，钳制不触发，行为不变）
+    so_n = min(round(total * ACDOCA_REF_SPLIT[0]), len(so_pool))
+    po_n = min(round(total * ACDOCA_REF_SPLIT[1]), len(po_pool))
+    mv_n = min(total - so_n - po_n, len(mv_pool))
+    so_refs = rng.sample(so_pool, so_n)
+    po_refs = rng.sample(po_pool, po_n)
+    mv_refs = rng.sample(mv_pool, mv_n)
     refs = (
         [("SO", d) for d in so_refs]
         + [("PO", d) for d in po_refs]
@@ -942,6 +964,8 @@ def write_db(db_path: Path, tables: list[tuple[str, str, list[dict[str, Any]]]])
     try:
         for table, ddl, rows in tables:
             conn.executescript(ddl)
+            if not rows:
+                continue  # 小 scale 下表可能 0 行（如 MAST 无 FERT/HALB 父物料）：建表但跳过插入
             columns = list(rows[0].keys())
             placeholders = ",".join("?" * len(columns))
             conn.executemany(
@@ -986,8 +1010,9 @@ def build_enterprise(
     out_dir: str | Path | None = None,
     seed: int | None = None,
     config_file: str | Path | None = None,
+    scale: float | None = None,
 ) -> dict[str, Any]:
-    """确定性生成 1 企业 5 源系统 18 张表（9 主数据 + 9 事务，合计 1,000,000 行）+ manifest.json。
+    """确定性生成 1 企业 5 源系统 18 张表（9 主数据 + 9 事务）+ manifest.json。
 
     设计 §5 约定 1-5 全落地：每表独立 RNG 流、主键升序落库、纯函数派生、canonical 配置 hash、
     拓扑序固定（依赖 depends_on）。事务表引用主数据/上级单据的确定性内存输出，不重抽。
@@ -996,9 +1021,12 @@ def build_enterprise(
         enterprise_code：企业编码（目录名）；
         out_dir：输出目录（默认 <data/des/enterprises>/<code>）；
         seed：覆盖企业配置中的 seed；
-        config_file：覆盖企业配置 YAML（测试钩子，默认取企业目录内文件）。
+        config_file：覆盖企业配置 YAML（测试钩子，默认取企业目录内文件）；
+        scale：行数缩放系数（None 默认 = 全量 1,000,000 行；传数值则透传 load_config，
+            每表行数按 round(scale×row_count) 缩放到 ≥1，如 scale=0.003 → 总行数 ~3000，
+            常规测试小规模快速跑；1M 演示/量级门禁保留 scale=None）。
     """
-    config = load_config(enterprise_code, config_file=config_file)
+    config = load_config(enterprise_code, config_file=config_file, scale=scale)
     ent = config["enterprise"]
     if seed is None:
         seed = ent["seed"]

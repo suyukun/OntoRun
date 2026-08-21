@@ -74,13 +74,19 @@ def load_config(
     enterprise_code: str,
     config_file: str | Path | None = None,
     template_file: str | Path | None = None,
+    scale: float | None = None,
 ) -> dict:
     """加载并规范化企业生效配置（模板层 + 企业覆盖层 deep_merge + 校验）。
 
     参数：
         enterprise_code：企业编码（目录名，如 hc_precision），用于解析默认企业配置路径；
         config_file：企业覆盖层 YAML（默认 <enterprises_dir>/<code>/des_enterprise.yaml）；
-        template_file：行业模板层 YAML（默认 data/des/des_industry_template.yaml）。
+        template_file：行业模板层 YAML（默认 data/des/des_industry_template.yaml）；
+        scale：行数缩放系数（None 默认 = 全量，行为与既往完全一致）。传数值时对每表
+            row_count 乘 scale：row_count' = max(1, round(row_count × scale))，total_target
+            重算为 Σ row_count'（见 _apply_scale）；scale 写入配置顶层参与 canonical 序列化
+            → config_sha256（同 scale 同 seed → 同 sha；scale 不同 → sha 不同）。
+            用于常规测试小规模快速跑（如 scale=0.003 → 总行数 ~3000），1M 演示/量级门禁保留 None。
     """
     ent_path = (
         Path(config_file)
@@ -99,6 +105,11 @@ def load_config(
     merged = deep_merge(template, enterprise)
     normalized = _normalize(merged, enterprise_code)
     validate(normalized)
+    if scale is not None:
+        if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale <= 0:
+            raise DesConfigError(f"scale 必须为正数: {scale!r}")
+        normalized = _apply_scale(normalized, float(scale))
+        validate(normalized)
     return normalized
 
 
@@ -150,6 +161,37 @@ def _normalize(merged: dict, enterprise_code: str) -> dict:
             "systems": systems,
         },
     }
+
+
+def _apply_scale(config: dict, scale: float) -> dict:
+    """按 scale 缩放每表 row_count（round + 下限 max(1,·)），并重算 total_target = Σ。
+
+    - 每表 row_count' = max(1, round(row_count × scale))：下限 1 保证最小行数（表仍可生成）；
+    - total_target' = Σ row_count'（保持 validate 的 Σ == total_target 机验口径）；
+    - 把 scale 写入返回配置顶层（key "scale"）：参与 canonical 序列化 → config_sha256，
+      同 scale 同 seed → 同 sha；scale 不同（即使行数偶然相同）→ sha 不同（§5.1 约定 4）。
+      scale=None 时不含该键，全量配置与既往完全一致（canonical/SHA 不变）。
+    注：派生表（如 MARC=2×MARA、STPO=5×MAST）实际行数随父表比例走，小 scale 下可能
+    与独立 round 出的 row_count' 有 ±1 级取整差，属生成器自洽口径（见 generate.py）。
+    """
+    systems: dict[str, dict[str, Any]] = {}
+    for code, sys_cfg in config["enterprise"]["systems"].items():
+        tables = {
+            name: {**spec, "row_count": max(1, round(spec["row_count"] * scale))}
+            for name, spec in sys_cfg["tables"].items()
+        }
+        systems[code] = {**sys_cfg, "tables": tables}
+    scaled = {
+        **config,
+        "scale": scale,
+        "enterprise": {**config["enterprise"], "systems": systems},
+    }
+    scaled["total_target"] = sum(
+        spec["row_count"]
+        for sys_cfg in systems.values()
+        for spec in sys_cfg["tables"].values()
+    )
+    return scaled
 
 
 # ---------------------------------------------------------------------------
