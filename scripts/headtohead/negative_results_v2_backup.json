@@ -1,0 +1,139 @@
+{
+ "A": [
+  {
+   "name": "注入多语句",
+   "sql": "SELECT * FROM MARA; DROP TABLE MARA",
+   "rejected": true,
+   "violations": [
+    "含禁用片段: ';'",
+    "含禁用片段: 'drop'"
+   ]
+  },
+  {
+   "name": "注入注释逃逸",
+   "sql": "SELECT * FROM MARA WHERE MATNR='x' --' OR 1=1",
+   "rejected": true,
+   "violations": [
+    "含禁用片段: '--'"
+   ]
+  },
+  {
+   "name": "写库 DML",
+   "sql": "DELETE FROM MARA WHERE MATNR='MAT-2026-0001-K4V'",
+   "rejected": true,
+   "violations": [
+    "非 SELECT/WITH 单语句"
+   ]
+  },
+  {
+   "name": "非白名单表",
+   "sql": "SELECT * FROM sys.sensitive",
+   "rejected": true,
+   "violations": [
+    "引用非白名单表: ['sys.sensitive']"
+   ]
+  },
+  {
+   "name": "外部数据源",
+   "sql": "SELECT * FROM read_csv('/etc/passwd')",
+   "rejected": true,
+   "violations": [
+    "含禁用片段: 'read_csv'",
+    "引用非白名单表: ['read_csv']"
+   ]
+  }
+ ],
+ "B": [
+  {
+   "name": "未知 metric_id",
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "not_a_metric"
+    }
+   },
+   "rejected": true,
+   "violations": "契约校验失败（fail-closed 拒答）: metric_id 不在指标注册表（M 系列）: 'not_a_metric'"
+  },
+  {
+   "name": "未知对象（V1 白名单）",
+   "contract": {
+    "contract_version": "0.1",
+    "object_type": "FooObject",
+    "filters": {},
+    "aggregations": [],
+    "group_by": [],
+    "link_traversal": null
+   },
+   "rejected": true,
+   "violations": "契约校验失败（fail-closed 拒答）: object_type 未注册或非法（V1 白名单）: 'FooObject'"
+  },
+  {
+   "name": "对象过滤字段不在白名单（V2）",
+   "contract": {
+    "contract_version": "0.1",
+    "object_type": "Vendor",
+    "filters": {
+     "not_a_field": {
+      "op": "eq",
+      "value": "x"
+     }
+    },
+    "aggregations": [],
+    "group_by": [],
+    "link_traversal": null
+   },
+   "rejected": true,
+   "violations": "契约校验失败（fail-closed 拒答）: 过滤字段不在 Vendor 白名单: not_a_field"
+  },
+  {
+   "name": "非 metric 契约带 time_range（P2-2 fail-closed）",
+   "contract": {
+    "contract_version": "0.1",
+    "object_type": "Material",
+    "filters": {},
+    "aggregations": [],
+    "group_by": [],
+    "link_traversal": null,
+    "time_range": {
+     "from": "2026-01-01",
+     "to": "2026-01-31"
+    }
+   },
+   "rejected": true,
+   "violations": "契约校验失败（fail-closed 拒答）: 非 metric 契约不支持 time_range（v0.1 对象路径 fail-closed 拒答）"
+  },
+  {
+   "name": "维度过滤值注入",
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "sales_amount_by_mat_month",
+     "dimension_filters": {
+      "matnr": {
+       "op": "eq",
+       "value": "MAT-2026-0001-K4V'; DROP TABLE x--"
+      }
+     }
+    }
+   },
+   "rejected": true,
+   "violations": "契约校验失败（fail-closed 拒答）: 过滤值含疑似 SQL 片段（V4 防注入拒答）: matnr"
+  },
+  {
+   "name": "time_range 非法",
+   "contract": {
+    "contract_version": "0.2",
+    "metric": {
+     "metric_id": "sales_amount_by_mat_month",
+     "time_range": {
+      "from": "2026-02-01",
+      "to": "2026-01-01"
+     }
+    }
+   },
+   "rejected": true,
+   "violations": "契约校验失败（fail-closed 拒答）: time_range.from 必须 ≤ to: '2026-02-01' > '2026-01-01'"
+  }
+ ]
+}
