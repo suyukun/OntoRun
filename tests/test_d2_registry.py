@@ -53,16 +53,20 @@ def registry() -> Registry:
 
 
 def test_registry_loads(registry):
-    assert len(registry.object_types()) == 8
-    assert {t.name for t in registry.object_types()} == EXPECTED_OBJECTS
+    # S2 P1a：DES 对象（Material/Code）与 S1 8 对象同一注册表（设计 §1.4），共 10 个
+    assert len(registry.object_types()) == 10
+    assert EXPECTED_OBJECTS <= {t.name for t in registry.object_types()}
+    assert {"Material", "Code"} <= {t.name for t in registry.object_types()}
 
 
 def test_link_count_and_names(registry):
-    assert len(registry.link_types()) == 8
+    # S2 P1a：hasCode（material.codes）追加注册，共 9 条链接（设计 §1.4）
+    assert len(registry.link_types()) == 9
     names = [l.name for l in registry.link_types()]
     assert (
         "order.customer" in names and "order.items" in names and "refund.order" in names
     )
+    assert "material.codes" in names
 
 
 def test_action_count(registry):

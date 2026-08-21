@@ -7,7 +7,8 @@ self_check 覆盖：主键唯一性、链接双向命名一致、动作参数完
 from __future__ import annotations
 
 import re
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -32,6 +33,9 @@ class Issue(BaseModel):
     message: str
 
 
+SelfCheckFn = Callable[["Registry", dict[str, list[dict[str, Any]]] | None], list[Issue]]
+
+
 class Registry:
     """对象 / 链接 / 动作的统一注册表（schema 元数据单一来源，四处消费：运行时索引、
     API /meta/schema、前端动态 UI、Agent 工具生成——§3.2）。"""
@@ -40,6 +44,7 @@ class Registry:
         self._objects: dict[str, ObjectTypeDef] = {}
         self._links: list[LinkTypeDef] = []
         self._actions: dict[str, ActionDef] = {}
+        self._extra_checks: list[SelfCheckFn] = []
 
     # ---- 注册（重复注册直接报错，防静默覆盖） ----
     def register_object_type(self, defn: ObjectTypeDef) -> None:
@@ -90,12 +95,28 @@ class Registry:
     def action(self, name: str) -> ActionDef:
         return self._actions[name]
 
+    # ---- 扩展点：模块级 self_check（如 DES 对象的实例级检查，避免 registry 与业务对象耦合） ----
+    def add_self_check(self, fn: SelfCheckFn) -> None:
+        """注册额外 self_check 检查 fn(registry, instance_data) -> list[Issue]。
+
+        由业务对象模块（如 src/ontology/des_objects.py）挂载，registry 保持通用。
+        """
+        self._extra_checks.append(fn)
+
     # ---- 启动自检（§3.2：主键唯一 / 链接双向命名 / 动作参数完整 / 状态归属标注） ----
-    def self_check(self) -> list[Issue]:
+    def self_check(
+        self, instance_data: dict[str, list[dict[str, Any]]] | None = None
+    ) -> list[Issue]:
+        """启动自检；instance_data（{类型名: [行 dict]}）供扩展检查做实例级校验。
+
+        不传 instance_data 时仅做 schema 层检查（与 S1 行为完全一致）。
+        """
         issues: list[Issue] = []
         issues.extend(self._check_objects())
         issues.extend(self._check_links())
         issues.extend(self._check_actions())
+        for fn in self._extra_checks:
+            issues.extend(fn(self, instance_data))
         return issues
 
     def _check_objects(self) -> list[Issue]:

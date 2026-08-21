@@ -51,8 +51,9 @@ def assert_ok(resp):
 
 def test_meta_schema_counts(client):
     body = assert_ok(client.get("/meta/schema"))
-    assert len(body["data"]["objects"]) == 8
-    assert len(body["data"]["links"]) == 8
+    # S2 P1a：DES 对象（Material/Code）+ hasCode 链接与 S1 8 对象同一注册表，共 10 对象/9 链接
+    assert len(body["data"]["objects"]) == 10
+    assert len(body["data"]["links"]) == 9
     assert len(body["data"]["actions"]) == 6
 
 

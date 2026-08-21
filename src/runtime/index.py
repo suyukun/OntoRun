@@ -47,13 +47,20 @@ class ObjectIndex:
     # ---- 加载 ----
 
     def load_all(self, conn: sqlite3.Connection) -> None:
-        """从源系统库全量加载 8 个对象类型并重建链接索引。"""
+        """从源系统库全量加载对象类型并重建链接索引。
+
+        本库无该类型的源表时保留空 bucket（如零售库无 DES 物化表 Material/Code），
+        保证 list_all 返回空列表而非 KeyError；源表存在才读行。
+        """
         self._objects.clear()
         self._out.clear()
         self._in.clear()
         conn.row_factory = sqlite3.Row
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         for obj in self._registry.object_types():
             bucket = self._objects.setdefault(obj.name, {})
+            if obj.source_table not in tables:
+                continue  # 该类型的源表不在本库 → 本库无实例
             for row in conn.execute(f"SELECT * FROM {obj.source_table}"):
                 attrs = dict(row)
                 self._apply_derived(obj.name, attrs)
