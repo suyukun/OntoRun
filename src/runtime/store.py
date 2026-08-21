@@ -375,6 +375,29 @@ GOVERNANCE_SCHEMA: str = (
     .replace("_STATUS_VALUES_", _sql_in(REVIEW_STATUSES))
 )
 
+# ---------------------------------------------------------------------------
+# SESSIONS_SCHEMA —— 会话持久化（P4，议题 4 形态：SQLite 单表 + TTL + 审计关联）
+# ---------------------------------------------------------------------------
+SESSIONS_SCHEMA: str = """
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id    TEXT PRIMARY KEY,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  pending_json  TEXT NOT NULL DEFAULT '{}',   -- 待确认 ToolCall JSON（双签恢复）
+  ttl_class     TEXT NOT NULL DEFAULT 'standard' CHECK (ttl_class IN ('standard','sensitive','transient'))
+);
+CREATE TABLE IF NOT EXISTS messages (
+  message_id    TEXT PRIMARY KEY,
+  session_id    TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('system','user','assistant','tool')),
+  content       TEXT,
+  tool_call_id  TEXT,
+  tool_calls_json TEXT NOT NULL DEFAULT '[]',
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, created_at);
+"""
+
 
 def _patch_action_runs_executed_by_check(conn: sqlite3.Connection) -> None:
     """v4 patch（TD-9）：action_runs.executed_by 补 CHECK 白名单。
@@ -672,6 +695,8 @@ class Store:
             # （不 bump schema_version，沿用 v2/v3/v4「幂等补丁只追加 note 不升号」先例）。
             conn.executescript(GOVERNANCE_SCHEMA)
             _apply_governance_patches(conn)
+            # P4 会话段：sessions/messages 表（幂等 CREATE IF NOT EXISTS）
+            conn.executescript(SESSIONS_SCHEMA)
             # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "

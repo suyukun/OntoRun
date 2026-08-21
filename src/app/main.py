@@ -175,11 +175,8 @@ def create_app(
         rebuild_seed=rebuild_seed,
     )
 
-    # 会话管理器（MVP 内存实现）
-    sessions = SessionManager()
-
-    # 注册 agent 端点
-    _register_agent_routes(app, sessions)
+    # 注册 agent 端点（P4：会话持久化，SessionManager 在路由内构造并注入 store + agent 工厂）
+    _register_agent_routes(app, app.state.runtime.store)
 
     # 注册错误处理
     _register_error_handlers(app)
@@ -187,7 +184,7 @@ def create_app(
     return app
 
 
-def _register_agent_routes(app: FastAPI, sessions: SessionManager) -> None:
+def _register_agent_routes(app: FastAPI, store) -> None:
     """挂载 /agent/chat 和 /agent/confirm 端点。"""
     import json as _json
 
@@ -203,6 +200,9 @@ def _register_agent_routes(app: FastAPI, sessions: SessionManager) -> None:
         executor = RestActionExecutor(engine=rt.engine, query=rt.query)
         provider = get_provider(provider_name)
         return Agent(registry=registry, provider=provider, executor=executor)
+
+    # P4：会话持久化（SQLite 写-through + 重启恢复）
+    sessions = SessionManager(store, agent_factory=_get_agent)
 
     @app.post("/agent/chat")
     async def agent_chat(body: ChatRequest):
@@ -234,6 +234,9 @@ def _register_agent_routes(app: FastAPI, sessions: SessionManager) -> None:
         else:
             # 新一轮消息到来：作废旧提议
             sessions.set_pending(session_id, None)
+
+        # P4：每轮写-through 落会话历史（会话重启不丢）
+        sessions.persist(session_id, agent)
 
         need_confirm_dict = None
         if turn.need_confirm:

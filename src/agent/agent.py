@@ -126,6 +126,17 @@ class Agent:
         self._history: list[ChatMessage] = []
         self._pending: ToolCall | None = None
 
+    @property
+    def history(self) -> list[ChatMessage]:
+        """会话历史（P4 持久化：导出供 SQLite 存储）。"""
+        return list(self._history)
+
+    def restore_history(self, messages: list[ChatMessage]) -> None:
+        """恢复历史（P4 会话重启不丢：从存储回放，不含 system prompt）。"""
+        self._history = [
+            m for m in messages if m.role in ("user", "assistant", "tool")
+        ]
+
     # ---- 对外入口 ----
 
     def run_turn(self, user_message: str) -> AgentTurn:
