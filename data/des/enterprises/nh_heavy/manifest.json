@@ -1,0 +1,82 @@
+{
+  "enterprise": "nh_heavy",
+  "seed": 20260915,
+  "data_version": "P1b-1",
+  "config_sha256": "ef4043e1186ae6b2d187c370bc16755cf11b39c72e1141748b7e49c9005a4767",
+  "total_rows": 25000,
+  "tables": {
+    "erp.KNA1": {
+      "rows": 250,
+      "sha256": "8b9e08fde6b455caebabcfef47ef084118747a7017b9ecead8c7150c3cf8ed1d"
+    },
+    "erp.MARA": {
+      "rows": 200,
+      "sha256": "d1340df893395ff6d79f46c6cc203a54171609598944d02866bdf37a7422ff05",
+      "multi_code_count": 30
+    },
+    "erp.MARC": {
+      "rows": 400,
+      "sha256": "6bf47587728a86cd11762e0e144643cfd7e210617793421b662dfa13a6a9c25c"
+    },
+    "erp.MARD": {
+      "rows": 600,
+      "sha256": "51293fee0127f1993be76b286b0f42ee0c82530f7e76fe745aeb5e37f0aca0da"
+    },
+    "erp.MAST": {
+      "rows": 250,
+      "sha256": "7eff32e73b249d4bd149d76a398f3f172f98734e20900f97c49f63e63a11aef8"
+    },
+    "erp.STPO": {
+      "rows": 1250,
+      "sha256": "c21defbb2763edabb7c195d06f97169e7d3c17acf816a7d75b644daf5a0afe45"
+    },
+    "erp.VBAK": {
+      "rows": 1000,
+      "sha256": "534614a5ee4f3b761dbd3b29ec37a8fc0bb2adca4ce3ff0690cfaa698d457541"
+    },
+    "erp.VBAP": {
+      "rows": 2500,
+      "sha256": "b838434a13038e255b52bc7a31bc8e6c53fc277e8a636bb59e730fa23f8f1eec"
+    },
+    "fin.ACDOCA": {
+      "rows": 1025,
+      "sha256": "db81512cc86054212a6e37c3c59dd198216533a0be7ac66b1fa87497b29e9833"
+    },
+    "mes.AFPO": {
+      "rows": 3000,
+      "sha256": "24017a7ecdb9fb56c2cb9821bd2082cb6618f7f253466e4c7e5355e1e91e0146"
+    },
+    "mes.AUFK": {
+      "rows": 2250,
+      "sha256": "ba0ec6bffbfdd8a14e032e11caa03042fdaaf656085d721caad7d36adb40c48d"
+    },
+    "mes.COFV": {
+      "rows": 4500,
+      "sha256": "78f4c9546c1642912ee0e57feb0013b0aa126c130fe34a64552945005191c132"
+    },
+    "mes.MPLA": {
+      "rows": 200,
+      "sha256": "9cec20bc0e1fddbd2f7e636bded8edd410ed7a0f1ce9a19a3e64a0f8f1ba716b"
+    },
+    "scm.EKKO": {
+      "rows": 750,
+      "sha256": "11ad441eeca1e18ccb848210128f731ea674ddec3ce2a6883842cabd1768c47b"
+    },
+    "scm.EKPO": {
+      "rows": 2000,
+      "sha256": "954972b630a5985170bfc2e6442f8d83ca8ffe998d1c2bca85692e530c68ea56"
+    },
+    "scm.LFA1": {
+      "rows": 125,
+      "sha256": "6e03ad2cb065d7610b4bd368591656f1978b60b378f02c0dfcaf734087c2bbc2"
+    },
+    "wms.MSEG": {
+      "rows": 4500,
+      "sha256": "b5f3aea2b5b2fa8593378c30642157ade8fe3d505e7646e50f8bec8355d36ec7"
+    },
+    "wms.WMMD": {
+      "rows": 200,
+      "sha256": "7f0dfc29bef6c372a631f7d033e41ab99463cff14e21a28ad1d688febf8de8c8"
+    }
+  }
+}

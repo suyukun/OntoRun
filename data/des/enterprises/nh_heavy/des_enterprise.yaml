@@ -1,0 +1,19 @@
+# data/des/enterprises/nh_heavy/des_enterprise.yaml —— 制造业样例企业覆盖层（第二企业，验证模板复用）
+# 依据 docs/P1b-DES-横向铺开设计_v0.1.md（§7.2：表规格/行数默认放模板层，企业层只声明身份 + 覆盖；
+# §7.2 R7：第二企业小规模样例 ~2.5 万行，验证「同模板不同企业」复用性，不参与 1M 量级门禁）。
+# 继承：加载器 deep_merge(des_industry_template.yaml, 本文件)；
+#       全 18 表注册表（kind/row_count/pk/depends_on/fk）、coding、injection 默认（rate/tolerance/field/
+#       legacy_pattern）、storage、seed_policy 全部继承行业模板 —— 本文件只写"企业要声明/要改"的差异：
+#       企业名 / 编码前缀 / seed / 旧码前缀（legacy_prefix，validate 必需，模板不提供企业前缀）。
+# 不改行业模板（复用而非改模板）；覆盖层仅差异，验证模板复用成立。
+inherit: des_industry_template.yaml
+
+enterprise:
+  name: "宁海重工（Ninghai Heavy Industry）"
+  code_prefix: "NH"         # 企业编码前缀 → 目录名 nh_heavy、旧码前缀 NH-
+  seed: 20260915            # 生成 seed（确定性锚：同 seed 同配置 → SHA256 相同，见 P1b §5）
+
+  injection:
+    multi_code:
+      legacy_prefix: "NH"   # 旧码前缀（旧码格式继承模板 legacy_pattern "{prefix}-{year}{seq:05d}"
+                            #   → NH-202600001…；rate/tolerance/field 均继承模板，不重写）
