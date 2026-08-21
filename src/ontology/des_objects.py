@@ -2,6 +2,11 @@
 + P2 ChatBI 主体对象（Vendor / InventoryLocation / FinanceEntry，2026-08-21 Jack 拍板注册）。
 +（Customer 主体对象复用 S1 零售 Customer，同一注册表，见 src/ontology/objects.py。）
 
+source_table 语义（P2 接线，报告 §5 缺口修复）：一律指向本体物化器落盘的表名
+（material/codes/vendor/inventory_location/finance_entry，见 src/des/materialize.py），
+与 Material/Code 同范式；权威源表（scm.LFA1 / erp.MARD / fin.ACDOCA）语义由指标注册表
+source_tables 与物化 SQL 承载——注册对象即可查询对象，不再出现「已注册但源表未接线」。
+
 依据 docs/P1a-本体映射与查询契约设计_v0.1.md §1.2/§1.4：
 - Material = 跨 3 源系统（ERP/MES/WMS）物化的物料概念，join key = MATNR，字段内嵌 4 码位
   （属性承载查询：filters/聚合直接命中，不必每次遍历链接，设计 §1.1）；
@@ -101,6 +106,7 @@ class FinanceEntry(BaseModel):
     amount: float = own(OWN_SOURCE, "金额（借正/贷负，权威列 FIN.ACDOCA.WSL，指标度量 amount）")
     post_date: str = own(OWN_SOURCE, "过账日期 YYYY-MM-DD（权威列 FIN.ACDOCA.BUDAT，指标月维度源）")
     ref_type: str = own(OWN_SOURCE, "参考单据类型 SO/PO/MV（权威列 FIN.ACDOCA.REF_TYPE，指标维度 ref_type）")
+    ref_doc: str = own(OWN_SOURCE, "参考单据号（权威列 FIN.ACDOCA.REF_DOC；SO=订单号，退款链路查询用）")
 
 
 # hasCode 链接：Material 1:N Code（1 概念多编码），FK 在 Code（target 侧）——
@@ -142,7 +148,7 @@ DES_OBJECT_TYPES: list[ObjectTypeDef] = [
         model=Vendor,
         pk_field="vendor_id",
         title_field="vendor_id",
-        source_table="scm.LFA1",
+        source_table="vendor",
     ),
     ObjectTypeDef(
         name="InventoryLocation",
@@ -151,7 +157,7 @@ DES_OBJECT_TYPES: list[ObjectTypeDef] = [
         model=InventoryLocation,
         pk_field="location_id",
         title_field="location_id",
-        source_table="erp.MARD",
+        source_table="inventory_location",
     ),
     ObjectTypeDef(
         name="FinanceEntry",
@@ -160,7 +166,7 @@ DES_OBJECT_TYPES: list[ObjectTypeDef] = [
         model=FinanceEntry,
         pk_field="entry_id",
         title_field="entry_id",
-        source_table="fin.ACDOCA",
+        source_table="finance_entry",
     ),
 ]
 

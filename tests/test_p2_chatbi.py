@@ -1,9 +1,9 @@
 """P2 ChatBI 门禁测试（docs/P2-ChatBI闭环设计_v0.1.md §6 五门禁 + §1-3 可机验断言）。
 
 覆盖（对齐 P2 五门禁 + 上篇 §1/§2/§3 断言清单）：
-- 指标注册表（§1.2/§1.3）：load_metrics 15 条 + M1-M7 校验 fail-fast（未知对象/未知来源表/
-  未知列/非法聚合/类型不兼容/粒度重复/重复 metric_id 拒绝）；
-- 物化 + C4 reconcile（§2.1-§2.3）：materialize_metrics 跑通（15 表行数>0 + 逐指标 reconcile
+- 指标注册表（§1.2/§1.3）：load_metrics 26 条 + M1-M9 校验 fail-fast（未知对象/未知来源表/
+  未知列/非法聚合/类型不兼容/粒度重复/重复 metric_id/命名与 transform/M9 可选扩展字段拒绝）；
+- 物化 + C4 reconcile（§2.1-§2.3）：materialize_metrics 跑通（26 表行数>0 + 逐指标 reconcile
   全绿 + 版本戳提交）、reconcile_metrics 全 diff=0（R1）、check_metrics_version 漂移检出（R3/T3）；
 - 契约 v0.2 metric 执行（§3.1/§3.2）：sales_amount_by_mat_month + 维度过滤返回行数与值
   与源库直算一致；非法 metric_id/未知维度键 fail-closed；T3 版本守卫漂移拒答；V5 结果护栏；
@@ -30,7 +30,7 @@ import pytest
 from src.des.config import load_config
 from src.des.contract import (
     DQ01_CONTRACT,
-    RESULT_LIMIT_FLOOR,
+    MAX_TOP_N,
     ContractError,
     ContractExecutor,
     PermissionContext,
@@ -66,26 +66,11 @@ _CONFIG = load_config(ENTERPRISE_CODE)
 _MARA_ROWS = _CONFIG["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
 _MULTI_RATE = _CONFIG["injection"]["multi_code"]["rate"]
 EXPECTED_MULTI = round(_MARA_ROWS * _MULTI_RATE)  # DQ-01 = round(N×rate)（当前配置 = 1200）
-EXPECTED_METRIC_COUNT = 15  # §1.5 五组 15 指标
-RESULT_LIMIT = max(RESULT_LIMIT_FLOOR, 2 * EXPECTED_MULTI)  # V5 护栏上限（与执行器同源派生）
-
-_METRIC_IDS = {
-    "mat_count_by_type_factory",
-    "mat_count_by_abc_factory",
-    "mat_count_by_group",
-    "sales_amount_by_mat_month",
-    "sales_amount_by_customer_month",
-    "sales_qty_by_mat_month",
-    "stock_balance_by_location",
-    "stock_balance_by_mat_location",
-    "stock_flow_by_location",
-    "purchase_amount_by_vendor_month",
-    "purchase_qty_by_mat_month",
-    "purchase_order_count_by_vendor_month",
-    "finance_amount_by_account_month",
-    "finance_amount_by_costcenter_month",
-    "finance_amount_by_reftype",
-}
+# 指标集单一事实来源 = 注册表（当前 26 指标，禁硬编码 15）：计数与 id 集均从注册表派生，
+# 后续增补指标免手改断言（对齐「期望值全部从生效配置派生」纪律）
+_METRIC_REGISTRY = load_metrics(config=_CONFIG)
+EXPECTED_METRIC_COUNT = len(_METRIC_REGISTRY.metrics)
+_METRIC_IDS = {m.metric_id for m in _METRIC_REGISTRY.metrics}
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +177,8 @@ def _source_direct_sales(matnr: str) -> list[dict]:
 # ===========================================================================
 # ① 指标注册表（设计 §1.2/§1.3）
 # ===========================================================================
-def test_metric_registry_loads_15() -> None:
-    """load_metrics：默认注册表 YAML 加载 15 条，metric_id 全局唯一（M7）。"""
+def test_metric_registry_loads_expected() -> None:
+    """load_metrics：默认注册表 YAML 加载全部指标（当前 26），metric_id 全局唯一（M7）。"""
     reg = load_metrics()
     ids = {m.metric_id for m in reg.metrics}
     assert len(reg.metrics) == EXPECTED_METRIC_COUNT
@@ -202,12 +187,12 @@ def test_metric_registry_loads_15() -> None:
 
 def test_metrics_by_object_index(metrics: MetricRegistry) -> None:
     """§1.4 对象 → 指标索引：Material 指向 7 个；4 个主体对象全部已注册（解除 planned，M1 前置）。"""
-    assert len(metrics.metrics_by_object("Material")) == 7
-    assert len(metrics.metrics_by_object("Customer")) == 1
-    assert len(metrics.metrics_by_object("Vendor")) == 2
+    assert len(metrics.metrics_by_object("Material")) == 11
+    assert len(metrics.metrics_by_object("Customer")) == 5
+    assert len(metrics.metrics_by_object("Vendor")) == 3
     assert len(metrics.metrics_by_object("InventoryLocation")) == 2
-    assert len(metrics.metrics_by_object("FinanceEntry")) == 3
-    # 15 指标全部挂载到 5 个已注册主体对象（Jack 2026-08-21 拍板，无 pending 待补录）
+    assert len(metrics.metrics_by_object("FinanceEntry")) == 5
+    # 26 指标全部挂载到 5 个已注册主体对象（Jack 2026-08-21 拍板，无 pending 待补录）
     subject = ("Material", "Customer", "Vendor", "InventoryLocation", "FinanceEntry")
     assert sum(len(metrics.metrics_by_object(o)) for o in subject) == EXPECTED_METRIC_COUNT
     assert not hasattr(metrics, "pending_registration")  # planned 概念已移除
@@ -358,7 +343,7 @@ def test_metric_validation_m7_duplicate_id() -> None:
 # ② 物化 + C4 reconcile（设计 §2）
 # ===========================================================================
 def test_materialize_metrics_full(mat_result: MetricsMaterializationResult) -> None:
-    """materialize_metrics 跑通：metrics.db 生成、15 表行数>0、逐指标 reconcile 全绿、版本戳提交。"""
+    """materialize_metrics 跑通：metrics.db 生成、26 表行数>0、逐指标 reconcile 全绿、版本戳提交。"""
     assert mat_result.metrics_db_path.is_file()
     assert set(mat_result.tables) == _METRIC_IDS
     assert all(rows > 0 for rows in mat_result.tables.values())
@@ -421,7 +406,7 @@ def test_reconcile_detects_meta_row_count_mismatch(mat_result, tmp_path) -> None
 def test_check_metrics_version_ok(
     mat_result: MetricsMaterializationResult,
 ) -> None:
-    """T3 版本守卫：全绿时返回 15 指标摘要，data_version/config_sha256 与 manifest 一致。"""
+    """T3 版本守卫：全绿时返回全部指标摘要（当前 26），data_version/config_sha256 与 manifest 一致。"""
     summary = check_metrics_version(ENTERPRISE_CODE)
     man = json.loads((ENTERPRISE_DIR / "manifest.json").read_text(encoding="utf-8"))
     assert len(summary["metrics"]) == EXPECTED_METRIC_COUNT
@@ -623,15 +608,105 @@ def test_metric_missing_registry_fail_closed(
 
 
 def test_metric_v5_result_guard(executor: ContractExecutor) -> None:
-    """V5 结果护栏：未过滤大结果（77936 行 > 上限 2400）→ fail-closed 拒答。"""
+    """V5 结果护栏（red-team P3-9 按规模派生）：合法全表分析（物化表全量行）按规模放行；
+    结果超过规模派生上限（scale 被压低到远小于结果）仍 fail-closed 拒答——护栏接线未退化。"""
     contract = {
         "contract_version": "0.2",
         "metric": {"metric_id": "sales_amount_by_mat_month"},
     }
     assert validate_contract(contract, build_registry(), load_metrics(config=_CONFIG)) == []
-    with pytest.raises(ContractError) as exc:
-        executor.execute(contract)
-    assert "护栏" in str(exc.value) and str(RESULT_LIMIT) in str(exc.value)
+    conn = duckdb.connect(str(METRICS_DB_PATH), read_only=True)
+    try:
+        scale = conn.execute(
+            "SELECT row_count FROM metric_meta "
+            "WHERE metric_id='sales_amount_by_mat_month'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    # 按规模派生：护栏上限 = max(1000, 物化表行数) = 物化表行数 → 全表分析放行
+    result = executor.execute(contract)
+    assert result["count"] == scale > 0
+    # 护栏仍有效：真实数据无法超出自身规模上限（rows ≤ 物化表行数），故用 scale 注入模拟
+    # 元数据异常态（scale 远小于结果）→ 上限回落 1000 → 拒答，验证 _result_limit(scale) 接线
+    original = executor._metric_scale
+    executor._metric_scale = lambda conn, md: 10  # type: ignore[method-assign]
+    try:
+        with pytest.raises(ContractError) as exc:
+            executor.execute(contract)
+        assert "护栏" in str(exc.value)
+    finally:
+        executor._metric_scale = original
+
+
+def test_metric_top_n_limits_rows(executor: ContractExecutor) -> None:
+    """v0.2 表达力 Top-N（报告 §6 J4）：metric.topN 执行 LIMIT，返回 ≤N 行且按度量值降序；
+    有 group_by 同样生效；非法 topN（0/超大/非整数）fail-closed 拒答。"""
+    contract = {
+        "contract_version": "0.2",
+        "metric": {"metric_id": "sales_amount_by_mat_month", "topN": 5},
+    }
+    assert validate_contract(contract, build_registry(), load_metrics(config=_CONFIG)) == []
+    result = executor.execute(contract)
+    assert 0 < result["count"] <= 5
+    vals = [row["sales_amount"] for row in result["rows"]]
+    assert vals == sorted(vals, reverse=True)  # Top-N = 按度量值降序取前 N
+    # 有 group_by 的 topN 同样生效（重聚合后按度量值降序截断）
+    gb_contract = {
+        "contract_version": "0.2",
+        "metric": {
+            "metric_id": "sales_amount_by_mat_month",
+            "topN": 3,
+            "group_by": ["month"],
+        },
+    }
+    gb_result = executor.execute(gb_contract)
+    assert 0 < gb_result["count"] <= 3
+    assert [r["sales_amount"] for r in gb_result["rows"]] == sorted(
+        (r["sales_amount"] for r in gb_result["rows"]), reverse=True
+    )
+    # 非法 topN → 校验违规（fail-closed）
+    for bad in (0, MAX_TOP_N + 1, "5", 3.5):
+        bad_contract = {
+            "contract_version": "0.2",
+            "metric": {"metric_id": "sales_amount_by_mat_month", "topN": bad},
+        }
+        assert validate_contract(bad_contract, build_registry(), load_metrics(config=_CONFIG)), f"topN={bad!r} 应被拒"
+
+
+def test_metric_measure_filter_executes(executor: ContractExecutor) -> None:
+    """v0.2 表达力按度量过滤（报告 §6 F2/F4）：dimension_filters 支持度量列（如 sales_amount > 阈值）；
+    非法度量过滤值（非数值）fail-closed 拒答（不静默忽略）。"""
+    conn = duckdb.connect(str(METRICS_DB_PATH), read_only=True)
+    try:
+        thr = conn.execute(
+            "SELECT approx_quantile(sales_amount, 0.9) "
+            "FROM metric_sales_amount_by_mat_month"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    contract = {
+        "contract_version": "0.2",
+        "metric": {
+            "metric_id": "sales_amount_by_mat_month",
+            "dimension_filters": {"sales_amount": {"op": "gt", "value": float(thr)}},
+        },
+    }
+    assert validate_contract(contract, build_registry(), load_metrics(config=_CONFIG)) == []
+    result = executor.execute(contract)
+    assert result["count"] > 0
+    assert all(row["sales_amount"] > thr for row in result["rows"])
+    # 非法度量过滤值（非数值）→ 校验违规 + 执行器拒答
+    bad = {
+        "contract_version": "0.2",
+        "metric": {
+            "metric_id": "sales_amount_by_mat_month",
+            "dimension_filters": {"sales_amount": {"op": "gt", "value": "abc"}},
+        },
+    }
+    violations = validate_contract(bad, build_registry(), load_metrics(config=_CONFIG))
+    assert any("度量过滤值类型应为数值" in v for v in violations)
+    with pytest.raises(ContractError):
+        executor.execute(bad)
 
 
 # ===========================================================================

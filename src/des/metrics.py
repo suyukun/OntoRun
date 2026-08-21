@@ -1,10 +1,13 @@
-"""P2 ChatBI 指标注册表加载 + 校验（M1-M8）。
+"""P2 ChatBI 指标注册表加载 + 校验（M1-M9）。
 
-依据 docs/P2-ChatBI闭环设计_v0.1.md §1（指标模型 7 字段 / 校验 M1-M8 / 5 组 15 指标清单 §1.5）：
+依据 docs/P2-ChatBI闭环设计_v0.1.md §1（指标模型 7 字段 / 校验 M1-M8 / 5 组 15 指标清单 §1.5）
++ docs/P2-headtohead-实验报告.md §6（语义面扩展：退款/收货/日粒度等 ~10 新指标 + 可选扩展字段）：
 - 指标 = 挂在本体对象上的可预聚合度量（对象 → 指标定义 → 物化结果），本注册表 = 单一事实来源；
 - 加载即校验，任一违规 fail-fast（对齐 contract.py V1-V5 与 config.py 的 fail-fast 纪律）；
 - M1-M8 机器校验（对象白名单 / 来源表白名单 / 字段存在 / 聚合合法 / 类型兼容 / 粒度唯一 /
   id 唯一 / 命名与 transform 白名单——M8 防未来注册表成为半可信输入时的物化 SQL 注入面）；
+- M9 可选扩展字段校验（row_filter / measure_scale / joins，§1.2 可选扩展字段范式 + 报告 §6）：
+  行级过滤 / 度量缩放（如 -1 翻转借贷符号）/ 显式 join 边（配置 fk 无法派生的连接）；
 - 5 个指标主体对象（Material + Customer/Vendor/InventoryLocation/FinanceEntry）均已注册
   （2026-08-21 Jack 拍板解除 planned 标记），M1 一律要求 object_type 可解析到已注册对象。
 """
@@ -33,6 +36,9 @@ AGG_FUNCTIONS = ("sum", "count", "count_distinct", "avg", "min", "max")
 # M5：sum/avg/min/max 要求数值度量列（REAL）；count/count_distinct 允许任意列或 '*'
 NUMERIC_AGGS = ("sum", "avg", "min", "max")
 ANY_COLUMN_AGGS = ("count", "count_distinct")
+
+# 可选扩展字段 row_filter 操作符白名单（报告 §6 J3/J4/F4/T4 口径：行级谓词，M8 同源防注入面）
+ROW_FILTER_OPS = ("eq", "ne", "in", "gt", "ge", "lt", "le", "is_null", "is_not_null")
 
 # M1 已注册 DES 主体对象（P1a 注册 Material/Code；P2 注册 Customer/Vendor/InventoryLocation/
 # FinanceEntry——2026-08-21 Jack 拍板解除 planned 标记；Customer 复用 S1 零售 Customer）
@@ -271,8 +277,38 @@ class Measure:
 
 
 @dataclass(frozen=True)
+class RowFilter:
+    """指标行级过滤（可选扩展字段，报告 §6 J3/J4/F4/T4 口径）：源列谓词，值全为注册表常量。
+
+    op ∈ ROW_FILTER_OPS；value 为常量标量（op=in 时为列表，is_null/is_not_null 时省略）。
+    作用于源表行（聚合前过滤），物化 SQL 与 reconcile SQL 同源于此（R3 口径单点）。
+    值/字段均来自注册表常量（与表名/列名同信任级，M8 纵深防御仍防注入面）。
+    """
+
+    source: str  # 'TABLE.COLUMN'（表名省略系统前缀，如 'MSEG.BWART'）
+    op: str
+    value: Any = None
+
+
+@dataclass(frozen=True)
+class JoinSpec:
+    """显式 join 边（可选扩展字段）：left/right = 'TABLE.COLUMN'（表名省略系统前缀）。
+
+    用于配置 fk 无法派生的连接（如 ACDOCA.REF_DOC → VBAK.VBELN 多态引用——配置 fk 只声明
+    REF_DOC→erp.VBAP 单边）。left/right 表必须 ∈ source_tables 且列存在（M3）。
+    """
+
+    left: str
+    right: str
+
+
+@dataclass(frozen=True)
 class MetricDef:
-    """单条指标定义（核心 7 字段，§1.2）。"""
+    """单条指标定义（核心 7 字段 §1.2 + 可选扩展字段 row_filter/measure_scale/joins）。
+
+    row_filter：行级过滤（报告 §6 退款/收货口径）；measure_scale：度量缩放系数（如 -1
+    翻转借贷符号）；joins：显式 join 边（配置 fk 无法派生时）。三者均为可选、校验通过后不可变。
+    """
 
     metric_id: str
     object_type: str
@@ -281,6 +317,9 @@ class MetricDef:
     agg_function: str
     definition: str
     source_tables: tuple[str, ...]
+    row_filter: tuple[RowFilter, ...] = ()
+    measure_scale: float = 1.0
+    joins: tuple[JoinSpec, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -406,6 +445,38 @@ def _structure_violations(raw: Any, idx: int) -> tuple[list[str], dict | None]:
         or not all(isinstance(t, str) and t for t in st)
     ):
         v.append(f"指标 #{idx}: source_tables 必须为非空字符串数组")
+    # 可选扩展字段结构（§1.2 可选扩展字段范式）：row_filter / measure_scale / joins
+    rf = raw.get("row_filter")
+    if rf is not None:
+        if not isinstance(rf, list):
+            v.append(f"指标 #{idx}: row_filter 必须为数组")
+        else:
+            for pos, f in enumerate(rf):
+                if (
+                    not isinstance(f, dict)
+                    or not isinstance(f.get("source"), str)
+                    or not f.get("source")
+                    or not isinstance(f.get("op"), str)
+                    or not f.get("op")
+                ):
+                    v.append(f"指标 #{idx}: row_filter[{pos}] 必须含非空 source/op")
+    ms = raw.get("measure_scale")
+    if ms is not None and (isinstance(ms, bool) or not isinstance(ms, (int, float))):
+        v.append(f"指标 #{idx}: measure_scale 必须为数值")
+    js = raw.get("joins")
+    if js is not None:
+        if not isinstance(js, list):
+            v.append(f"指标 #{idx}: joins 必须为数组")
+        else:
+            for pos, j in enumerate(js):
+                if (
+                    not isinstance(j, dict)
+                    or not isinstance(j.get("left"), str)
+                    or not j.get("left")
+                    or not isinstance(j.get("right"), str)
+                    or not j.get("right")
+                ):
+                    v.append(f"指标 #{idx}: joins[{pos}] 必须含非空 left/right")
     return (v, raw if not v else None)
 
 
@@ -515,6 +586,53 @@ def _check_m8_naming_transform(raw: dict, idx: int) -> list[str]:
     return v
 
 
+def _check_m9_optional_fields(raw: dict, idx: int) -> list[str]:
+    """M9 可选扩展字段校验（row_filter/measure_scale/joins，§1.2 可选扩展字段范式 + 报告 §6）。
+
+    - row_filter：source 解析到来源表列（M3 同源）；op ∈ ROW_FILTER_OPS；is_null/is_not_null 不带
+      value，in 必须非空数组，其余必须带 value；
+    - measure_scale：结构已验数值；≠1 时仅 sum 允许（-1×SUM=Σ(-1×)，其余聚合缩放语义会翻转 min/max）；
+    - joins：left/right 解析到来源表列（M3 同源），表名省略系统前缀（VBAP→erp.VBAP 唯一命中）。
+    """
+    v: list[str] = []
+    st = tuple(raw["source_tables"])
+    for pos, f in enumerate(raw.get("row_filter") or []):
+        resolved = _resolve_source(f["source"], st)
+        if resolved is None:
+            v.append(f"指标 #{idx}: row_filter[{pos}] source 无法解析到来源表（M9）: {f['source']!r}")
+        else:
+            table_id, column = resolved
+            if column not in SOURCE_COLUMNS.get(table_id, {}):
+                v.append(f"指标 #{idx}: row_filter[{pos}] 列不存在（M9）: {table_id}.{column}")
+        op = f.get("op")
+        if op not in ROW_FILTER_OPS:
+            v.append(f"指标 #{idx}: row_filter[{pos}] op 非法（M9）: {op!r}（应为 {list(ROW_FILTER_OPS)}）")
+            continue
+        if op in ("is_null", "is_not_null"):
+            if "value" in f:
+                v.append(f"指标 #{idx}: row_filter[{pos}] {op} 不得携带 value")
+            continue
+        if "value" not in f:
+            v.append(f"指标 #{idx}: row_filter[{pos}] op={op} 缺少 value")
+            continue
+        value = f["value"]
+        if op == "in" and (not isinstance(value, list) or not value):
+            v.append(f"指标 #{idx}: row_filter[{pos}] op=in 的 value 必须为非空数组")
+    ms = raw.get("measure_scale")
+    if ms is not None and float(ms) != 1.0 and raw.get("agg_function") != "sum":
+        v.append(f"指标 #{idx}: measure_scale≠1 仅 sum 允许（M9）: {ms!r} agg={raw.get('agg_function')!r}")
+    for pos, j in enumerate(raw.get("joins") or []):
+        for side in ("left", "right"):
+            resolved = _resolve_source(j[side], st)
+            if resolved is None:
+                v.append(f"指标 #{idx}: joins[{pos}].{side} 无法解析到来源表（M9）: {j[side]!r}")
+            else:
+                table_id, column = resolved
+                if column not in SOURCE_COLUMNS.get(table_id, {}):
+                    v.append(f"指标 #{idx}: joins[{pos}].{side} 列不存在（M9）: {table_id}.{column}")
+    return v
+
+
 def _to_metric(raw: dict) -> MetricDef:
     """把通过校验的裸 dict 转成不可变 MetricDef。"""
     dims = tuple(
@@ -529,6 +647,14 @@ def _to_metric(raw: dict) -> MetricDef:
         agg_function=raw["agg_function"],
         definition=raw["definition"],
         source_tables=tuple(raw["source_tables"]),
+        row_filter=tuple(
+            RowFilter(source=f["source"], op=f["op"], value=f.get("value"))
+            for f in raw.get("row_filter") or []
+        ),
+        measure_scale=float(raw.get("measure_scale") or 1.0),
+        joins=tuple(
+            JoinSpec(left=j["left"], right=j["right"]) for j in raw.get("joins") or []
+        ),
     )
 
 
@@ -567,6 +693,7 @@ def load_metrics(
             violations.extend(_check_m3_m5(valid, idx))
             violations.extend(_check_m6_grain_m7(valid, idx, seen_grains, seen_ids))
             violations.extend(_check_m8_naming_transform(valid, idx))
+            violations.extend(_check_m9_optional_fields(valid, idx))
         if violations:
             raise MetricError(
                 f"{yaml_path}: 指标 #{idx} 校验失败: " + "; ".join(violations)

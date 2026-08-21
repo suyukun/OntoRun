@@ -18,7 +18,13 @@ from typing import Any
 import duckdb
 
 from src.des.config import DEFAULT_ENTERPRISES_DIR, load_config
-from src.ontology.des_objects import Code, Material
+from src.ontology.des_objects import (
+    Code,
+    FinanceEntry,
+    InventoryLocation,
+    Material,
+    Vendor,
+)
 from src.ontology.registry import Issue, Registry
 
 MATERIAL_TABLE = "material"  # 物化表名（与 Material.source_table 对齐）
@@ -54,6 +60,33 @@ UNION ALL SELECT 'legacy' || ':' || old_code, 'legacy', old_code, matnr FROM mat
 ORDER BY code_id
 """
 
+# P2 主体对象接线（报告 §5 缺口修复：注册对象 ≠ 可查询对象，源表按对象模型字段映射物化）：
+# Vendor（scm.LFA1）/ InventoryLocation（erp.MARD 地点粒度）/ FinanceEntry（fin.ACDOCA）——
+# 物化成与对象 schema 同构的表（vendor/inventory_location/finance_entry），供 v0.1 对象路径查询。
+VENDOR_TABLE = "vendor"  # 物化表名（与 Vendor.source_table 对齐）
+INV_LOC_TABLE = "inventory_location"  # 物化表名（与 InventoryLocation.source_table 对齐）
+FINANCE_TABLE = "finance_entry"  # 物化表名（与 FinanceEntry.source_table 对齐）
+
+# 供应商物化：SCM.LFA1 → Vendor 模型字段（PK = LIFNR，设计 §1.5 表）
+_VENDOR_SQL = """
+SELECT LIFNR AS vendor_id, NAME1 AS name, ORT01 AS city, LAND1 AS country
+FROM sqlite_scan(?, 'LFA1') ORDER BY LIFNR
+"""
+
+# 库存地点物化：ERP.MARD 地点粒度（WERKS+LGORT 去重，PK = '{WERKS}|{LGORT}'，设计 §1.5 表）
+_INV_LOC_SQL = """
+SELECT WERKS || '|' || LGORT AS location_id, WERKS AS factory, LGORT AS location
+FROM (SELECT DISTINCT WERKS, LGORT FROM sqlite_scan(?, 'MARD')) AS d ORDER BY 1
+"""
+
+# 财务凭证行物化：FIN.ACDOCA → FinanceEntry 模型字段（PK = '{BELNR}|{POSNR}'，设计 §1.5 表）
+_FIN_SQL = """
+SELECT BELNR || '|' || POSNR AS entry_id, BELNR AS belnr, POSNR AS posnr,
+       RACCT AS account, KOSTL AS cost_center, WSL AS amount, BUDAT AS post_date,
+       REF_TYPE AS ref_type, REF_DOC AS ref_doc
+FROM sqlite_scan(?, 'ACDOCA') ORDER BY 1
+"""
+
 
 class MaterializeError(Exception):
     """物化失败（数据与本体契约不一致即 fail-fast，不静默）。"""
@@ -74,6 +107,9 @@ class DesMaterialization:
     material_count: int
     code_count: int
     legacy_re: re.Pattern[str]
+    vendor_count: int = 0  # P2 接线：SCM.LFA1 行数
+    inventory_location_count: int = 0  # P2 接线：MARD 地点粒度（WERKS+LGORT 去重）
+    finance_entry_count: int = 0  # P2 接线：FIN.ACDOCA 行数
     validation: dict[str, Any] = field(default_factory=dict)
 
 
@@ -100,18 +136,29 @@ def derive_legacy_regex(config: dict[str, Any]) -> re.Pattern[str]:
 
 
 def _db_paths(out_dir: Path) -> dict[str, Path]:
-    """企业目录下 3 个源系统库路径（设计 §5 布局）。"""
+    """企业目录下 5 个源系统库路径（设计 §5 布局；P2 接线补 scm/fin）。"""
     return {
         "erp": out_dir / "erp.db",
         "mes": out_dir / "mes.db",
         "wms": out_dir / "wms.db",
+        "scm": out_dir / "scm.db",
+        "fin": out_dir / "fin.db",
     }
 
 
 def _write_materialized_db(
-    path: Path, material_rows: list[dict[str, Any]], code_rows: list[dict[str, Any]]
+    path: Path,
+    material_rows: list[dict[str, Any]],
+    code_rows: list[dict[str, Any]],
+    vendor_rows: list[dict[str, Any]] | None = None,
+    inv_loc_rows: list[dict[str, Any]] | None = None,
+    finance_rows: list[dict[str, Any]] | None = None,
 ) -> None:
-    """把物化结果落盘为 SQLite 物化库（持久化可机验产物，幂等重建）。"""
+    """把物化结果落盘为 SQLite 物化库（持久化可机验产物，幂等重建）。
+
+    P2 接线：vendor/inventory_location/finance_entry 三表（对象 schema 同构）随 material/codes
+    一并落盘；不传时（仅 Material/Code 场景）保持旧 schema 行为。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.unlink()
@@ -130,6 +177,24 @@ def _write_materialized_db(
             );
             """
         )
+        if vendor_rows is not None:
+            conn.execute(
+                f"CREATE TABLE {VENDOR_TABLE} ("
+                "vendor_id TEXT PRIMARY KEY, name TEXT NOT NULL, city TEXT NOT NULL, "
+                "country TEXT NOT NULL)"
+            )
+        if inv_loc_rows is not None:
+            conn.execute(
+                f"CREATE TABLE {INV_LOC_TABLE} ("
+                "location_id TEXT PRIMARY KEY, factory TEXT NOT NULL, location TEXT NOT NULL)"
+            )
+        if finance_rows is not None:
+            conn.execute(
+                f"CREATE TABLE {FINANCE_TABLE} ("
+                "entry_id TEXT PRIMARY KEY, belnr TEXT NOT NULL, posnr TEXT NOT NULL, "
+                "account TEXT NOT NULL, cost_center TEXT NOT NULL, amount REAL NOT NULL, "
+                "post_date TEXT NOT NULL, ref_type TEXT NOT NULL, ref_doc TEXT)"
+            )
         conn.executemany(
             f"INSERT INTO {MATERIAL_TABLE} VALUES (?,?,?,?,?,?,?,?,?)",
             [tuple(r[c] for c in ("matnr", "name", "material_type", "plm_code", "mes_code",
@@ -141,6 +206,25 @@ def _write_materialized_db(
             [tuple(r[c] for c in ("code_id", "code_space", "value", "material_matnr"))
              for r in code_rows],
         )
+        if vendor_rows is not None:
+            conn.executemany(
+                f"INSERT INTO {VENDOR_TABLE} VALUES (?,?,?,?)",
+                [tuple(r[c] for c in ("vendor_id", "name", "city", "country"))
+                 for r in vendor_rows],
+            )
+        if inv_loc_rows is not None:
+            conn.executemany(
+                f"INSERT INTO {INV_LOC_TABLE} VALUES (?,?,?)",
+                [tuple(r[c] for c in ("location_id", "factory", "location"))
+                 for r in inv_loc_rows],
+            )
+        if finance_rows is not None:
+            conn.executemany(
+                f"INSERT INTO {FINANCE_TABLE} VALUES (?,?,?,?,?,?,?,?,?)",
+                [tuple(r[c] for c in ("entry_id", "belnr", "posnr", "account",
+                                      "cost_center", "amount", "post_date", "ref_type", "ref_doc"))
+                 for r in finance_rows],
+            )
         conn.commit()
     finally:
         conn.close()
@@ -193,15 +277,28 @@ def materialize_des(
     con.execute("LOAD sqlite")
     con.execute("CREATE TABLE material AS " + _MATERIAL_SQL, [str(db_paths["erp"]), str(db_paths["mes"]), str(db_paths["wms"])])
     con.execute("CREATE TABLE codes AS " + _CODES_SQL)
+    # P2 主体对象接线（报告 §5 缺口修复）：对象 schema 同构物化表，v0.1 对象路径可查询
+    con.execute("CREATE TABLE vendor AS " + _VENDOR_SQL, [str(db_paths["scm"])])
+    con.execute("CREATE TABLE inventory_location AS " + _INV_LOC_SQL, [str(db_paths["erp"])])
+    con.execute("CREATE TABLE finance_entry AS " + _FIN_SQL, [str(db_paths["fin"])])
 
     material_rows = rows_as_dicts(con, f"SELECT * FROM {MATERIAL_TABLE} ORDER BY matnr")
     code_rows = rows_as_dicts(con, f"SELECT * FROM {CODE_TABLE} ORDER BY code_id")
+    vendor_rows = rows_as_dicts(con, f"SELECT * FROM {VENDOR_TABLE} ORDER BY vendor_id")
+    inv_loc_rows = rows_as_dicts(con, f"SELECT * FROM {INV_LOC_TABLE} ORDER BY location_id")
+    finance_rows = rows_as_dicts(con, f"SELECT * FROM {FINANCE_TABLE} ORDER BY entry_id")
 
     # 1) Pydantic 模型校验（schema 一致性，fail-fast）
     for row in material_rows:
         Material.model_validate(row)
     for row in code_rows:
         Code.model_validate(row)
+    for row in vendor_rows:
+        Vendor.model_validate(row)
+    for row in inv_loc_rows:
+        InventoryLocation.model_validate(row)
+    for row in finance_rows:
+        FinanceEntry.model_validate(row)
 
     # 2) 跨系统一致性复核
     cross = _validate_cross_db(con, db_paths)
@@ -217,11 +314,16 @@ def materialize_des(
             raise MaterializeError("物化数据未通过 self_check: " + "; ".join(errors))
 
     material_db_path = out / MATERIALIZED_DB
-    _write_materialized_db(material_db_path, material_rows, code_rows)
+    _write_materialized_db(
+        material_db_path, material_rows, code_rows, vendor_rows, inv_loc_rows, finance_rows
+    )
 
     validation = {
         "material_count": len(material_rows),
         "code_count": len(code_rows),
+        "vendor_count": len(vendor_rows),
+        "inventory_location_count": len(inv_loc_rows),
+        "finance_entry_count": len(finance_rows),
         "cross_db": cross,
         "self_check_issues": [i.model_dump() for i in checks],
     }
@@ -232,6 +334,9 @@ def materialize_des(
         material_db_path=material_db_path,
         material_count=len(material_rows),
         code_count=len(code_rows),
+        vendor_count=len(vendor_rows),
+        inventory_location_count=len(inv_loc_rows),
+        finance_entry_count=len(finance_rows),
         legacy_re=derive_legacy_regex(config),
         validation=validation,
     )

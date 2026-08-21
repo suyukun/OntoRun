@@ -60,11 +60,14 @@ CONTRACT_KEYS = {
     "group_by", "link_traversal", "metric", "time_range",
 }
 FILTER_EXPR_KEYS = {"op", "value"}
-METRIC_KEYS = {"metric_id", "dimension_filters", "time_range", "group_by"}
+METRIC_KEYS = {"metric_id", "dimension_filters", "time_range", "group_by", "topN"}
 TIME_RANGE_KEYS = {"from", "to"}
-OPS = ("eq", "ne", "is_null", "is_not_null", "in")
+# v0.2 表达力扩展（报告 v0.2 建议③）：比较操作符 gt/ge/lt/le（阈值过滤 F2/F4，含度量列过滤）
+OPS = ("eq", "ne", "gt", "ge", "lt", "le", "is_null", "is_not_null", "in")
 AGG_FUNCS = ("count", "sum", "avg", "min", "max", "count_distinct")  # v0.2 追加 count_distinct
-RESULT_LIMIT_FLOOR = 1000  # V5 结果护栏下限（实际上限从配置派生 = max(下限, 2×round(N×rate))，禁硬编码）
+MAX_TOP_N = 1000  # metric.topN 上限（Top-N 契约表达力，J4 取前 5 等，防意外大返回）
+RESULT_LIMIT_FLOOR = 1000  # V5 结果护栏下限（实际上限 = max(下限, 规模系数×查询规模)，禁硬编码）
+RESULT_LIMIT_SCALE_FACTOR = 1  # V5 护栏规模系数（red-team P3-9：按查询对象/指标 row_count 派生，改 analytics 口径）
 MAX_AGGREGATIONS = 5  # V5
 MAX_GROUP_BY = 4  # V5
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # time_range ISO 日期（V2）
@@ -332,6 +335,17 @@ def _check_dimension_value_type(
         v.append(f"维度过滤值类型应为字符串: {fname}={value!r}")
 
 
+def _measure_value_check(md: MetricDef) -> Callable[[list[str], Any], None]:
+    """度量列过滤值检查（报告 v0.2 建议③ 按度量过滤）：度量列物化为 REAL → 数值；防注入（V4）。"""
+
+    def check(v: list[str], value: Any) -> None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            v.append(f"度量过滤值类型应为数值: {md.measure.name}={value!r}")
+        _check_sql_fragment(v, md.measure.name, value)
+
+    return check
+
+
 def _validate_time_range(v: list[str], tr: Any) -> None:
     """V2 time_range 校验：{from, to} ISO 日期字符串且 from ≤ to（设计 §3.1）。"""
     if not isinstance(tr, dict):
@@ -386,10 +400,12 @@ def _validate_metric_block(
         v.append("metric.dimension_filters 必须为对象")
         dim_filters = {}
     for fname, expr in dim_filters.items():
-        if fname not in dims:
-            v.append(f"dimension_filters 字段不在 {mid} 维度白名单: {fname!r}")
+        if fname not in dims and fname != md.measure.name:
+            v.append(f"dimension_filters 字段不在 {mid} 维度白名单/度量列: {fname!r}")
             continue
-        v.extend(_validate_filter_expr(fname, expr, _dimension_value_check(fname, md, fname)))
+        # 度量列过滤（报告 v0.2 建议③）：值须数值（物化列 REAL）；维度列走维度类型检查
+        value_check = _measure_value_check(md) if fname == md.measure.name else _dimension_value_check(fname, md, fname)
+        v.extend(_validate_filter_expr(fname, expr, value_check))
 
     tr = metric.get("time_range") if metric.get("time_range") is not None else top_time_range
     if tr is not None:
@@ -409,6 +425,10 @@ def _validate_metric_block(
                     v.append(f"metric.group_by 不在 {mid} 维度白名单: {g!r}")
             if md.agg_function in ("avg", "count_distinct"):
                 v.append(f"聚合 {md.agg_function} 非可加，禁物化表子集重聚合 group_by: {mid}")
+
+    top_n = metric.get("topN")
+    if top_n is not None and (isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1 or top_n > MAX_TOP_N):
+        v.append(f"metric.topN 必须为正整数（≤{MAX_TOP_N}）: {top_n!r}")
 
 
 def _validate_aggregation(agg: Any, fields: dict, obj_name: str) -> list[str]:
@@ -535,6 +555,18 @@ def _build_where(filters: dict) -> tuple[str, list[Any]]:
         elif op == "ne":
             clauses.append(f"{field} != ?")
             params.append(value)
+        elif op == "gt":
+            clauses.append(f"{field} > ?")
+            params.append(value)
+        elif op == "ge":
+            clauses.append(f"{field} >= ?")
+            params.append(value)
+        elif op == "lt":
+            clauses.append(f"{field} < ?")
+            params.append(value)
+        elif op == "le":
+            clauses.append(f"{field} <= ?")
+            params.append(value)
         elif op == "is_null":
             clauses.append(f"{field} IS NULL")
         elif op == "is_not_null":
@@ -632,7 +664,8 @@ class ContractExecutor:
             rows = rows_as_dicts(self._conn, sql, params)
         except Exception as exc:  # 表不存在/类型错误即 fail-closed
             raise ContractError(f"契约执行失败（fail-closed 拒答）: {exc}") from exc
-        limit = self._result_limit()
+        scale = self._object_scale(obj)
+        limit = self._result_limit(scale)
         if len(rows) > limit:
             raise ContractError(f"结果行数 {len(rows)} 超过护栏上限 {limit}（V5，请加过滤）")
 
@@ -651,16 +684,20 @@ class ContractExecutor:
             result["_diagnostics"] = {"predicate_excluded": excluded}
         return result
 
-    def _result_limit(self) -> int:
-        """V5 结果护栏上限：从生效配置派生（禁硬编码 1000）——max(下限, 2×round(N×rate))。
+    def _object_scale(self, obj: Any) -> int:
+        """对象路径查询规模 = 源表行数（V5 按规模派生，red-team P3-9；表名为注册表常量，无注入面）。"""
+        n = self._conn.execute(f"SELECT COUNT(*) FROM {obj.source_table}").fetchone()[0]
+        return int(n)
 
-        保证 DQ-01 全量结果（round(N×rate) 条）可放行，同时按量级封顶大结果集（如未过滤的全表）；
-        N = MARA 行数、rate = multi_code 注入率，均取自定义配置（单一事实来源）。
+    def _result_limit(self, scale_row_count: int) -> int:
+        """V5 结果护栏上限：按查询规模派生（red-team P3-9，不再锚定 MARA 一刀切 2400）。
+
+        limit = max(下限, 规模系数 × 查询目标 row_count)。规模 = 查询目标数据集的自然行数
+        （对象路径 = 源表 COUNT(*)，指标路径 = 物化表 row_count）：合法全表分析（A1 77,936 /
+        L4 24,000 / F5 16,000）按规模放行，系数=1 时护栏退化为「不超源数据集规模的天然封顶」。
+        上限始终从注册表/配置派生，禁硬编码 2400。
         """
-        config = self._mz.config
-        mara = config["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
-        rate = config["injection"]["multi_code"]["rate"]
-        return max(RESULT_LIMIT_FLOOR, 2 * round(mara * rate))
+        return max(RESULT_LIMIT_FLOOR, RESULT_LIMIT_SCALE_FACTOR * scale_row_count)
 
     # ------------------------------------------------------------------
     # 读侧权限（设计 §3.3：P1.5 decide(read) 接线；fail-closed 不静默裁剪）
@@ -809,7 +846,7 @@ class ContractExecutor:
     def _execute_metric(self, contract: dict) -> dict:
         """执行 v0.2 指标契约：M 系列校验 → T3 版本守卫 → 查 metrics.db 物化表。
 
-        返回 {object_type, metric_id, count, rows}；结果护栏与 v0.1 一致（V5）。
+        返回 {object_type, metric_id, count, rows}；结果护栏按指标物化表规模派生（V5，P3-9）。
         """
         if self._metrics is None:
             raise ContractError("契约含 metric 但执行器未注入指标注册表（M 系列 fail-closed）")
@@ -833,10 +870,12 @@ class ContractExecutor:
             self._guard_version(conn)  # T3 版本守卫（漂移 fail-fast）
             where, params = self._metric_where(contract, md)
             gb = contract["metric"].get("group_by") or []
-            rows = self._query_metric(conn, md, gb, where, params)
+            top_n = contract["metric"].get("topN")  # Top-N 执行（v0.2，已校验 ≤1000）
+            rows = self._query_metric(conn, md, gb, where, params, top_n)
+            scale = self._metric_scale(conn, md)  # V5 规模派生（conn 关闭前取 meta.row_count）
         finally:
             conn.close()
-        limit = self._result_limit()
+        limit = self._result_limit(scale)
         if len(rows) > limit:
             raise ContractError(f"结果行数 {len(rows)} 超过护栏上限 {limit}（V5，请加过滤）")
         rows = self._filter_metric_rows(rows, visible, md)
@@ -846,6 +885,18 @@ class ContractExecutor:
             "count": len(rows),
             "rows": rows,
         }
+
+    def _metric_scale(self, conn: Any, md: MetricDef) -> int:
+        """指标查询规模 = 物化表行数（metric_meta.row_count，V5 按规模派生，red-team P3-9）。
+
+        meta 缺该指标行时保守回落下限（fail-closed 语义：不因元数据缺失而放大护栏）。
+        """
+        row = conn.execute(
+            f"SELECT row_count FROM {METRIC_META_TABLE} WHERE metric_id=?", (md.metric_id,)
+        ).fetchone()
+        if row is None or row[0] is None:
+            return RESULT_LIMIT_FLOOR
+        return int(row[0])
 
     def _guard_version(self, conn: Any) -> None:
         """T3 查询侧版本守卫（设计 §2.2(3)）：metric_meta.data_version/config_sha256 vs manifest。
@@ -896,12 +947,20 @@ class ContractExecutor:
         raise ContractError(f"指标 {md.metric_id} 无日期维度，time_range 无法绑定（校验应已拦截）")
 
     def _query_metric(
-        self, conn: Any, md: MetricDef, gb: list[str], where: str, params: list[Any]
+        self,
+        conn: Any,
+        md: MetricDef,
+        gb: list[str],
+        where: str,
+        params: list[Any],
+        top_n: int | None = None,
     ) -> list[dict[str, Any]]:
         """查 metric_<id> 物化表（参数化，V4）：无 group_by → 维度全列 + 度量列；
         有 group_by → 物化表子集重聚合（仅可加聚合 sum/count/min/max，校验已挡 avg/count_distinct）。
 
-        表名/列名全为注册表派生常量（无用户输入，无注入面），值一律 ? 绑定。
+        top_n（v0.2 表达力 Top-N，报告 §6 J4）：按度量值降序截断前 N 行（参数化 LIMIT，
+        N 已校验 ≤1000），有/无 group_by 均生效；缺省 None = 不截断。表名/列名全为注册表
+        派生常量（无用户输入，无注入面），值一律 ? 绑定。
         """
         table = metric_table_name(md.metric_id)
         measure_col = md.measure.name
@@ -910,11 +969,17 @@ class ContractExecutor:
                 gb + [f"{_METRIC_REAGG_SQL[md.agg_function]}({measure_col}) AS {measure_col}"]
             )
             order = ", ".join(gb)
-            sql = f"SELECT {select} FROM {table} WHERE {where} GROUP BY {order} ORDER BY {order}"
+            sql = f"SELECT {select} FROM {table} WHERE {where} GROUP BY {order}"
         else:
             cols = ", ".join([d.name for d in md.dimension_fields] + [measure_col])
             order = ", ".join(d.name for d in md.dimension_fields)
-            sql = f"SELECT {cols} FROM {table} WHERE {where} ORDER BY {order}"
+            sql = f"SELECT {cols} FROM {table} WHERE {where}"
+        if top_n is not None:
+            # Top-N：按度量值降序取前 N（J4 退款 Top5 等）；LIMIT 参数化（V4），N 已校验 ≤1000
+            sql += f" ORDER BY {measure_col} DESC, {order} LIMIT ?"
+            params = [*params, top_n]
+        else:
+            sql += f" ORDER BY {order}"
         try:
             return rows_as_dicts(conn, sql, params)
         except Exception as exc:  # 表缺失/类型错误即 fail-closed

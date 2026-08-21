@@ -127,7 +127,11 @@ def _measure_expr(metric: MetricDef) -> str:
     template = _AGG_TEMPLATES.get(metric.agg_function)
     if template is None:
         raise MetricMaterializeError(f"agg_function 非法（M4）: {metric.agg_function!r}")
-    return template.format(c=source)
+    expr = template.format(c=source)
+    if metric.measure_scale != 1.0:
+        # measure_scale（M9：仅 sum 允许，报告 §6 退款口径）：-1×SUM(x) = Σ(-1×x)（借正贷负翻转）
+        expr = f"{metric.measure_scale:g} * {expr}"
+    return expr
 
 
 def _table_source(out_dir: Path, config: dict, table_id: str) -> str:
@@ -157,6 +161,64 @@ def _join_on(table_id: str, config: dict, joined: set[str]) -> str | None:
     return None
 
 
+def _lit(value: Any) -> str:
+    """注册表常量值 → SQL 字面量（字符串转义单引号防注入面；数值/布尔原样，M8 纵深防御）。"""
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    return str(value)
+
+
+def _row_filter_sql(metric: MetricDef) -> str:
+    """row_filter 行级过滤 WHERE（M9 校验通过；值/字段为注册表常量，字符串值转义单引号）。
+
+    物化与 reconcile 同源（derive_metric_sql 单点拼接，R3 口径单点，报告 §6 J3/J4/F4/T4 口径）。
+    """
+    if not metric.row_filter:
+        return ""
+    clauses: list[str] = []
+    for f in metric.row_filter:
+        col = f.source
+        op = f.op
+        if op == "eq":
+            clauses.append(f"{col} = {_lit(f.value)}")
+        elif op == "ne":
+            clauses.append(f"{col} != {_lit(f.value)}")
+        elif op == "gt":
+            clauses.append(f"{col} > {_lit(f.value)}")
+        elif op == "ge":
+            clauses.append(f"{col} >= {_lit(f.value)}")
+        elif op == "lt":
+            clauses.append(f"{col} < {_lit(f.value)}")
+        elif op == "le":
+            clauses.append(f"{col} <= {_lit(f.value)}")
+        elif op == "in":
+            clauses.append(f"{col} IN ({', '.join(_lit(x) for x in f.value)})")
+        elif op == "is_null":
+            clauses.append(f"{col} IS NULL")
+        elif op == "is_not_null":
+            clauses.append(f"{col} IS NOT NULL")
+    return " WHERE " + " AND ".join(clauses)
+
+
+def _join_on_explicit(table_id: str, joined: set[str], metric: MetricDef) -> str | None:
+    """从显式 joins 边派生 table_id 与已入链表集的连接（配置 fk 无法派生时的兜底，M9 已校验）。
+
+    在 metric.joins 中找一条边：一侧短表名 ∈ 已入链表、另一侧 == 目标表；返回 '左表.列 = 右表.列'
+    （如 'ACDOCA.REF_DOC = VBAK.VBELN'，多态引用 REF_DOC→VBAK 是配置 fk 声明不了双边的场景）。
+    """
+    short = table_id.rsplit(".", 1)[-1]
+    joined_short = {t.rsplit(".", 1)[-1] for t in joined}
+    for j in metric.joins:
+        left_short, right_short = j.left.split(".", 1)[0], j.right.split(".", 1)[0]
+        if right_short == short and left_short in joined_short:
+            return f"{j.left} = {j.right}"
+        if left_short == short and right_short in joined_short:
+            return f"{j.left} = {j.right}"
+    return None
+
+
 def derive_metric_sql(metric: MetricDef, config: dict, out_dir: Path) -> str:
     """由指标注册表派生物化/reconcile 同源 SQL（§2.3 R3 口径单点，禁双处手写）。
 
@@ -165,6 +227,7 @@ def derive_metric_sql(metric: MetricDef, config: dict, out_dir: Path) -> str:
       SELECT MARA.MTART AS material_type, MARC.WERKS AS factory, COUNT(*) AS material_count
       FROM sqlite_scan('<erp.db>','MARA') AS MARA
       JOIN sqlite_scan('<erp.db>','MARC') AS MARC ON MARC.MATNR = MARA.MATNR
+      WHERE MSEG.BWART = '101'        -- 可选：M9 row_filter 行级过滤
       GROUP BY 1,2
     本函数不输出 ORDER BY；物化（CTAS）与 reconcile 两侧由调用方统一追加
     ORDER BY <维度键>（§2.3 按维度键排序逐行比对，见 _ordered_rows）。
@@ -174,15 +237,23 @@ def derive_metric_sql(metric: MetricDef, config: dict, out_dir: Path) -> str:
     froms = [_table_source(out_dir, config, metric.source_tables[0])]
     joined = {metric.source_tables[0]}
     for table_id in metric.source_tables[1:]:
-        on = _join_on(table_id, config, joined)
+        # join 键优先取显式 joins 边（M9），否则从配置 fk 派生（§2.6）
+        on = _join_on_explicit(table_id, joined, metric) if metric.joins else _join_on(table_id, config, joined)
         if on is None:
             raise MetricMaterializeError(
-                f"指标 {metric.metric_id}: 无法从配置 fk 派生 {table_id} 的 join 键"
+                f"指标 {metric.metric_id}: 无法从配置 fk/joins 派生 {table_id} 的 join 键"
             )
         froms.append(f"JOIN {_table_source(out_dir, config, table_id)} ON {on}")
         joined.add(table_id)
     group = ", ".join(str(i) for i in range(1, len(metric.dimension_fields) + 1))
-    return "SELECT " + ", ".join(selects) + "\n FROM " + " ".join(froms) + f"\n GROUP BY {group}"
+    return (
+        "SELECT "
+        + ", ".join(selects)
+        + "\n FROM "
+        + " ".join(froms)
+        + _row_filter_sql(metric)
+        + f"\n GROUP BY {group}"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -162,3 +162,124 @@ metrics:
     agg_function: sum
     definition: "按参考单据类型（SO/PO/MV）的财务金额 = Σ ACDOCA.WSL（REF_TYPE 决定 REF_DOC 归属，无孤儿门禁 D8）"
     source_tables: [fin.ACDOCA]
+  # —— 组 F · 订单/客户（主体 Customer，源表 erp.VBAK；报告 §6 J1/A3/T1 口径）——
+  - metric_id: order_count_by_customer
+    object_type: Customer
+    dimension_fields:
+      - { name: customer, source: "VBAK.KUNNR" }
+    measure: { name: order_count, source: "VBAK.VBELN" }
+    agg_function: count_distinct
+    definition: "每个客户的下单数 = COUNT(DISTINCT VBAK.VBELN)（报告 §6 J1：客户→订单数）"
+    source_tables: [erp.VBAK]
+
+  - metric_id: customer_count_by_month
+    object_type: Customer
+    dimension_fields:
+      - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
+    measure: { name: customer_count, source: "VBAK.KUNNR" }
+    agg_function: count_distinct
+    definition: "各月下单客户数 = COUNT(DISTINCT VBAK.KUNNR)（月 = AUDAT 前 7 位；报告 §6 A3）"
+    source_tables: [erp.VBAK]
+
+  - metric_id: order_count_by_month
+    object_type: Customer
+    dimension_fields:
+      - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
+    measure: { name: order_count, source: "VBAK.VBELN" }
+    agg_function: count_distinct
+    definition: "各月订单量 = COUNT(DISTINCT VBAK.VBELN)（月 = AUDAT 前 7 位；报告 §6 T1）"
+    source_tables: [erp.VBAK]
+
+  # —— 组 G · 品类库存 / 采购收货（报告 §6 J2/J3 适配口径）——
+  - metric_id: stock_balance_by_mat_group
+    object_type: Material
+    dimension_fields:
+      - { name: material_group, source: "MARA.MATKL" }
+    measure: { name: stock_balance, source: "MARD.LABST" }
+    agg_function: sum
+    definition: "各物料组的库存账面 = Σ MARD.LABST（MARD↔MARA 以 MATNR 关联；报告 §6 J2：品类库存金额→库存量适配口径）"
+    source_tables: [erp.MARA, erp.MARD]
+
+  - metric_id: receipt_qty_by_vendor
+    object_type: Vendor
+    dimension_fields:
+      - { name: vendor, source: "EKKO.LIFNR" }
+    measure: { name: receipt_qty, source: "MSEG.MENGE" }
+    agg_function: sum
+    row_filter:
+      - { source: "MSEG.BWART", op: "eq", value: "101" }
+    definition: "各供应商采购收货量 = Σ MSEG.MENGE（仅 BWART='101' 收货；MSEG↔EKKO 以 EBELN 关联；报告 §6 J3：准时率→到货量适配口径）"
+    source_tables: [wms.MSEG, scm.EKKO]
+
+  # —— 组 H · 退款（主体 FinanceEntry/Customer，源表 fin.ACDOCA；报告 §6 J4/F4/T4 口径）——
+  - metric_id: customer_refund_by_customer
+    object_type: Customer
+    dimension_fields:
+      - { name: customer, source: "VBAK.KUNNR" }
+    measure: { name: refund_amount, source: "ACDOCA.WSL" }
+    agg_function: sum
+    measure_scale: -1
+    row_filter:
+      - { source: "ACDOCA.REF_TYPE", op: "eq", value: "SO" }
+      - { source: "ACDOCA.WSL", op: "lt", value: 0 }
+    joins:
+      - { left: "ACDOCA.REF_DOC", right: "VBAK.VBELN" }
+    definition: "各客户退款金额 = -1×Σ ACDOCA.WSL（REF_TYPE='SO' 且 WSL<0；ACDOCA↔VBAK 以 REF_DOC=VBELN 关联，多态引用显式 join；报告 §6 J4，需契约 Top-N）"
+    source_tables: [fin.ACDOCA, erp.VBAK]
+
+  - metric_id: refund_amount_by_order
+    object_type: FinanceEntry
+    dimension_fields:
+      - { name: vbeln, source: "ACDOCA.REF_DOC" }
+    measure: { name: refund_amount, source: "ACDOCA.WSL" }
+    agg_function: sum
+    measure_scale: -1
+    row_filter:
+      - { source: "ACDOCA.REF_TYPE", op: "eq", value: "SO" }
+      - { source: "ACDOCA.WSL", op: "lt", value: 0 }
+    definition: "按订单的退款金额 = -1×Σ ACDOCA.WSL（REF_TYPE='SO' 且 WSL<0；按 REF_DOC 分组；报告 §6 F4：阈值用契约度量过滤）"
+    source_tables: [fin.ACDOCA]
+
+  - metric_id: refund_amount_by_month
+    object_type: FinanceEntry
+    dimension_fields:
+      - { name: month, source: "ACDOCA.BUDAT", transform: "substr(1,7)" }
+    measure: { name: refund_amount, source: "ACDOCA.WSL" }
+    agg_function: sum
+    measure_scale: -1
+    row_filter:
+      - { source: "ACDOCA.REF_TYPE", op: "eq", value: "SO" }
+      - { source: "ACDOCA.WSL", op: "lt", value: 0 }
+    definition: "各月退款金额 = -1×Σ ACDOCA.WSL（REF_TYPE='SO' 且 WSL<0；月 = BUDAT 前 7 位；报告 §6 T4：双 time_range 对比待扩展）"
+    source_tables: [fin.ACDOCA]
+
+  # —— 组 I · 日粒度销售 / 报工（报告 §6 T3/T5/A2 口径）——
+  - metric_id: sales_amount_by_day
+    object_type: Material
+    dimension_fields:
+      - { name: day, source: "VBAK.AUDAT", transform: "substr(1,10)" }
+    measure: { name: sales_amount, source: "VBAP.NETWR" }
+    agg_function: sum
+    definition: "按日的销售金额 = Σ VBAP.NETWR（日 = VBAK.AUDAT 前 10 位；VBAK↔VBAP 以 VBELN 关联；报告 §6 T3：time_range 日粒度）"
+    source_tables: [erp.VBAK, erp.VBAP]
+
+  - metric_id: cofv_qty_by_matkl_werks_month
+    object_type: Material
+    dimension_fields:
+      - { name: material_group, source: "MARA.MATKL" }
+      - { name: factory, source: "AUFK.WERKS" }
+      - { name: month, source: "COFV.DATUM", transform: "substr(1,7)" }
+    measure: { name: qty, source: "COFV.ISM01" }
+    agg_function: sum
+    definition: "按物料组×工厂×月的报工数量 = Σ COFV.ISM01（COFV↔AUFK 以 AUFNR、AUFK↔MARA 以 MATNR 关联；报告 §6 A2 三维汇总）"
+    source_tables: [mes.COFV, mes.AUFK, erp.MARA]
+
+  - metric_id: cofv_avg_hrs_by_month
+    object_type: Material
+    dimension_fields:
+      - { name: month, source: "COFV.DATUM", transform: "substr(1,7)" }
+    measure: { name: avg_hrs, source: "COFV.ISMN1" }
+    agg_function: avg
+    definition: "各月平均报工工时 = AVG COFV.ISMN1（月 = DATUM 前 7 位；报告 §6 T5：到货时长→报工工时适配口径）"
+    source_tables: [mes.COFV]
+
