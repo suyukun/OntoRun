@@ -224,13 +224,16 @@
             "enum": [
               "code",
               "customer",
+              "finance_entry",
               "inventory",
+              "inventory_location",
               "material",
               "order",
               "order_item",
               "product",
               "refund",
               "shipment",
+              "vendor",
               "warehouse"
             ],
             "type": "string"

@@ -142,14 +142,14 @@ def test_gt_file_load_and_validate(gt, gt_entries, registry) -> None:
 
 
 def test_gt_file_metadata() -> None:
-    """GT 文件元数据：版本 + 标注口径（demo 单轮标注，Rose 复核待办，§3.5）。"""
+    """GT 文件元数据：版本 + 标注口径（demo 单轮标注，Rose 已复核通过，§3.5）。"""
     raw = yaml.safe_load(GT_PATH.read_text(encoding="utf-8"))
     assert raw["version"]
     assert raw["domain"] == "manufacturing"
     labeling = raw["labeling"]
     assert labeling["method"] == "single-pass"  # demo 口径：单轮标注
-    assert labeling["reviewer"] == "rose"  # Rose 复核（待办，复核通过前真值以文档为准）
-    assert labeling["reviewed"] is False
+    assert labeling["reviewer"] == "rose"  # Rose 复核（2026-08-21 通过，真值以文档为准）
+    assert labeling["reviewed"] is True
 
 
 # ======================================================================
