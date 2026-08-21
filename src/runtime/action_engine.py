@@ -1,9 +1,10 @@
 """动作执行引擎（B2，技术方案 §3.3 核心管道）。
 
-管道：① 参数校验(Pydantic) → ② 源库事务（BEGIN IMMEDIATE，单写连接=天然串行）
-→ ③ 事务内重读快照（防读-改-写竞态）→ ④ 前置规则按声明顺序执行（submission criteria）
-→ ⑤ 计算变更（纯函数）→ ⑥ 写回源库（source-backed，每条带 SQL 与影响行数）
-→ ⑦ 源库提交后更新本体索引 + 本体自有状态（补偿式，§7.4）
+管道：① 参数校验(Pydantic) → ①' 权限门（P4，PermissionEnforcer 缺省 None 不启用；
+deny → rejected + PERMISSION_DENIED，零源库变更）→ ② 源库事务（BEGIN IMMEDIATE，
+单写连接=天然串行）→ ③ 事务内重读快照（防读-改-写竞态）→ ④ 前置规则按声明顺序执行
+（submission criteria）→ ⑤ 计算变更（纯函数）→ ⑥ 写回源库（source-backed，每条带 SQL
+与影响行数）→ ⑦ 源库提交后更新本体索引 + 本体自有状态（补偿式，§7.4）
 → ⑧ 审计落库（applied/rejected/failed 三态）。
 
 设计要点（§3.3）：
@@ -23,7 +24,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -31,7 +32,12 @@ from src.ontology.objects import OWN_ONTOLOGY, field_ownership
 from src.ontology.registry import Registry
 from src.runtime.audit import AuditLog, AuditRecord, _j
 from src.runtime.index import ObjectIndex
-from src.runtime.store import ALLOWED_ACTORS, Store
+from src.runtime.permissions import PermissionDecision
+from src.runtime.store import (
+    ALLOWED_ACTORS,
+    ERROR_CODE_PERMISSION_DENIED,
+    Store,
+)
 
 # §4.3 错误码 → 中文消息（API 层信封错误也复用）
 ERROR_MESSAGES: dict[str, str] = {
@@ -52,6 +58,7 @@ ERROR_MESSAGES: dict[str, str] = {
     "REFUND_NOT_PENDING": "退款单不存在或已审核",
     "AMOUNT_EXCEEDS_PAID": "退款金额超过实付（含已批准退款）",
     "REFUND_NOT_ALLOWED": "订单状态不允许退款",
+    ERROR_CODE_PERMISSION_DENIED: "权限不足，动作被拒绝（PERMISSION_DENIED）",
 }
 
 # failed 路径对外稳定错误码/文案（安全摘要，不含原始异常文本——AGENTS.md
@@ -92,6 +99,23 @@ class Writeback(BaseModel):
     params: list[Any]
     table: str
     rows: int = 0
+
+
+class PermissionEnforcer(Protocol):
+    """动作执行侧权限门（P4）：execute 在①参数校验后、④前置规则前调用 decide() 裁决。
+
+    实现方负责 动作 → (对象, 操作) 映射 与 actor → PermissionSubject 解析
+    （如 approve_refund → (Refund, 'approve')，其余写动作 → (目标对象, 'write')，
+    委托 src.runtime.permissions 的 decide 纯函数即可 fail-closed）。
+    - 返回 PermissionDecision：按 allowed 裁决，allowed=False → rejected + PERMISSION_DENIED，
+      命中策略 id（matched_policy_ids）落审计 detail_json 溯源；
+    - 返回 None：该动作不纳入权限门（跳过，交给调用方在实现里显式决定哪些动作放行）。
+    缺省不传 enforcer = S1 行为不变（权限门不启用）。
+    """
+
+    def decide(
+        self, action_name: str, params: dict[str, Any], actor: str
+    ) -> PermissionDecision | None: ...
 
 
 class Violation(BaseModel):
@@ -179,7 +203,12 @@ class ActionEngine:
     """动作执行管道（§3.3）。"""
 
     def __init__(
-        self, registry: Registry, store: Store, index: ObjectIndex, audit: AuditLog
+        self,
+        registry: Registry,
+        store: Store,
+        index: ObjectIndex,
+        audit: AuditLog,
+        enforcer: PermissionEnforcer | None = None,
     ) -> None:
         # 冲突消解策略 1（user_edit_wins）由各 handler 的无条件写回隐式执行
         # （compute_effects 算新值 → writeback 覆盖源库当前值）；conflict.py 保留为
@@ -188,6 +217,9 @@ class ActionEngine:
         self.store = store
         self.index = index
         self.audit = audit
+        # P4 权限门：缺省 None = S1 兼容（不传不启用，既有动作执行行为不变）；
+        # 传入 enforcer 后，execute 在①参数校验后、④前置规则前裁决（见 execute）。
+        self._enforcer = enforcer
         self._handlers: dict[str, ActionHandler] = {
             a.name: self._build_handler(a.name) for a in registry.actions()
         }
@@ -271,6 +303,29 @@ class ActionEngine:
                 detail,
                 [],
             )
+
+        # ①' 权限门（P4）：① 参数校验后、④ 前置规则前（源库事务未开，拒绝零变更）。
+        # 缺省 None = S1 不启用；启用时 enforcer 返回 deny → rejected + PERMISSION_DENIED，
+        # 审计落 rejected（matched_policy_ids 溯源）；返回 None（不纳入）→ 跳过。
+        if self._enforcer is not None:
+            decision = self._enforcer.decide(action_name, validated.model_dump(), actor)
+            if decision is not None and not decision.allowed:
+                return self._reject(
+                    action,
+                    action_name,
+                    ERROR_CODE_PERMISSION_DENIED,
+                    params,
+                    actor,
+                    actor_detail,
+                    request_id,
+                    t0,
+                    {
+                        "matched_policy_ids": decision.matched_policy_ids,
+                        "action_name": action_name,
+                        "actor": actor,
+                    },
+                    [],
+                )
 
         conn = self.store.source_conn()
         conn.execute("BEGIN IMMEDIATE")

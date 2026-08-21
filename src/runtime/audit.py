@@ -5,6 +5,10 @@ audit_log 是"运行语义层"区别于"只读语义层"的证据面：writeback
 audit_id 用 ULID（时间有序 + 随机，标准库实现，不引依赖）。
 链序 = seq 自增列（追加序，与 audit_id 字典序解耦；red-team P2-1：同毫秒乱序 audit_id
 不断链——append 取 max(seq) 作 prev，verify 按 seq 升序重算）。
+
+修正策略（P1.5 R3，Jack 已批准）：审计为 WORM（append-only），原记录绝不 UPDATE——
+发现原记录有误时经 append_correction 追加一条 source='correction' 的修正记录（关联原
+audit_id + 原因 + 修正字段），保留"原值 + 修正"两段证据链，哈希链随之扩展不重算。
 """
 
 from __future__ import annotations
@@ -23,6 +27,11 @@ from src.runtime.store import AUDIT_SOURCES, RETENTION_CLASSES, Store
 
 # Crockford Base32（ULID 字母表，不含 I/L/O/U）
 _ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+# P1.5 R3 审计修正策略（append correction）：审计为 WORM（append-only），原记录一经落库
+# 绝不 UPDATE——发现原记录有误时追加一条 source='correction' 的修正记录，保留"原值 + 修正"
+# 两段证据链。修正记录的 action_name 固定常量，与业务动作区分（source 单一来源 = store.AUDIT_SOURCES）。
+CORRECTION_ACTION_NAME = "audit_correction"
 
 
 def new_ulid() -> str:
@@ -248,6 +257,66 @@ class AuditLog:
             return dict(row) if row else None
         finally:
             conn.close()
+
+    def append_correction(
+        self,
+        original_audit_id: str,
+        reason: str,
+        corrected_fields: dict[str, Any],
+        *,
+        actor: str = "api",
+        actor_detail: str = "",
+    ) -> str:
+        """追加一条修正审计记录（P1.5 R3：append correction，绝不 UPDATE 原记录）。
+
+        修正策略：审计为 WORM（append-only，store 层 BEFORE UPDATE/DELETE 触发器强制），
+        原记录一经落库不可改动。发现原记录内容有误时，不 UPDATE 原记录，而是追加一条
+        source='correction' 的修正记录：关联原 audit_id、记录修正原因与修正字段，完整保留
+        "原值 + 修正"两段证据链；修正记录同样入哈希链，verify_integrity 保持全绿。
+
+        - original_audit_id：被修正的原审计记录（必须已存在，否则 ValueError，防悬空关联）；
+        - reason：修正原因（落 message 供人工可读，同时入 detail_json 结构化）；
+        - corrected_fields：被修正的审计字段 → 修正值 映射（落 detail_json，入哈希不可旁路篡改）；
+        - 修正记录字段：action_name=audit_correction / outcome=applied / source=correction；
+          detail_json = {original_audit_id, reason, corrected_fields}。
+        返回新修正记录的 audit_id。
+        """
+        if self.get(original_audit_id) is None:
+            raise ValueError(f"修正目标审计记录不存在: {original_audit_id}")
+        detail = {
+            "original_audit_id": original_audit_id,
+            "reason": reason,
+            "corrected_fields": corrected_fields,
+        }
+        record = AuditRecord(
+            action_name=CORRECTION_ACTION_NAME,
+            actor=actor,
+            actor_detail=actor_detail,
+            outcome="applied",
+            source="correction",
+            message=reason,
+            detail_json=_j(detail),
+        )
+        return self.append(record)
+
+    def find_corrections(self, original_audit_id: str) -> list[dict]:
+        """查询某审计记录的全部修正记录（source='correction' 且 detail_json 关联 original_audit_id）。
+
+        修正链路机器可查：给出原记录 audit_id，回溯其所有修正记录（按追加序）。
+        """
+        conn = self._store.ontology_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM audit_log WHERE source='correction' ORDER BY seq ASC"
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            dict(r)
+            for r in rows
+            if (json.loads(r["detail_json"] or "{}").get("original_audit_id"))
+            == original_audit_id
+        ]
 
     def query(
         self,

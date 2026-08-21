@@ -29,6 +29,9 @@ CANONICAL_ERROR_CODES: tuple[str, ...] = (
     "REFUND_NOT_PENDING",
     "AMOUNT_EXCEEDS_PAID",
     "REFUND_NOT_ALLOWED",
+    # P4 动作执行侧权限门（engine 直发 PERMISSION_DENIED，不经动作声明；
+    # 单一来源 = store.ERROR_CODE_PERMISSION_DENIED，已获 Jack 批准）
+    "PERMISSION_DENIED",
 )
 
 

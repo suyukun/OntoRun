@@ -565,6 +565,71 @@ def test_audit_independent_of_session(store) -> None:
 
 
 # ======================================================================
+# P1.5 R3 审计修正策略（append correction：只追加，绝不 UPDATE 原记录，保 WORM）
+# ======================================================================
+def test_append_correction_appends(audit) -> None:
+    """R3：追加 correction 记录（source='correction'，关联原 audit_id，含修正原因与字段）。"""
+    original = audit.append(_audit_record(action_name="adjust_inventory", message="原始记录"))
+    correction = audit.append_correction(
+        original,
+        reason="盘点纠正：原在库数量录入有误",
+        corrected_fields={"message": "修正后：数量应为 1234"},
+        actor="human",
+        actor_detail="jack",
+    )
+    assert correction != original  # 新记录，非原地修改
+    got = audit.get(correction)
+    assert got is not None
+    assert got["source"] == "correction"
+    assert got["action_name"] == "audit_correction"
+    assert got["outcome"] == "applied"
+    assert got["actor"] == "human" and got["actor_detail"] == "jack"
+    assert got["message"] == "盘点纠正：原在库数量录入有误"
+    detail = json.loads(got["detail_json"])
+    assert detail["original_audit_id"] == original
+    assert detail["reason"] == "盘点纠正：原在库数量录入有误"
+    assert detail["corrected_fields"] == {"message": "修正后：数量应为 1234"}
+    # 关联可回溯：find_corrections 按原 audit_id 反查修正记录
+    assert [c["audit_id"] for c in audit.find_corrections(original)] == [correction]
+
+
+def test_append_correction_original_immutable(audit, store) -> None:
+    """R3 WORM：修正只追加，绝不 UPDATE 原记录——原记录内容原样、UPDATE 仍被触发器拦截。"""
+    original = audit.append(_audit_record(action_name="adjust_inventory", message="原始消息"))
+    before = audit.get(original)
+    audit.append_correction(original, reason="纠正", corrected_fields={"message": "修正后"})
+    after = audit.get(original)
+    assert after == before, "修正后原记录必须逐字段不变（WORM append-only）"
+    conn = store.ontology_conn()
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE audit_log SET message='hack' WHERE audit_id=?", (original,)
+            )
+    finally:
+        conn.close()
+
+
+def test_append_correction_hash_chain_still_green(audit) -> None:
+    """R3：追加修正记录后哈希链仍全绿（修正记录同链，不重算、不断链）。"""
+    first = audit.append(_audit_record(action_name="first"))
+    audit.append(_audit_record(action_name="second"))
+    audit.append_correction(first, reason="修正", corrected_fields={"a": 1})
+    audit.append(_audit_record(action_name="third"))
+    report = audit.verify_integrity()
+    assert report["ok"] is True
+    assert report["checked"] == 4
+    assert report["broken"] == []
+    assert report["first_broken_index"] is None
+
+
+def test_append_correction_requires_existing_original(audit) -> None:
+    """R3：修正目标不存在 → ValueError（防悬空关联，只追加不伪造修正）。"""
+    with pytest.raises(ValueError):
+        audit.append_correction("no_such_audit_id", reason="x", corrected_fields={})
+
+
+# ======================================================================
 # ③ 映射打标可跑（门禁 3）
 # ======================================================================
 def test_classify_threshold_boundaries() -> None:

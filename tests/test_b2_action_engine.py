@@ -25,6 +25,7 @@ from src.runtime.conflict import (
     resolve,
 )
 from src.runtime.index import ObjectIndex
+from src.runtime.permissions import PermissionDecision
 from src.runtime.store import Store
 
 TABLES = [
@@ -85,6 +86,36 @@ def table_snapshot(conn: sqlite3.Connection) -> dict:
     return {
         t: conn.execute(f"SELECT * FROM {t} ORDER BY rowid").fetchall() for t in TABLES
     }
+
+
+# P4 权限门测试替身（PermissionEnforcer 协议实现：deny/allow/skip 三态）
+class _DenyEnforcer:
+    """一律拒绝：返回 deny 决策 + 命中策略 id（供审计 detail_json 断言）。"""
+
+    def decide(self, action_name, params, actor):
+        return PermissionDecision(allowed=False, matched_policy_ids=["deny-1", "deny-2"])
+
+
+class _AllowEnforcer:
+    """一律放行。"""
+
+    def decide(self, action_name, params, actor):
+        return PermissionDecision(allowed=True, matched_policy_ids=["allow-1"])
+
+
+class _SkipEnforcer:
+    """返回 None：该动作不纳入权限门（跳过权限裁决）。"""
+
+    def decide(self, action_name, params, actor):
+        return None
+
+
+def runtime_with_enforcer(runtime: Runtime, enforcer) -> Runtime:
+    """基于既有双库再造一台带权限门的引擎（复用同一 store/index/audit）。"""
+    engine = ActionEngine(
+        runtime.engine.registry, runtime.store, runtime.index, runtime.audit, enforcer=enforcer
+    )
+    return Runtime(runtime.store, runtime.index, runtime.audit, engine)
 
 
 def row(runtime: Runtime, sql: str, params=()) -> sqlite3.Row | None:
@@ -667,6 +698,56 @@ def test_approve_refund_not_allowed_order_status(runtime):
 def test_unknown_action(runtime):
     res = exec_action(runtime, "no_such_action", {})
     assert res.outcome == "rejected" and res.error_code == "UNKNOWN_ACTION"
+
+
+# ======================================================================
+# P4 权限门（PermissionEnforcer：① 参数校验后、④ 前置规则前）
+# ======================================================================
+
+
+def test_execute_without_enforcer_s1_compat(runtime):
+    """P4 兼容：缺省不传 enforcer → 权限门不启用，动作执行与 S1 完全一致。"""
+    res = exec_action(runtime, "confirm_order", {"order_id": "ORD-0001"})
+    assert res.outcome == "applied" and res.error_code is None
+    assert runtime.engine._enforcer is None  # 缺省关闭，不改变既有行为
+
+
+def test_permission_gate_deny_rejected_with_audit(runtime):
+    """P4 权限门：enforcer deny → rejected + PERMISSION_DENIED + 审计落 rejected（含 matched_policy_ids），源库零变更。"""
+    rt = runtime_with_enforcer(runtime, _DenyEnforcer())
+    conn = rt.source()
+    before = table_snapshot(conn)
+    res = exec_action(rt, "cancel_order", {"order_id": "ORD-1001", "reason": "越权尝试"})
+    assert res.outcome == "rejected"
+    assert res.error_code == "PERMISSION_DENIED"
+    assert res.detail["matched_policy_ids"] == ["deny-1", "deny-2"]
+    assert table_snapshot(conn) == before, "权限拒绝路径源库必须零变更"
+    audit = rt.audit.get(res.audit_id)
+    assert audit["outcome"] == "rejected"
+    assert audit["error_code"] == "PERMISSION_DENIED"
+    detail = json.loads(audit["detail_json"])
+    assert detail["matched_policy_ids"] == ["deny-1", "deny-2"]
+    assert detail["action_name"] == "cancel_order" and detail["actor"] == "api"
+    conn.close()
+
+
+def test_permission_gate_allow_proceeds(runtime):
+    """P4 权限门：enforcer allow → 继续执行（applied），不改变既有管道。"""
+    rt = runtime_with_enforcer(runtime, _AllowEnforcer())
+    res = exec_action(rt, "confirm_order", {"order_id": "ORD-0001"})
+    assert res.outcome == "applied"
+    assert (
+        row(rt, "SELECT status FROM orders WHERE order_id='ORD-0001'")["status"]
+        == "confirmed"
+    )
+
+
+def test_permission_gate_enforcer_skip_none(runtime):
+    """P4 权限门：enforcer 返回 None（该动作不纳入权限门）→ 跳过权限裁决，正常执行。"""
+    rt = runtime_with_enforcer(runtime, _SkipEnforcer())
+    res = exec_action(rt, "confirm_order", {"order_id": "ORD-0001"})
+    assert res.outcome == "applied"
+    assert res.error_code is None
 
 
 def test_rejected_paths_zero_write_assertion(runtime):

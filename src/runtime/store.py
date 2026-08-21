@@ -40,7 +40,19 @@ MAPPING_KINDS: tuple[str, ...] = ("object", "attribute", "link")
 CONFIDENCE_LEVELS: tuple[str, ...] = ("high", "medium", "low")
 REVIEW_STATUSES: tuple[str, ...] = ("draft", "reviewing", "approved", "rejected")
 RETENTION_CLASSES: tuple[str, ...] = ("standard", "sensitive", "transient")
-AUDIT_SOURCES: tuple[str, ...] = ("action", "query", "review", "permission", "publish")
+AUDIT_SOURCES: tuple[str, ...] = (
+    "action",
+    "query",
+    "review",
+    "permission",
+    "publish",
+    "correction",  # P1.5 R3 审计修正策略：只追加修正记录，绝不 UPDATE 原记录（保 WORM）
+)
+
+# 动作执行侧权限拒绝错误码（P4 动作权限门，Jack 已批准）：
+# 读侧同值常量在 src/des/contract.py（PERMISSION_DENIED），本处为动作执行侧单一来源；
+# §4.3 错误码全集同步见 src/ontology/actions.py CANONICAL_ERROR_CODES。
+ERROR_CODE_PERMISSION_DENIED: str = "PERMISSION_DENIED"
 
 
 def _sql_in(values: tuple[str, ...]) -> str:
@@ -483,20 +495,21 @@ def _patch_audit_log_seq(conn: sqlite3.Connection) -> None:
 
 
 def _patch_audit_log_source_check(conn: sqlite3.Connection) -> None:
-    """v5 patch（P3）：audit_log.source CHECK 补 'publish'（发布审计 source='publish'）。
+    """audit_log.source CHECK 与最新 AUDIT_SOURCES 对齐（重建表迁移，仿 v4/v5 先例）。
 
-    P3 引入发布审计（action_name='mapping_publish', source='publish'），但存量库的
-    source CHECK 白名单（('action','query','review','permission')）不含 'publish'，
-    SQLite 无法 ALTER ADD CONSTRAINT。采用重建表迁移（仿 v4 action_runs.executed_by
-    先例）：单事务建新表（含新 CHECK）→ 拷数据 → 换名 → 重建索引与 WORM 触发器；
-    失败整体回滚不丢数据。存量哈希链 prev_hash/record_hash 原样拷贝，verify_integrity
-    不受影响。新库（source 列已按最新 AUDIT_SOURCES 建 CHECK）经 sqlite_master 检出
-    'publish' 后幂等跳过。
+    AUDIT_SOURCES 新增取值时（v5 的 'publish'、v7 的 'correction'），存量库的 source
+    CHECK 白名单不含新值，SQLite 无法 ALTER ADD CONSTRAINT → 重建表迁移：单事务
+    建新表（含最新 CHECK）→ 拷数据 → 换名 → 重建索引与 WORM 触发器；失败整体回滚
+    不丢数据。存量哈希链 prev_hash/record_hash 原样拷贝，verify_integrity 不受影响。
+    新库（source 列已按最新 AUDIT_SOURCES 建 CHECK）经 sqlite_master 检出全部取值
+    后幂等跳过。
     """
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='audit_log'"
     ).fetchone()
-    if row is None or "publish" in (row[0] or ""):
+    if row is None:
+        return
+    if all(v in (row[0] or "") for v in AUDIT_SOURCES):
         return
     new_sql = re.sub(
         r"CHECK \(source IN \(.*?\)\)",
@@ -505,7 +518,10 @@ def _patch_audit_log_source_check(conn: sqlite3.Connection) -> None:
         flags=re.DOTALL,
     )
     cols = ",".join(r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall())
-    new_sql = re.sub(r"^CREATE TABLE audit_log", "CREATE TABLE audit_log_new", new_sql, count=1)
+    # 兼容引号表名：经 RENAME TO 迁移过的库，sqlite_master 存的 SQL 为 CREATE TABLE "audit_log"（SQLite 行为）
+    new_sql = re.sub(
+        r'^CREATE TABLE "?audit_log"?', "CREATE TABLE audit_log_new", new_sql, count=1
+    )
     try:
         conn.execute("DROP TRIGGER IF EXISTS trg_audit_log_wo_upd")
         conn.execute("DROP TRIGGER IF EXISTS trg_audit_log_wo_del")
@@ -638,7 +654,8 @@ class Store:
             "治理段（P1.5）：permission_roles/permission_policies/audit_field_mirror/"
             "mapping_candidates/mapping_review_history + audit_log 加列(prev_hash/"
             "record_hash/retention_class/source/seq) + WORM 触发器 + 枚举 CHECK 同源；"
-            "v6 patch: audit_log.seq 链序列（P2-1 哈希链序 = 追加序）"
+            "v6 patch: audit_log.seq 链序列（P2-1 哈希链序 = 追加序）；"
+            "v7 patch: source 补 'correction'（P1.5 R3 审计修正策略，只追加不 UPDATE）"
         )
         merged_note = f"{runtime_note}；{builder_note}；{governance_note}"
         conn = self.ontology_conn()
