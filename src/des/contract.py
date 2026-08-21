@@ -12,6 +12,9 @@ v0.2 扩展（设计 §3.1/§3.2，老 v0.1 契约原样可执行）：
   否则走 v0.1 对象路径（行为完全不变）；
 - count_distinct 聚合函数（v0.1 普通聚合同样支持）；
 - time_range（{from, to} ISO 日期）——metric 块内绑定日期维度；非 metric 契约绑定对象唯一 date 字段。
+- 读侧权限（P1.5 decide(read) 接线，设计 §3.3）：permission_ctx 非 None 时查询前
+decide(subject, object_type, 'read')，属性级 visible_attributes 过滤返回列，
+契约显式请求的字段触及不可见列 fail-closed 拒答（不静默裁剪，防推断泄漏）。
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ from src.des.metrics import (
 )
 from src.ontology import build_registry
 from src.ontology.registry import Registry
+from src.runtime.permissions import PermissionRegistry, PermissionSubject
 
 # ---------------------------------------------------------------------------
 # 常量（契约 schema 白名单 / 护栏上限，设计 §3.1/§3.3）
@@ -63,6 +67,7 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # time_range ISO 日期（V2�
 _METRIC_REAGG_SQL = {"sum": "SUM", "count": "SUM", "min": "MIN", "max": "MAX"}
 _SQL_FRAGMENT_MARKERS = ("'", '"', ";", "--", "/*", "*/")
 _SQL_KEYWORDS = re.compile(r"\b(select|union|insert|delete|update|drop|alter)\b", re.IGNORECASE)
+PERMISSION_DENIED = "PERMISSION_DENIED"  # 读侧权限拒绝错误码（设计 §3.3，fail-closed 拒答）
 
 # DQ-01「哪些物料一物多码？」契约实例（设计 §3.2）
 DQ01_CONTRACT = {
@@ -77,6 +82,34 @@ DQ01_CONTRACT = {
 
 class ContractError(Exception):
     """契约校验/执行失败（fail-closed 拒答，不降级为裸执行）。"""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        # 未显式传 code 时回落到子类类属性（PermissionDeniedError.code=PERMISSION_DENIED）
+        self.code = code if code is not None else getattr(type(self), "code", None)
+
+
+class PermissionDeniedError(ContractError):
+    """读侧权限拒绝（设计 §3.3：fail-closed 拒答，不静默裁剪防推断泄漏）。
+
+    与 ContractError 同族（既有 pytest.raises(ContractError) 兼容不破坏）；
+    附加 code=PERMISSION_DENIED 供上层映射错误码/拒答语义。
+    """
+
+    code = PERMISSION_DENIED
+
+
+@dataclass(frozen=True)
+class PermissionContext:
+    """读侧权限上下文（设计 §3.3）：主体 + 权限注册表。
+
+    传给 ContractExecutor 即启用读侧权限：查询前 decide(subject, object_type, "read")，
+    属性级 visible_attributes 过滤返回列；契约显式请求的字段触及不可见列 fail-closed 拒答
+    （不静默裁剪，防推断泄漏）。缺省 None = 无权限校验（保持既有调用兼容）。
+    """
+
+    subject: PermissionSubject
+    permission_registry: PermissionRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -475,11 +508,14 @@ class ContractExecutor:
         registry: Registry,
         metrics: MetricRegistry | None = None,
         metrics_db: Path | None = None,
+        permission_ctx: PermissionContext | None = None,
     ) -> None:
         """metrics：指标注册表（v0.2 metric 路径必需；未注入时含 metric 契约 fail-closed 拒答）。
 
         metrics_db：metrics.db 路径（默认 = 企业目录 / metrics.db，与 manifest.json 同目录，
         供 T3 版本守卫比对）。
+        permission_ctx：读侧权限上下文（设计 §3.3，P1.5 接线）；缺省 None = 无权限校验，
+        保持既有调用兼容。非 None 时 execute/_execute_metric 前置 decide(read) 并做可见列过滤。
         """
         self._mz = materialization
         self._registry = registry
@@ -489,6 +525,7 @@ class ContractExecutor:
         self._metrics_db = metrics_db or (
             DEFAULT_ENTERPRISES_DIR / materialization.enterprise_code / METRICS_DB
         )
+        self._permission_ctx = permission_ctx
 
     def execute(self, contract: dict) -> dict:
         """校验并执行契约；任一校验失败抛 ContractError（fail-closed 拒答）。
@@ -502,6 +539,14 @@ class ContractExecutor:
         if violations:
             raise ContractError("契约校验失败（fail-closed 拒答）: " + "; ".join(violations))
         obj = _resolve_type(self._registry, contract["object_type"])
+        # 读侧权限（设计 §3.3：validate 后、execute 前）：decide(read) + 显式请求列可见性 fail-closed
+        visible = self._permission_visible(obj.name)
+        requested = [obj.pk_field] + list((contract.get("filters") or {}).keys())
+        requested += [
+            a.get("field") for a in (contract.get("aggregations") or []) if a.get("field") != "*"
+        ]
+        requested += contract.get("group_by") or []
+        self._assert_fields_visible(visible, requested, obj.name)
         where, params = _build_where(contract.get("filters") or {})
         sql = f"SELECT * FROM {obj.source_table} WHERE {where} ORDER BY {obj.pk_field}"
         try:
@@ -521,7 +566,7 @@ class ContractExecutor:
 
         if contract.get("aggregations"):
             return self._run_aggregation(contract, obj, rows, excluded)
-        items = self._build_items(obj, rows, contract.get("link_traversal"))
+        items = self._build_items(obj, rows, contract.get("link_traversal"), visible)
         result = {"object_type": obj.name, "count": len(items), "items": items}
         if excluded:
             result["_diagnostics"] = {"predicate_excluded": excluded}
@@ -537,6 +582,67 @@ class ContractExecutor:
         mara = config["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
         rate = config["injection"]["multi_code"]["rate"]
         return max(RESULT_LIMIT_FLOOR, 2 * round(mara * rate))
+
+    # ------------------------------------------------------------------
+    # 读侧权限（设计 §3.3：P1.5 decide(read) 接线；fail-closed 不静默裁剪）
+    # ------------------------------------------------------------------
+    def _permission_visible(self, object_type: str) -> list[str] | None:
+        """前置 decide(subject, object_type, 'read')：allowed=False → fail-closed 拒答。
+
+        返回 visible_attributes（读侧可见属性列表，属性级 deny 已剔除）；无权限上下文 → None
+        （不校验，兼容既有调用）。allowed 但可见集缺失（decide 异常态）保守视为全字段可见。
+        """
+        ctx = self._permission_ctx
+        if ctx is None:
+            return None
+        decision = ctx.permission_registry.decide(ctx.subject, object_type, "read")
+        if not decision.allowed:
+            raise PermissionDeniedError(
+                f"读侧权限拒绝: 主体 {ctx.subject.kind}:{ctx.subject.id} 无 {object_type} 的 "
+                "read 权限（fail-closed）"
+            )
+        if decision.visible_attributes is not None:
+            return decision.visible_attributes
+        if self._registry.has_object_type(object_type):  # 异常态兜底：全字段可见
+            return list(self._registry.object_type(object_type).model.model_fields)
+        return None
+
+    def _object_fields(self, object_type: str, names: list[str]) -> list[str]:
+        """把请求列裁剪到对象字段（指标派生列/度量列非对象字段，不受属性级 deny 约束）。"""
+        if not self._registry.has_object_type(object_type):
+            return []
+        fields = self._registry.object_type(object_type).model.model_fields
+        return [n for n in names if n in fields]
+
+    def _assert_fields_visible(
+        self, visible: list[str] | None, fields: list[str], what: str
+    ) -> None:
+        """契约显式请求的字段触及不可见列 → fail-closed 拒答（不静默裁剪，防推断泄漏）。
+
+        visible=None（无权限上下文）或请求为空时不触发；重复字段去重后判定。
+        """
+        if visible is None:
+            return
+        invisible = sorted(f for f in set(fields) if f is not None and f not in visible)
+        if invisible:
+            raise PermissionDeniedError(
+                f"读侧权限拒绝（{what}）: 请求字段不可见 {invisible}（属性级 deny，fail-closed）"
+            )
+
+    def _filter_metric_rows(
+        self, rows: list[dict[str, Any]], visible: list[str] | None, md: MetricDef
+    ) -> list[dict[str, Any]]:
+        """返回行按可见列过滤（设计 §3.3）：对象字段列仅保留可见者；度量/派生列（非对象字段）为指标答案保留。
+
+        visible=None（无权限上下文）或 rows 为空 → 原样返回。
+        """
+        if visible is None or not rows:
+            return rows
+        obj_fields: set[str] = set()
+        if self._registry.has_object_type(md.object_type):
+            obj_fields = set(self._registry.object_type(md.object_type).model.model_fields)
+        keep = [c for c in rows[0] if c not in obj_fields or c in visible]
+        return [{k: v for k, v in r.items() if k in keep} for r in rows]
 
     def _needs_multi_code_predicate(self, contract: dict) -> bool:
         """契约是否以 old_code is_not_null 选中一物多码结果集（触发全谓词强制）。"""
@@ -576,10 +682,15 @@ class ContractExecutor:
         return result
 
     def _build_items(
-        self, obj: Any, rows: list[dict[str, Any]], link_traversal: dict | None
+        self,
+        obj: Any,
+        rows: list[dict[str, Any]],
+        link_traversal: dict | None,
+        visible: list[str] | None = None,
     ) -> list[dict]:
-        """组装 items：properties 全字段；link_traversal（material.codes, hops=1）带回 codes 数组。"""
-        fields = list(obj.model.model_fields)
+        """组装 items：properties 为可见列（permission_ctx 下 = visible_attributes，属性级 deny 剔除）；
+        link_traversal（material.codes, hops=1）带回 codes 数组。"""
+        fields = list(visible) if visible is not None else list(obj.model.model_fields)
         by_pk: dict[str, list[dict]] = defaultdict(list)
         if link_traversal:
             link = _find_link(self._registry, obj, link_traversal["link"])
@@ -613,6 +724,15 @@ class ContractExecutor:
         if not self._metrics_db.is_file():
             raise ContractError(f"metrics.db 缺失: {self._metrics_db}（先运行 materialize_metrics）")
         md = self._metrics.by_id()[contract["metric"]["metric_id"]]
+        # 读侧权限（设计 §3.3）：资源 = 指标主体对象；维度/度量列过滤（对象字段受属性级约束）
+        visible = self._permission_visible(md.object_type)
+        requested = list((contract["metric"].get("dimension_filters") or {}).keys())
+        tr = contract["metric"].get("time_range") if contract["metric"].get("time_range") is not None else contract.get("time_range")
+        if tr is not None:
+            requested.append(self._date_dimension(md).name)
+        requested += contract["metric"].get("group_by") or []
+        requested = self._object_fields(md.object_type, requested)  # 指标派生列（非对象字段）不受属性级约束
+        self._assert_fields_visible(visible, requested, md.object_type)
         conn = duckdb.connect(str(self._metrics_db), read_only=True)
         try:
             self._guard_version(conn)  # T3 版本守卫（漂移 fail-fast）
@@ -624,6 +744,7 @@ class ContractExecutor:
         limit = self._result_limit()
         if len(rows) > limit:
             raise ContractError(f"结果行数 {len(rows)} 超过护栏上限 {limit}（V5，请加过滤）")
+        rows = self._filter_metric_rows(rows, visible, md)
         return {
             "object_type": md.object_type,
             "metric_id": md.metric_id,
