@@ -1,7 +1,7 @@
 
 # P1a 本体映射与查询契约设计 v0.1
 
-> 编制：架构角色（本体论方向）｜ 日期：2026-08-21 ｜ 状态：待 Jack 业务验收
+> 编制：架构角色（本体论方向）｜ 日期：2026-08-21 ｜ 状态：已验收（2026-08-21 Jack）
 > 关联：docs/P1a-DES-配置与表结构设计_v0.1.md（数据角色，本设计的字段落点与门禁锚）、docs/DES-最小垂直切片规划_v0.1草案.md（§2/§8）、research/s2-review-decision-pack.md（D3）、docs/S2-P0-执行记录.md §五 P1a 门禁、docs/S2-议题清单_v0.1.md §3.7（议题 2）
 > 风格对齐：src/ontology/objects.py（Pydantic + own() 状态归属）、src/ontology/links.py（LinkTypeDef 双向链接）、src/ontology/registry.py（注册表 + self_check）；**不引入 RDFlib**
 > 产出：本文档（单文件 md，设计规格）；实现由 P1a 编码活落地，与数据角色文档同一次验收（P1a 门禁 3/4/5）
