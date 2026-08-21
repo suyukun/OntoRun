@@ -2,6 +2,7 @@
 
 技术方案依据：§2.2 对象清单（8）、§2.3 链接（8，双向命名）、§2.4 动作（6）、
 §3.2 registry 自检（主键唯一 / 链接双向命名一致 / 动作参数完整 / 状态归属标注）、§4.3 错误码全集。
+S2 P1a/P2：DES 对象（Material/Code + P2 主体对象 Vendor/InventoryLocation/FinanceEntry）同注册表。
 """
 
 import pytest
@@ -34,6 +35,8 @@ EXPECTED_OBJECTS = {
     "Shipment",
     "Refund",
 }
+# P2 ChatBI 主体对象（2026-08-21 Jack 拍板；Customer 复用 S1 零售对象，其余 3 个新注册）
+P2_SUBJECT_OBJECTS = {"Customer", "Vendor", "InventoryLocation", "FinanceEntry"}
 EXPECTED_ACTIONS = {
     "create_order",
     "confirm_order",
@@ -53,10 +56,13 @@ def registry() -> Registry:
 
 
 def test_registry_loads(registry):
-    # S2 P1a：DES 对象（Material/Code）与 S1 8 对象同一注册表（设计 §1.4），共 10 个
-    assert len(registry.object_types()) == 10
+    # S2 P1a/P2：DES 对象（Material/Code + P2 主体对象 Vendor/InventoryLocation/FinanceEntry）
+    # 与 S1 8 对象同一注册表（设计 §1.4/§1.5），共 13 个
+    assert len(registry.object_types()) == 13
     assert EXPECTED_OBJECTS <= {t.name for t in registry.object_types()}
     assert {"Material", "Code"} <= {t.name for t in registry.object_types()}
+    # P2 4 个指标主体对象全部已注册（解除 planned，M1 前置）
+    assert P2_SUBJECT_OBJECTS <= {t.name for t in registry.object_types()}
 
 
 def test_link_count_and_names(registry):

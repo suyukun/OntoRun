@@ -4,7 +4,8 @@
 
 1. 候选生成与分级（§1.3）：annotate_mapping_candidates 对 DES 语义 + FK 检测产出候选，
    classify 档位自洽（confidence_level == classify(score)），高（score≥0.9）自动过，
-   中/低进审核队列；C4 未注册 target 跳过（待补录）。
+   中/低进审核队列；C4 未注册 object target 进待补录队列（draft，不静默丢弃），
+   attribute target 跳过（待补录计数）。
 2. 审核流转（§2）：review CLI export（CSV 含 header 快照）→ import accept/reject/conflict
    → 状态机合法 + mapping_review_history 留痕 + audit source='review'；非法裁决（未知
    candidate_id / 非法 decision）fail-fast 记失败不静默；approved 终态锁定不可改；
@@ -237,21 +238,27 @@ def test_candidate_generation_des_and_links(store, registry) -> None:
         ],
     }
     persisted = annotate_mapping_candidates(source, registry, store=store)
-    # 2 des（object/attribute）+ 2 fk link；命名 attribute 的 PascalCase target 非注册字段 → C4 跳过
-    assert len(persisted) == 4
+    # 2 des（object/attribute）+ 2 fk link + GhostObj（object 未注册 → 待补录 draft）
+    assert len(persisted) == 5
     kinds = {c.kind for c in persisted}
     assert kinds == {"object", "attribute", "link"}
     objs = [c for c in persisted if c.kind == "object"]
     attrs = [c for c in persisted if c.kind == "attribute"]
     links = sorted((c for c in persisted if c.kind == "link"), key=lambda c: c.confidence_score, reverse=True)
-    assert [c.target for c in objs] == ["Material"]
+    assert [c.target for c in objs] == ["Material", "GhostObj"]
     assert [c.target for c in attrs] == ["matnr"]
     assert [c.target for c in links] == ["lnk_med", "lnk_low"]
     # 档位自洽：confidence_level == classify(score)
     for c in persisted:
         assert c.confidence_level == classify(c.confidence_score)
-    # 高置信（DES score 1.0）自动过
-    for c in objs + attrs:
+    # 已注册 object（Material）高置信自动过；未注册 object（GhostObj）进待补录 draft 不自动过
+    mat = next(c for c in objs if c.target == "Material")
+    ghost = next(c for c in objs if c.target == "GhostObj")
+    assert mat.confidence_level == "high" and mat.review_status == APPROVED and mat.auto_approved
+    assert ghost.review_status == DRAFT and not ghost.auto_approved
+    assert ghost.evidence_json.get("c4") == "pending_registration"  # 待补录标记（不静默丢弃）
+    # attribute 高置信（DES score 1.0）自动过
+    for c in attrs:
         assert c.confidence_level == "high"
         assert c.review_status == APPROVED and c.auto_approved is True
     # 中/低进审核队列
@@ -260,9 +267,9 @@ def test_candidate_generation_des_and_links(store, registry) -> None:
     assert all(not c.auto_approved for c in links)
     # 自动过留 auto 历史
     svc = MappingCandidateService(store, registry)
-    hist = svc.list_history(objs[0].candidate_id)
+    hist = svc.list_history(mat.candidate_id)
     assert len(hist) == 1 and hist[0]["reviewer"] == "auto"
-    # 命名 attribute 未入表（C4 跳过 → 待补录）
+    # 命名 attribute 未入表（C4 跳过 → 待补录，attribute 不进队只计数）
     assert all(c.target not in ("Name", "MaterialType") for c in persisted)
 
 
@@ -777,11 +784,11 @@ def test_run_mapping_pipeline_report(store, registry) -> None:
     }
     report = run_mapping_pipeline(source, store=store, registry=registry)
     assert report["source_table"] == "erp.MARA"
-    assert report["total_candidates"] == 3  # Material + matnr + lnk_p（Name C4 跳过）
+    assert report["total_candidates"] == 4  # Material + matnr + lnk_p + GhostObj（object 待补录 draft）
     assert report["auto_approved"] == 2     # Material + matnr（DES score 1.0 高置信自动过）
-    assert report["in_queue"] == 1          # lnk_p medium → draft 队列
-    assert report["by_level"] == {"high": 2, "medium": 1, "low": 0}
-    assert report["skipped_c4"] == ["GhostObj", "Name"]  # C4 未注册 target 显式计数（不再静默丢弃）
+    assert report["in_queue"] == 2          # lnk_p medium + GhostObj（object 未注册 → 待补录 draft）
+    assert report["by_level"] == {"high": 3, "medium": 1, "low": 0}  # GhostObj 1.0 → high（但 draft）
+    assert report["skipped_c4"] == ["GhostObj", "Name"]  # object 待补录 + attribute 跳过均显式计数
 
 
 # ======================================================================

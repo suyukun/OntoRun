@@ -1,4 +1,6 @@
-"""DES 垂直切片本体对象 —— Material（物料概念）+ Code（编码对象）+ hasCode 链接。
+"""DES 垂直切片本体对象 —— Material（物料概念）+ Code（编码对象）+ hasCode 链接，
++ P2 ChatBI 主体对象（Vendor / InventoryLocation / FinanceEntry，2026-08-21 Jack 拍板注册）。
++（Customer 主体对象复用 S1 零售 Customer，同一注册表，见 src/ontology/objects.py。）
 
 依据 docs/P1a-本体映射与查询契约设计_v0.1.md §1.2/§1.4：
 - Material = 跨 3 源系统（ERP/MES/WMS）物化的物料概念，join key = MATNR，字段内嵌 4 码位
@@ -65,6 +67,42 @@ class Code(BaseModel):
     material_matnr: str = own(OWN_SOURCE, "归属物料（FK -> Material.matnr，hasCode 链接承载）")
 
 
+class Vendor(BaseModel):
+    """供应商（DES：采购主体，权威表 SCM.LFA1）。PK/Title = vendor_id。"""
+
+    vendor_id: str = own(OWN_SOURCE, "供应商号（PK/Title，权威列 SCM.LFA1.LIFNR）")
+    name: str = own(OWN_SOURCE, "供应商名称（权威列 SCM.LFA1.NAME1）")
+    city: str = own(OWN_SOURCE, "所在城市（权威列 SCM.LFA1.ORT01）")
+    country: str = own(OWN_SOURCE, "国家/地区（权威列 SCM.LFA1.LAND1）")
+
+
+class InventoryLocation(BaseModel):
+    """库存地点（DES：ERP.MARD 地点粒度 WERKS+LGORT）。PK = location_id 派生。"""
+
+    location_id: str = own(
+        OWN_SOURCE, "库存地点号（PK，派生自 factory + location，'{WERKS}|{LGORT}'）"
+    )
+    factory: str = own(OWN_SOURCE, "工厂（权威列 ERP.MARD.WERKS，指标维度 factory）")
+    location: str = own(
+        OWN_SOURCE, "库存地点（权威列 ERP.MARD.LGORT / WMS.MSEG.LGORT，指标维度 location）"
+    )
+
+
+class FinanceEntry(BaseModel):
+    """财务凭证行（DES：权威表 FIN.ACDOCA）。PK = entry_id 派生自 BELNR+POSNR。"""
+
+    entry_id: str = own(
+        OWN_SOURCE, "财务凭证行号（PK，派生自 belnr + posnr，'{BELNR}|{POSNR}'）"
+    )
+    belnr: str = own(OWN_SOURCE, "会计凭证号（权威列 FIN.ACDOCA.BELNR）")
+    posnr: str = own(OWN_SOURCE, "凭证行项目（权威列 FIN.ACDOCA.POSNR）")
+    account: str = own(OWN_SOURCE, "会计科目（权威列 FIN.ACDOCA.RACCT，指标维度 account）")
+    cost_center: str = own(OWN_SOURCE, "成本中心（权威列 FIN.ACDOCA.KOSTL，指标维度 cost_center）")
+    amount: float = own(OWN_SOURCE, "金额（借正/贷负，权威列 FIN.ACDOCA.WSL，指标度量 amount）")
+    post_date: str = own(OWN_SOURCE, "过账日期 YYYY-MM-DD（权威列 FIN.ACDOCA.BUDAT，指标月维度源）")
+    ref_type: str = own(OWN_SOURCE, "参考单据类型 SO/PO/MV（权威列 FIN.ACDOCA.REF_TYPE，指标维度 ref_type）")
+
+
 # hasCode 链接：Material 1:N Code（1 概念多编码），FK 在 Code（target 侧）——
 # 对齐 S1「1:N → 外键在 target」约定（src/ontology/links.py 头注释）
 HAS_CODE_LINK = LinkTypeDef(
@@ -96,6 +134,33 @@ DES_OBJECT_TYPES: list[ObjectTypeDef] = [
         pk_field="code_id",
         title_field="code_id",
         source_table="codes",
+    ),
+    ObjectTypeDef(
+        name="Vendor",
+        api_name="vendor",
+        description="供应商（DES：采购主体，权威表 scm.LFA1，PK = LIFNR）",
+        model=Vendor,
+        pk_field="vendor_id",
+        title_field="vendor_id",
+        source_table="scm.LFA1",
+    ),
+    ObjectTypeDef(
+        name="InventoryLocation",
+        api_name="inventory_location",
+        description="库存地点（DES：ERP.MARD 地点粒度 WERKS+LGORT）",
+        model=InventoryLocation,
+        pk_field="location_id",
+        title_field="location_id",
+        source_table="erp.MARD",
+    ),
+    ObjectTypeDef(
+        name="FinanceEntry",
+        api_name="finance_entry",
+        description="财务凭证行（DES：权威表 fin.ACDOCA，PK = BELNR+POSNR）",
+        model=FinanceEntry,
+        pk_field="entry_id",
+        title_field="entry_id",
+        source_table="fin.ACDOCA",
     ),
 ]
 

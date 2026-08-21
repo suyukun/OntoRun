@@ -5,8 +5,8 @@
 - 加载即校验，任一违规 fail-fast（对齐 contract.py V1-V5 与 config.py 的 fail-fast 纪律）；
 - M1-M8 机器校验（对象白名单 / 来源表白名单 / 字段存在 / 聚合合法 / 类型兼容 / 粒度唯一 /
   id 唯一 / 命名与 transform 白名单——M8 防未来注册表成为半可信输入时的物化 SQL 注入面）；
-- 4 个待注册主体对象（Customer/Vendor/InventoryLocation/FinanceEntry）注册等 Jack 拍板（§1.5），
-  M1 对 planned 对象放行但记 pending_registration —— 无这些对象注册也可正常加载。
+- 5 个指标主体对象（Material + Customer/Vendor/InventoryLocation/FinanceEntry）均已注册
+  （2026-08-21 Jack 拍板解除 planned 标记），M1 一律要求 object_type 可解析到已注册对象。
 """
 
 from __future__ import annotations
@@ -34,10 +34,15 @@ AGG_FUNCTIONS = ("sum", "count", "count_distinct", "avg", "min", "max")
 NUMERIC_AGGS = ("sum", "avg", "min", "max")
 ANY_COLUMN_AGGS = ("count", "count_distinct")
 
-# M1 已注册 DES 主体对象（P1a 已注册 Material/Code；指标主体对象用 Material）
-REGISTERED_OBJECT_TYPES = ("Material",)
-# M1 待注册主体对象（P2 设计 §1.5：4 新对象注册等 Jack 拍板）
-PLANNED_OBJECT_TYPES = ("Customer", "Vendor", "InventoryLocation", "FinanceEntry")
+# M1 已注册 DES 主体对象（P1a 注册 Material/Code；P2 注册 Customer/Vendor/InventoryLocation/
+# FinanceEntry——2026-08-21 Jack 拍板解除 planned 标记；Customer 复用 S1 零售 Customer）
+REGISTERED_OBJECT_TYPES = (
+    "Material",
+    "Customer",
+    "Vendor",
+    "InventoryLocation",
+    "FinanceEntry",
+)
 
 # M2 来源表白名单 = DES 18 表（P1b §3.1；可选从生效配置 systems[].tables[] 派生，见 _source_table_whitelist）
 DES_SOURCE_TABLES = frozenset(
@@ -280,10 +285,9 @@ class MetricDef:
 
 @dataclass(frozen=True)
 class MetricRegistry:
-    """校验通过后的指标注册表（不可变；含按对象索引 + pending 记录）。"""
+    """校验通过后的指标注册表（不可变；含按对象索引）。"""
 
     metrics: tuple[MetricDef, ...]
-    pending_registration: tuple[str, ...]  # 主体对象待注册（planned）的 metric_ids
 
     def by_id(self) -> dict[str, MetricDef]:
         return {m.metric_id: m for m in self.metrics}
@@ -307,7 +311,7 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _registered_object_types(registry: Registry | None) -> set[str]:
-    """M1 已注册对象集：优先取注入 Registry，兜底 REGISTERED_OBJECT_TYPES 常量。"""
+    """M1 已注册对象集：优先取注入 Registry，兜底 REGISTERED_OBJECT_TYPES 常量（5 主体对象）。"""
     reg = {o.name for o in registry.object_types()} if registry is not None else set()
     return reg | set(REGISTERED_OBJECT_TYPES)
 
@@ -411,10 +415,9 @@ def _check_m1_m2_m4(
     """M1 对象白名单 / M2 来源表白名单 / M4 聚合函数合法。"""
     v: list[str] = []
     ot = raw["object_type"]
-    if ot not in registered and ot not in PLANNED_OBJECT_TYPES:
+    if ot not in registered:
         v.append(
-            f"指标 #{idx}: object_type 未注册且不在待注册清单（M1）: {ot!r}"
-            f"（已注册={sorted(registered)}，planned={list(PLANNED_OBJECT_TYPES)}）"
+            f"指标 #{idx}: object_type 未注册（M1）: {ot!r}（已注册={sorted(registered)}）"
         )
     for t in raw["source_tables"]:
         if t not in whitelist:
@@ -542,9 +545,9 @@ def load_metrics(
 
     参数：
         path：注册表 YAML 路径（默认 data/des/des_metrics.yaml）；
-        registry：可选本体 Registry（M1 已注册对象集；不传时用内置已注册集 {"Material"}）；
+        registry：可选本体 Registry（M1 已注册对象集；不传时用内置 5 主体对象集）；
         config：可选生效配置（M2 来源表白名单派生；不传时用 18 表常量）。
-    返回：MetricRegistry（metrics / by_id / metrics_by_object / pending_registration）。
+    返回：MetricRegistry（metrics / by_id / metrics_by_object）。
     """
     yaml_path = Path(path) if path is not None else DEFAULT_METRICS_FILE
     data = _load_yaml(yaml_path)
@@ -554,7 +557,6 @@ def load_metrics(
     registered = _registered_object_types(registry)
     whitelist = _source_table_whitelist(config)
     metrics: list[MetricDef] = []
-    pending: list[str] = []
     seen_ids: dict[str, int] = {}
     seen_grains: dict[tuple, int] = {}
     for idx, raw in enumerate(raw_metrics):
@@ -571,9 +573,4 @@ def load_metrics(
             )
         metric = _to_metric(valid)
         metrics.append(metric)
-        if (
-            metric.object_type in PLANNED_OBJECT_TYPES
-            and metric.object_type not in registered
-        ):
-            pending.append(metric.metric_id)
-    return MetricRegistry(metrics=tuple(metrics), pending_registration=tuple(pending))
+    return MetricRegistry(metrics=tuple(metrics))

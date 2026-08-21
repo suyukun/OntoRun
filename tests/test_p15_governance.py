@@ -709,19 +709,23 @@ def test_confidence_level_derived_from_score(mapping) -> None:
 
 
 def test_annotate_mapping_candidates_entry(mapping, store, registry) -> None:
-    """打标入口：适配器输出 → classify → routing → 落表；未注册 target 跳过。"""
+    """打标入口：适配器输出 → classify → routing → 落表；未注册 object 进待补录 draft。"""
     source = {
         "source_table": "retail_orders",
         "des_mappings": [
             {"kind": "object", "target": "Order"},
             {"kind": "attribute", "target": "order_id", "source_field": "order_no"},
-            {"kind": "object", "target": "GhostObject"},  # 未注册 → 跳过
+            {"kind": "object", "target": "GhostObject"},  # 未注册 → 待补录 draft（不静默丢弃）
         ],
     }
     persisted = annotate_mapping_candidates(source, registry, store=store)
-    assert len(persisted) == 2
-    assert sorted(c.target for c in persisted) == ["Order", "order_id"]
-    assert all(c.auto_approved and c.review_status == APPROVED for c in persisted)
+    assert len(persisted) == 3
+    assert sorted(c.target for c in persisted) == ["GhostObject", "Order", "order_id"]
+    assert all(c.auto_approved and c.review_status == APPROVED for c in persisted
+               if c.target != "GhostObject")
+    ghost = next(c for c in persisted if c.target == "GhostObject")
+    assert ghost.review_status == DRAFT and not ghost.auto_approved
+    assert ghost.evidence_json.get("c4") == "pending_registration"  # 待补录标记
 
 
 # ======================================================================

@@ -244,6 +244,49 @@ class MappingCandidateService:
             conn.close()
         return routed
 
+    def create_pending_registration(
+        self,
+        candidate: MappingCandidate,
+        *,
+        thresholds: tuple[float, float] | None = None,
+    ) -> MappingCandidate:
+        """C4 待补录：未注册 object 候选落 draft 待补录队列（red-team P2-4）。
+
+        与 create 的关系：create 对 C4 失败 fail-fast 抛 TargetNotRegisteredError；本方法是
+        治理策略——annotate/pipeline 对「object 目标未注册」不静默丢弃，落 draft 队列
+        （evidence 标 c4=pending_registration），等对象经 P1a 注册后人工审核/自动过。
+        attribute 目标未注册仍走 create 的抛错（跳过 + skipped_c4 计数，不进队）。
+        """
+        if candidate.kind != "object":
+            raise ValueError(f"待补录仅适用于 object 候选: kind={candidate.kind!r}")
+        high, medium = thresholds if thresholds else (HIGH_THRESHOLD, MEDIUM_THRESHOLD)
+        now = _now()
+        draft = candidate.model_copy(
+            update={
+                "confidence_level": classify(candidate.confidence_score, high, medium),
+                "review_status": DRAFT,
+                "auto_approved": False,
+                "evidence_json": {
+                    **candidate.evidence_json,
+                    "c4": "pending_registration",
+                    "c4_reason": f"目标对象未注册（待补录）: {candidate.target}",
+                },
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        conn = self._store.ontology_conn()
+        try:
+            conn.execute(
+                f"INSERT INTO mapping_candidates ({_CAND_COLUMNS}) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                _candidate_to_row(draft),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return draft
+
     def transition(
         self, candidate_id: str, target: str, reviewer: str, note: str = ""
     ) -> MappingCandidate:
@@ -533,9 +576,12 @@ def _persist_candidates(
     *,
     thresholds: tuple[float, float] | None = None,
 ) -> tuple[list[MappingCandidate], list[str]]:
-    """落表 + 显式收集 C4 未注册 target（red-team P2-4：静默跳过 → 显式 skipped 计数）。
-
-    thresholds 透传 create（P3 §1.3 校准阈值覆盖，缺省 None 用默认）。
+    """落表 + C4 未注册 target 显式处理（red-team P2-4：不再静默丢弃）：
+    - object 目标未注册 → 进待补录队列（draft，evidence 标 c4=pending_registration）
+      + skipped_c4 计数——等对象 P1a 注册后人工审核（Jack 拍板「注册后新对象可入」）；
+    - attribute 目标未注册 → 跳过（不进队）+ skipped_c4 计数；
+    - link 不入 C4 校验（create 正常落表）。
+    thresholds 透传 create / create_pending_registration（校准阈值覆盖，缺省 None 用默认）。
     """
     persisted: list[MappingCandidate] = []
     skipped_c4: list[str] = []
@@ -543,6 +589,10 @@ def _persist_candidates(
         try:
             persisted.append(service.create(cand, thresholds=thresholds))
         except TargetNotRegisteredError:
+            if cand.kind == "object":
+                persisted.append(
+                    service.create_pending_registration(cand, thresholds=thresholds)
+                )
             skipped_c4.append(cand.target)
     return persisted, skipped_c4
 
@@ -561,8 +611,9 @@ def annotate_mapping_candidates(
       detected_links（fk_detection.detect_links 输出）；
       alias_result（alias_matcher.match_aliases 输出，可 None）；
       des_mappings（DES 语义已知映射：[{kind, target, source_field?}]）。
-    返回成功落表的候选；C4 未注册 target（对象/属性）的候选跳过（P3 待补录处理），
-    skipped 明细由 run_mapping_pipeline（PipelineReport.skipped_c4）显式收集。
+    返回成功落表的候选：已注册 target 正常过（高置信自动过）；object target 未注册
+    进待补录队列（draft，不静默丢弃）；attribute target 未注册跳过。skipped_c4 明细由
+    run_mapping_pipeline（PipelineReport.skipped_c4）显式收集。
     """
     service = MappingCandidateService(store or Store(), registry)
     persisted, _skipped = _persist_candidates(service, _adapt_all(source))
