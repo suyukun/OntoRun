@@ -39,6 +39,14 @@ YAML 配置 → DES 生成 MARA 表（SQLite）→ 注入一物多码 → 本体
 - 方法论 UI 1 步：0.5 周
 - **合计约 3 周**（1 人）
 
+
+
+## 6. 关键技术验证（2026-08-21，验证先行）
+
+1. **workflow 模型覆盖生效**：agent(..., { provider:"volc-coding-plan", model:"minimax-m3" }) 确实派出 MiniMax-M3（冒烟测试返回 "MiniMax-M3"），非继承 flash——多模型复核机制可行；
+2. **DuckDB 1.5.5 已装**（清华源）；**DuckDB 可直接读 SQLite**（sqlite_scan，无需转换）——双引擎方案成立；
+3. **DuckDB 物化聚合验证通过**：从 SQLite 源表 CREATE TABLE AS SELECT ... GROUP BY → 物化聚合表 + 导出 parquet 持久化——ChatBI"预聚合优先"落地路径成立。
+
 ## 5. 依赖
 - 议题 1（ChatBI 形态）、议题 2（映射机制）、议题 9（DES 形态）——均已定
 - 复用：builder/mapping（fk_detection/naming/alias_matcher）、agent/provider、前端 builder 页
