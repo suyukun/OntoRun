@@ -13,8 +13,8 @@ domain: "manufacturing"
 labeling:
   method: "single-pass"     # demo 口径（设计 §3.5）：单轮标注 + Rose 复核
   annotator: "jack"         # 数据角色单轮标注
-  reviewer: "rose"          # Rose 复核（全量一致性 + 冲突仲裁 + 抽样抽审）——待办，复核通过前真值以本文档为准
-  reviewed: false
+  reviewer: "rose"          # Rose 复核（全量一致性 + 冲突仲裁 + 抽样抽审）——2026-08-21 复核通过
+  reviewed: true
   labeled_at: "2026-08-21"
 
 entries:
