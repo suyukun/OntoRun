@@ -15,13 +15,15 @@ from .generate import build_enterprise
 
 def main(argv: Sequence[str] | None = None) -> None:
     """argparse 入口：--enterprise/--seed/--out（默认输出企业目录）。"""
-    parser = argparse.ArgumentParser(description="DES 确定性企业数据生成器（S2 P1a 垂直切片）")
+    parser = argparse.ArgumentParser(description="DES 确定性企业数据生成器（S2 P1b Phase A：主数据表）")
     parser.add_argument("--enterprise", default="hc_precision", help="企业编码（目录名），默认 hc_precision")
     parser.add_argument("--seed", type=int, default=None, help="覆盖企业配置中的生成 seed")
     parser.add_argument("--out", default=None, help="输出目录（默认 <data/des/enterprises>/<enterprise>）")
     args = parser.parse_args(argv)
     result = build_enterprise(args.enterprise, out_dir=args.out, seed=args.seed)
-    print(f"已生成企业数据: {result['enterprise']}（seed={result['seed']}，注入 {result['injected']} 行）")
+    tables = ", ".join(f"{tid}={n}" for tid, n in result["tables"].items())
+    print(f"已生成企业数据: {result['enterprise']}（seed={result['seed']}，主数据 {result['total_rows']} 行，注入 {result['injected']} 行）")
+    print(f"表行数: {tables}")
     print(f"输出目录: {result['out']}")
 
 

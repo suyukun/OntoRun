@@ -1,9 +1,11 @@
 # des_industry_template.yaml —— 制造业行业模板（默认层，行业级共用，一般不改）
-# 依据 docs/P1a-DES-配置与表结构设计_v0.1.md §1.3；企业文件经加载器 deep_merge 继承本层。
+# 依据 docs/P1b-DES-横向铺开设计_v0.1.md（§2 表清单 / §3.1 行数分布 / §5.1 约定 4 / §7.2 扩展点）；
+# 企业文件经加载器 deep_merge 继承本层；表规格（kind/row_count/pk/depends_on/fk）默认放本层，企业层可覆盖。
 industry: manufacturing
 template_version: "0.1"
+data_version: "P1b-1"          # 数据版本（参与 config_sha256，约定 4 扩展）
+total_target: 1000000          # 总行数门禁目标（Σ row_count；机验口径留 Phase B 事务表实现后）
 
-# —— 默认锚：企业文件经加载器深度合并继承；本文件内 anchor/alias 消重 ——
 coding: &coding
   master_pattern: "MAT-{YYYY}-{NNNN}-{CCC}"    # 新主码（ERP MATNR 格式），机验锚点
   year: 2026
@@ -11,12 +13,141 @@ coding: &coding
 injection: &injection
   multi_code:
     field: BISMT            # 旧码承载字段（ERP MARA.BISMT）
-    rate: 0.15              # 一物多码注入率目标（默认 15%）
+    rate: 0.15              # 一物多码注入率目标（8,000 × 15% = 精确 1,200 行，§2.1/§5.2）
     tolerance: 0.02         # 注入率机验容差（±2%）
-    legacy_pattern: "{prefix}-{year}{seq:05d}"   # 旧码格式，如 HC-202600007
+    legacy_pattern: "{prefix}-{year}{seq:05d}"   # 旧码格式，如 HC-202600001
 
 storage:
   layout: "one_enterprise_one_dir"   # 1 企业=1 目录，N 系统=N SQLite 文件（见 §5）
 
-seed_policy: fixed                   # 确定性锚：固定 seed（沿用 S1：SEED 固定 + 确定性生成）
-material_count_default: 200
+seed_policy: fixed                   # 确定性锚：固定 seed（沿用 P1a，§5 约定 1）
+
+# —— 表注册表（§2/§3.1，18 表 5 系统）——
+# kind: master 主数据 / transaction 事务（Phase B 实现）；row_count 精确行数；pk 主键列；
+# depends_on 生成拓扑依赖（约定 5）；fk 字段级外键声明（Phase B D 门禁 D1-D8 数据源）。
+enterprise:
+  systems:
+    erp:
+      db: erp.db
+      tables:
+        MARA:
+          kind: master
+          row_count: 8000
+          pk: [MATNR]
+          depends_on: []
+          fk: {}
+          injection: multi_code     # 一物多码注入参数引用（生效配置在 injection.multi_code）
+        MARC:
+          kind: master
+          row_count: 16000
+          pk: [MATNR, WERKS]
+          depends_on: [erp.MARA]
+          fk: {MATNR: erp.MARA}
+        MARD:
+          kind: master
+          row_count: 24000
+          pk: [MATNR, WERKS, LGORT]
+          depends_on: [erp.MARA]
+          fk: {MATNR: erp.MARA}
+        MAST:
+          kind: master
+          row_count: 10000
+          pk: [MATNR, WERKS, STLNR]
+          depends_on: [erp.MARA]
+          fk: {MATNR: erp.MARA}
+        STPO:
+          kind: master
+          row_count: 50000
+          pk: [STLNR, STLKN]
+          depends_on: [erp.MARA, erp.MAST]
+          fk: {STLNR: erp.MAST, IDNRK: erp.MARA}
+        VBAK:
+          kind: transaction
+          row_count: 40000
+          pk: [VBELN]
+          depends_on: [erp.KNA1]
+          fk: {KUNNR: erp.KNA1}
+        VBAP:
+          kind: transaction
+          row_count: 100000
+          pk: [VBELN, POSNR]
+          depends_on: [erp.VBAK, erp.MARA]
+          fk: {VBELN: erp.VBAK, MATNR: erp.MARA}
+        KNA1:
+          kind: master
+          row_count: 10000
+          pk: [KUNNR]
+          depends_on: []
+          fk: {}
+    mes:
+      db: mes.db
+      tables:
+        MPLA:
+          kind: master
+          row_count: 8000
+          pk: [MPLA_ID]
+          depends_on: [erp.MARA]
+          fk: {MATNR: erp.MARA}
+        AUFK:
+          kind: transaction
+          row_count: 90000
+          pk: [AUFNR]
+          depends_on: [erp.MARA]
+          fk: {MATNR: erp.MARA}
+        AFPO:
+          kind: transaction
+          row_count: 120000
+          pk: [AUFNR, POSNR]
+          depends_on: [mes.AUFK, erp.MARA]
+          fk: {AUFNR: mes.AUFK, MATNR: erp.MARA}
+        COFV:
+          kind: transaction
+          row_count: 180000
+          pk: [CONFNR]
+          depends_on: [mes.AUFK, erp.MARA]
+          fk: {AUFNR: mes.AUFK, MATNR: erp.MARA}
+    wms:
+      db: wms.db
+      tables:
+        WMMD:
+          kind: master
+          row_count: 8000
+          pk: [MATNR]
+          depends_on: [erp.MARA]
+          fk: {MATNR: erp.MARA}
+        MSEG:
+          kind: transaction
+          row_count: 180000
+          pk: [MBLNR, ZEILE]
+          depends_on: [erp.MARA, scm.EKKO, mes.AUFK]
+          fk: {MATNR: erp.MARA, EBELN: scm.EKKO, AUFNR: mes.AUFK}
+    scm:
+      db: scm.db
+      tables:
+        LFA1:
+          kind: master
+          row_count: 5000
+          pk: [LIFNR]
+          depends_on: []
+          fk: {}
+        EKKO:
+          kind: transaction
+          row_count: 30000
+          pk: [EBELN]
+          depends_on: [scm.LFA1]
+          fk: {LIFNR: scm.LFA1}
+        EKPO:
+          kind: transaction
+          row_count: 80000
+          pk: [EBELN, EBELP]
+          depends_on: [scm.EKKO, erp.MARA]
+          fk: {EBELN: scm.EKKO, MATNR: erp.MARA}
+    fin:
+      db: fin.db
+      tables:
+        ACDOCA:
+          kind: transaction
+          row_count: 41000
+          pk: [BELNR, POSNR]
+          depends_on: [erp.VBAP, scm.EKPO, wms.MSEG]
+          fk: {REF_DOC: erp.VBAP}   # REF_DOC 按 REF_TYPE（SO/PO/MV）多态引用，见设计 §2.5

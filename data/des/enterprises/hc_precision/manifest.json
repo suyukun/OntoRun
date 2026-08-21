@@ -1,20 +1,46 @@
 {
   "enterprise": "hc_precision",
   "seed": 20260821,
-  "config_sha256": "8a559631fdb3cef42ceaa26654ca4079a4fa1b4886ebe10de4a11c2ecad1208b",
+  "data_version": "P1b-1",
+  "config_sha256": "d3fa128e0abccfe602f673774a635b257fb1ec7ccb577416a34e6f1466aa6392",
+  "total_rows": 139000,
   "tables": {
+    "erp.KNA1": {
+      "rows": 10000,
+      "sha256": "9c336fa1cebf1c6ee069803a58ae941569e2c8b5eebe12d8515c0454f694941d"
+    },
     "erp.MARA": {
-      "rows": 200,
-      "sha256": "c17d20db58cd35881f822f2c3a55885fc1ba2daecc55562d74db8b94079b9da1",
-      "multi_code_count": 30
+      "rows": 8000,
+      "sha256": "5874f2501c64c7c507e454332ac3d3aad5f68bb2b362e130c9a3948d2e9ef229",
+      "multi_code_count": 1200
+    },
+    "erp.MARC": {
+      "rows": 16000,
+      "sha256": "a089b6cfe6fae20ce8ecb3b723b5d04dad36f2f4c4fd7eb39bfaad05307bf8c8"
+    },
+    "erp.MARD": {
+      "rows": 24000,
+      "sha256": "e6f56e69903b0a36d6aa96f8fbff2af8090c196044f3365fba75286cc0f87951"
+    },
+    "erp.MAST": {
+      "rows": 10000,
+      "sha256": "57e00a7f4a12ac5bea3b266028968250b330b1e5af3f7c0fa64fa2fc9110fbe9"
+    },
+    "erp.STPO": {
+      "rows": 50000,
+      "sha256": "979fa299c2fe260d2ebbb494c09f9f662b09105a596e1c05dce488fd8a381570"
     },
     "mes.MPLA": {
-      "rows": 200,
-      "sha256": "0ae06ea42ad171e758c84107d9619954c0ca3cf40f87f3bc2c5a4b0d8b4e7d7d"
+      "rows": 8000,
+      "sha256": "2a0503354df7ebb3de3939f2ac804827eab84029e1eab0d971868698c030c6e7"
+    },
+    "scm.LFA1": {
+      "rows": 5000,
+      "sha256": "ed7fa84dbf4df5f85f5fe1297bfb7282d4598319442d7cebc5f21e3d1f40b011"
     },
     "wms.WMMD": {
-      "rows": 200,
-      "sha256": "8694b0cb2d6b54daab38206d81e4f326ce2692e5974a9dc6ac0dddf53f6042c3"
+      "rows": 8000,
+      "sha256": "c62ba70336b4adcc217ed43eeddb72e27d6396d8ae288d49e8e50a9faac552ad"
     }
   }
 }
