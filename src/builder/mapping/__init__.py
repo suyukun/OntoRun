@@ -14,18 +14,28 @@ P0 仅子包骨架；P3 实现具体算法。
 
 from src.builder.mapping import (
     alias_matcher,
+    annotate,
     fk_detection,
     naming,
     repo,
     value_format,
     wide_split,
 )
+from src.builder.mapping.annotate import (
+    MappingCandidate,
+    MappingCandidateService,
+    classify,
+)
 from src.builder.mapping.auto_map import AutoMapResult, auto_map_from_inference
 
 __all__ = [
     "AutoMapResult",
+    "MappingCandidate",
+    "MappingCandidateService",
     "alias_matcher",
+    "annotate",
     "auto_map_from_inference",
+    "classify",
     "fk_detection",
     "naming",
     "repo",

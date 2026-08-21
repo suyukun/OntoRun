@@ -7,15 +7,16 @@ audit_id 用 ULID（时间有序 + 随机，标准库实现，不引依赖）。
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
-from src.runtime.store import Store
+from src.runtime.store import AUDIT_SOURCES, RETENTION_CLASSES, Store
 
 # Crockford Base32（ULID 字母表，不含 I/L/O/U）
 _ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -51,10 +52,63 @@ class AuditRecord(BaseModel):
     message: str | None = None
     detail_json: str | None = None
     duration_ms: int = 0
+    # P1.5 治理段：TTL 分级 + 来源分类（默认 sensitive/action，枚举单一来源 = store 顶部常量）
+    retention_class: str = "sensitive"
+    source: str = "action"
 
 
 def _j(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+# ----------------------------------------------------------------------
+# P1.5 哈希链（设计 2.3，零依赖 stdlib hashlib）
+# ----------------------------------------------------------------------
+# 链序 = ORDER BY audit_id（ULID 时间有序，天然给链定序）。
+# record_hash = SHA256(prev_hash + "|" + canonical_json(record 内容))；首条 prev_hash = ""。
+# canonical = json.dumps(sort_keys, separators=(',',':'), ensure_ascii=False)（确定性、跨版本稳定）。
+
+
+class FieldEffect(Protocol):
+    """字段级镜像输入协议：与 action_engine.Effect 结构兼容（object_type/pk/prop/old/new）。
+
+    不直接 import action_engine.Effect 以避开 action_engine -> audit 的循环依赖；
+    运行时按协议 duck-typing，Engine 的 Effect 对象直接可用。
+    """
+
+    object_type: str
+    pk: str
+    prop: str
+    old: Any
+    new: Any
+
+
+def _canonical_json(value: Any) -> str:
+    """canonical 序列化（设计 2.3）：sort_keys + 紧凑分隔符 + 非 ASCII 原样。"""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _hash_chain(prev_hash: str, content: dict) -> str:
+    """record_hash = SHA256(prev_hash + "|" + canonical_json(content))（genesis prev_hash=""）。"""
+    payload = (prev_hash or "") + "|" + _canonical_json(content)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+# 哈希忽略字段：prev_hash / record_hash 是链元数据，不能自引用入内容
+_HASH_IGNORE_FIELDS = frozenset({"prev_hash", "record_hash"})
+
+
+def _content_of(row: dict) -> dict:
+    """参与哈希的记录内容 = 全字段去掉 prev_hash/record_hash。"""
+    return {k: v for k, v in row.items() if k not in _HASH_IGNORE_FIELDS}
+
+
+def _retention_source_validate(record: AuditRecord) -> None:
+    """retention_class/source 枚举合法（机验 ⑤）：单一来源 = store 顶部常量。"""
+    if record.retention_class not in RETENTION_CLASSES:
+        raise ValueError(f"非法 retention_class: {record.retention_class}")
+    if record.source not in AUDIT_SOURCES:
+        raise ValueError(f"非法 source: {record.source}")
 
 
 class AuditLog:
@@ -63,35 +117,95 @@ class AuditLog:
     def __init__(self, store: Store) -> None:
         self._store = store
 
-    def append(self, record: AuditRecord) -> str:
+    def append(
+        self, record: AuditRecord, effects: list[FieldEffect] | None = None
+    ) -> str:
+        """原语义 + 计算 prev_hash/record_hash（哈希链）+ 同步落字段级镜像（同一事务）。
+
+        - 链序按 audit_id（ULID 时间有序）；首条 prev_hash = ""（genesis）；
+        - record_hash = SHA256(prev_hash + "|" + canonical_json(内容))（设计 2.3）；
+        - effects 按 FieldEffect 协议 duck-typing（action_engine.Effect 直接可用），
+          同一事务内落 audit_field_mirror（记录 + 镜像原子，设计 2.4）；
+        - retention_class/source 默认 sensitive/action，枚举非法即拒绝（机验 ⑤）。
+        """
+        _retention_source_validate(record)
         conn = self._store.ontology_conn()
         try:
+            row = {
+                "audit_id": record.audit_id,
+                "ts": record.ts.strftime("%Y-%m-%d %H:%M:%S"),
+                "action_name": record.action_name,
+                "actor": record.actor,
+                "actor_detail": record.actor_detail,
+                "request_id": record.request_id,
+                "params_json": record.params_json,
+                "preconditions_json": record.preconditions_json,
+                "effects_json": record.effects_json,
+                "writeback_json": record.writeback_json,
+                "outcome": record.outcome,
+                "error_code": record.error_code,
+                "message": record.message,
+                "detail_json": record.detail_json,
+                "duration_ms": record.duration_ms,
+                "retention_class": record.retention_class,
+                "source": record.source,
+            }
+            prev_hash = self._prev_hash(conn)
+            record_hash = _hash_chain(prev_hash, _content_of(row))
             conn.execute(
                 "INSERT INTO audit_log (audit_id, ts, action_name, actor, actor_detail, request_id, "
                 "params_json, preconditions_json, effects_json, writeback_json, outcome, error_code, "
-                "message, detail_json, duration_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "message, detail_json, duration_ms, prev_hash, record_hash, retention_class, source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    record.audit_id,
-                    record.ts.strftime("%Y-%m-%d %H:%M:%S"),
-                    record.action_name,
-                    record.actor,
-                    record.actor_detail,
-                    record.request_id,
-                    record.params_json,
-                    record.preconditions_json,
-                    record.effects_json,
-                    record.writeback_json,
-                    record.outcome,
-                    record.error_code,
-                    record.message,
-                    record.detail_json,
-                    record.duration_ms,
+                    row["audit_id"],
+                    row["ts"],
+                    row["action_name"],
+                    row["actor"],
+                    row["actor_detail"],
+                    row["request_id"],
+                    row["params_json"],
+                    row["preconditions_json"],
+                    row["effects_json"],
+                    row["writeback_json"],
+                    row["outcome"],
+                    row["error_code"],
+                    row["message"],
+                    row["detail_json"],
+                    row["duration_ms"],
+                    prev_hash,
+                    record_hash,
+                    row["retention_class"],
+                    row["source"],
                 ),
             )
+            # 字段级镜像（同一事务，记录 + 镜像原子；镜像行不入链，跟随母记录）
+            for e in effects or []:
+                conn.execute(
+                    "INSERT INTO audit_field_mirror (mirror_id, audit_id, object_type, pk, "
+                    "prop, old_value, new_value, ts) VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        new_ulid(),
+                        record.audit_id,
+                        e.object_type,
+                        e.pk,
+                        e.prop,
+                        None if e.old is None else str(e.old),
+                        None if e.new is None else str(e.new),
+                        row["ts"],
+                    ),
+                )
             conn.commit()
         finally:
             conn.close()
         return record.audit_id
+
+    def _prev_hash(self, conn) -> str:
+        """链上前一记录的 record_hash（按 audit_id 降序取最新；空链 → genesis ""）。"""
+        row = conn.execute(
+            "SELECT record_hash FROM audit_log ORDER BY audit_id DESC LIMIT 1"
+        ).fetchone()
+        return row["record_hash"] if row else ""
 
     def get(self, audit_id: str) -> dict | None:
         conn = self._store.ontology_conn()
@@ -132,3 +246,39 @@ class AuditLog:
             return [dict(r) for r in rows], total
         finally:
             conn.close()
+
+    def verify_integrity(self) -> dict:
+        """按 audit_id 升序重算整条哈希链（设计 2.3/2.5 机验 ②③）。
+
+        返回 {ok, checked, broken, first_broken_index}：
+        - ok = 链全部自洽；checked = 检查条数；
+        - broken = 被篡改/删除/插入的记录 audit_id 列表；
+        - first_broken_index = 链序上首个坏记录的下标（None = 全绿）。
+        任一条的 prev/record_hash 与按规格重算不符（或前后衔接断裂）即 broken。
+        """
+        conn = self._store.ontology_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM audit_log ORDER BY audit_id ASC"
+            ).fetchall()
+        finally:
+            conn.close()
+        broken: list[str] = []
+        first_broken_index: int | None = None
+        prev_hash = ""
+        for i, raw in enumerate(rows):
+            row = dict(raw)
+            expected = _hash_chain(prev_hash, _content_of(row))
+            prev_ok = row["prev_hash"] == prev_hash
+            rec_ok = row["record_hash"] == expected
+            if not (prev_ok and rec_ok):
+                broken.append(row["audit_id"])
+                if first_broken_index is None:
+                    first_broken_index = i
+            prev_hash = row["record_hash"]
+        return {
+            "ok": not broken,
+            "checked": len(rows),
+            "broken": broken,
+            "first_broken_index": first_broken_index,
+        }

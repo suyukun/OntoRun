@@ -24,6 +24,29 @@ ALLOWED_ACTORS: tuple[str, ...] = ("human", "llm", "api")
 # 仅本模块一处可改，改后 audit_log / action_runs 的 CHECK 与运行时校验同步生效。
 ACTOR_VALUES_SQL: str = "(" + ",".join(repr(a) for a in ALLOWED_ACTORS) + ")"
 
+
+# ----------------------------------------------------------------------
+# 治理骨架枚举单一来源（P1.5，TD-9 同源模式）
+# 以下常量派生 GOVERNANCE_SCHEMA 的 CHECK 值；permissions.py / audit.py /
+# annotate.py 的运行时校验与 DB CHECK 共用同一组常量，防 schema 字面量与
+# 运行时校验双轨漂移。DDL 内经 _XXX_VALUES_ 占位符替换注入（仿 _ACTOR_VALUES_）。
+# ----------------------------------------------------------------------
+PERMISSION_OPERATIONS: tuple[str, ...] = ("read", "write", "approve")  # D2 三分治
+PERMISSION_EFFECTS: tuple[str, ...] = ("allow", "deny")
+SUBJECT_KINDS: tuple[str, ...] = ("agent", "human")  # D1 双主体
+POLICY_SCOPES: tuple[str, ...] = ("object", "attribute")  # D4 粒度
+MAPPING_KINDS: tuple[str, ...] = ("object", "attribute", "link")
+CONFIDENCE_LEVELS: tuple[str, ...] = ("high", "medium", "low")
+REVIEW_STATUSES: tuple[str, ...] = ("draft", "reviewing", "approved", "rejected")
+RETENTION_CLASSES: tuple[str, ...] = ("standard", "sensitive", "transient")
+AUDIT_SOURCES: tuple[str, ...] = ("action", "query", "review", "permission")
+
+
+def _sql_in(values: tuple[str, ...]) -> str:
+    """tuple[str] -> SQL 字面量列表（repr 单引号 -> SQL 字面量，仿 ACTOR_VALUES_SQL）。"""
+    return "(" + ",".join(repr(v) for v in values) + ")"
+
+
 SCHEMA_VERSION = 1
 
 ONTOLOGY_SCHEMA = """
@@ -233,6 +256,112 @@ CREATE INDEX IF NOT EXISTS idx_action_runs_status ON action_runs(status);
 """.replace("__ACTION_RUNS_COLUMNS__", ACTION_RUNS_COLUMNS_SQL)
 
 
+# ======================================================================
+# GOVERNANCE_SCHEMA —— 治理骨架三张网（P1.5，设计 §4.1）
+#
+# ① 权限元数据（permission_roles / permission_policies + 索引）；
+# ② 审计最小骨架（audit_field_mirror 字段级镜像 + WORM 触发器；
+#    audit_log 加列走幂等补丁 _apply_governance_patches）；
+# ③ 映射置信度打标（mapping_candidates / mapping_review_history + 索引 + WORM）。
+#
+# 全部落 ontology.db（治理真相库），与运行时段 / builder 段共库。
+# CHECK 值经 _XXX_VALUES_ 占位符由模块顶部常量派生（TD-9 同源），
+# 防 schema 字面量与运行时校验双轨漂移。
+# ======================================================================
+_GOVERNANCE_SCHEMA_TEMPLATE = """
+-- ================= 治理骨架（P1.5）=================
+-- ① 权限元数据
+CREATE TABLE IF NOT EXISTS permission_roles (
+  role_id      TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  members_json TEXT NOT NULL DEFAULT '[]',     -- [{"kind": "agent"|"human", "id": "..."}]
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS permission_policies (
+  policy_id      TEXT PRIMARY KEY,
+  object_type    TEXT NOT NULL,                -- V1 注册表校验（应用层）
+  operation      TEXT NOT NULL CHECK (operation IN _OP_VALUES_),
+  effect         TEXT NOT NULL CHECK (effect IN _EFFECT_VALUES_),
+  -- 空串 = 纯角色策略（subject=None + role_id 引用，V7 二选一）持久化形态，decide 按角色展开
+  subject_kind   TEXT NOT NULL DEFAULT '' CHECK (subject_kind IN _SUBJECT_KIND_VALUES_),
+  subject_id     TEXT NOT NULL DEFAULT '',
+  role_id        TEXT NOT NULL DEFAULT '',     -- 与 subject 二选一（V7 应用层）
+  scope          TEXT NOT NULL DEFAULT 'object' CHECK (scope IN _SCOPE_VALUES_),
+  attributes_json TEXT NOT NULL DEFAULT '[]',  -- V6：仅 operation=read 允许非空
+  version        INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_policy_obj  ON permission_policies(object_type, operation);
+
+-- ② 审计：字段级镜像（audit_log 加列走幂等补丁，见 _apply_governance_patches）
+CREATE TABLE IF NOT EXISTS audit_field_mirror (
+  mirror_id    TEXT PRIMARY KEY,
+  audit_id     TEXT NOT NULL,                  -- 应用层对账（TD-10 先例，不加 SQLite FK）
+  object_type  TEXT NOT NULL,
+  pk           TEXT NOT NULL,
+  prop         TEXT NOT NULL,
+  old_value    TEXT,
+  new_value    TEXT,
+  ts           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mirror_audit  ON audit_field_mirror(audit_id);
+CREATE INDEX IF NOT EXISTS idx_mirror_target ON audit_field_mirror(object_type, pk, prop);
+-- WORM 触发器（audit_log / audit_field_mirror）
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_wo_upd  BEFORE UPDATE ON audit_log
+  BEGIN SELECT RAISE(ABORT, 'audit_log 只读（WORM）'); END;
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_wo_del  BEFORE DELETE ON audit_log
+  BEGIN SELECT RAISE(ABORT, 'audit_log 只读（WORM）'); END;
+CREATE TRIGGER IF NOT EXISTS trg_mirror_wo_upd  BEFORE UPDATE ON audit_field_mirror
+  BEGIN SELECT RAISE(ABORT, 'audit_field_mirror 只读（WORM）'); END;
+CREATE TRIGGER IF NOT EXISTS trg_mirror_wo_del  BEFORE DELETE ON audit_field_mirror
+  BEGIN SELECT RAISE(ABORT, 'audit_field_mirror 只读（WORM）'); END;
+
+-- ③ 映射置信度打标
+CREATE TABLE IF NOT EXISTS mapping_candidates (
+  candidate_id     TEXT PRIMARY KEY,
+  kind             TEXT NOT NULL CHECK (kind IN _MAPPING_KIND_VALUES_),
+  source_table     TEXT NOT NULL,
+  source_field     TEXT,
+  target           TEXT NOT NULL,              -- C4 注册表校验（应用层）
+  confidence_score REAL NOT NULL CHECK (confidence_score >= 0 AND confidence_score <= 1),
+  confidence_level TEXT NOT NULL CHECK (confidence_level IN _LEVEL_VALUES_),
+  review_status    TEXT NOT NULL CHECK (review_status IN _STATUS_VALUES_),
+  auto_approved    INTEGER NOT NULL DEFAULT 0,
+  evidence_json    TEXT NOT NULL DEFAULT '{}',
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cand_status ON mapping_candidates(review_status, confidence_level);
+CREATE TABLE IF NOT EXISTS mapping_review_history (
+  history_id   TEXT PRIMARY KEY,
+  candidate_id TEXT NOT NULL,
+  from_status  TEXT NOT NULL,
+  to_status    TEXT NOT NULL,
+  reviewer     TEXT NOT NULL,                   -- human id 或 'auto'
+  reviewed_at  TEXT NOT NULL,
+  note         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_review_cand ON mapping_review_history(candidate_id);
+-- WORM 触发器（mapping_review_history：审核痕迹 append-only）
+CREATE TRIGGER IF NOT EXISTS trg_review_wo_upd  BEFORE UPDATE ON mapping_review_history
+  BEGIN SELECT RAISE(ABORT, 'mapping_review_history 只读（WORM）'); END;
+CREATE TRIGGER IF NOT EXISTS trg_review_wo_del  BEFORE DELETE ON mapping_review_history
+  BEGIN SELECT RAISE(ABORT, 'mapping_review_history 只读（WORM）'); END;
+"""
+GOVERNANCE_SCHEMA: str = (
+    _GOVERNANCE_SCHEMA_TEMPLATE.replace("_OP_VALUES_", _sql_in(PERMISSION_OPERATIONS))
+    .replace("_EFFECT_VALUES_", _sql_in(PERMISSION_EFFECTS))
+    # 纯角色策略（V7 二选一）subject_kind 持久化为空串：CHECK 值 = 合法主体类型 + 空串标记
+    .replace("_SUBJECT_KIND_VALUES_", _sql_in(SUBJECT_KINDS + ("",)))
+    .replace("_SCOPE_VALUES_", _sql_in(POLICY_SCOPES))
+    .replace("_MAPPING_KIND_VALUES_", _sql_in(MAPPING_KINDS))
+    .replace("_LEVEL_VALUES_", _sql_in(CONFIDENCE_LEVELS))
+    .replace("_STATUS_VALUES_", _sql_in(REVIEW_STATUSES))
+)
+
+
 def _patch_action_runs_executed_by_check(conn: sqlite3.Connection) -> None:
     """v4 patch（TD-9）：action_runs.executed_by 补 CHECK 白名单。
 
@@ -303,6 +432,32 @@ def _apply_builder_patches(conn: sqlite3.Connection) -> None:
         )
     # v4 patch（TD-9）：action_runs.executed_by CHECK 白名单。
     _patch_action_runs_executed_by_check(conn)
+
+
+def _apply_governance_patches(conn: sqlite3.Connection) -> None:
+    """治理段幂等补丁：audit_log 加 4 列（prev_hash/record_hash/retention_class/source）。
+
+    仿 v2/v3 ALTER 先例：PRAGMA table_info 检出已加则跳过。新列均有默认值，
+    既有行保持兼容（设计 §4.3）。仅在 audit_log 存在时执行（Store.migrate 路径
+    ONTOLOGY_SCHEMA 已先建表；裸 builder 库无此表则跳过，不误伤）。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()}
+    if not cols:
+        return
+    if "prev_hash" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''")
+    if "record_hash" not in cols:
+        conn.execute("ALTER TABLE audit_log ADD COLUMN record_hash TEXT NOT NULL DEFAULT ''")
+    if "retention_class" not in cols:
+        conn.execute(
+            "ALTER TABLE audit_log ADD COLUMN retention_class TEXT NOT NULL DEFAULT 'sensitive' "
+            f"CHECK (retention_class IN {_sql_in(RETENTION_CLASSES)})"
+        )
+    if "source" not in cols:
+        conn.execute(
+            "ALTER TABLE audit_log ADD COLUMN source TEXT NOT NULL DEFAULT 'action' "
+            f"CHECK (source IN {_sql_in(AUDIT_SOURCES)})"
+        )
 
 
 def init_builder_schema(conn: sqlite3.Connection) -> None:
@@ -408,7 +563,12 @@ class Store:
             "v2 patch: link_types.fk_field；v3 patch: action_runs.audit_ref；"
             "v4 patch: action_runs.executed_by CHECK（TD-9）"
         )
-        merged_note = f"{runtime_note}；{builder_note}"
+        governance_note = (
+            "治理段（P1.5）：permission_roles/permission_policies/audit_field_mirror/"
+            "mapping_candidates/mapping_review_history + audit_log 加列(prev_hash/"
+            "record_hash/retention_class/source) + WORM 触发器 + 枚举 CHECK 同源"
+        )
+        merged_note = f"{runtime_note}；{builder_note}；{governance_note}"
         conn = self.ontology_conn()
         try:
             conn.executescript(ONTOLOGY_SCHEMA)
@@ -416,6 +576,10 @@ class Store:
             # v2/v3/v4 幂等补丁单一实现（PRAGMA table_info 返回列序
             # [cid, name, type, notnull, dflt_value, pk]，索引 1 = name）。
             _apply_builder_patches(conn)
+            # P1.5 治理段：新表 CREATE IF NOT EXISTS + audit_log 幂等加列
+            # （不 bump schema_version，沿用 v2/v3/v4「幂等补丁只追加 note 不升号」先例）。
+            conn.executescript(GOVERNANCE_SCHEMA)
+            _apply_governance_patches(conn)
             # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "
@@ -445,5 +609,10 @@ import re as _re
 
 BUILDER_TABLES = tuple(
     _re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", BUILDER_SCHEMA)
+)
+
+# 治理段表单一来源（red-team I3 模式）：从 GOVERNANCE_SCHEMA DDL 自动解析。
+GOVERNANCE_TABLES = tuple(
+    _re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", GOVERNANCE_SCHEMA)
 )
 del _re  # 局部别名，不污染模块命名空间

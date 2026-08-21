@@ -476,7 +476,8 @@ class ActionEngine:
             detail_json=_j(error[1]) if error and error[1] is not None else None,
             duration_ms=int((time.monotonic() - t0) * 1000),
         )
-        return self.audit.append(record)
+        # P1.5：effects 传入 append 派生 audit_field_mirror（记录 + 镜像同事务原子）
+        return self.audit.append(record, effects=effects)
 
     def _reject(
         self,
