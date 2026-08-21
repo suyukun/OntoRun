@@ -1,14 +1,16 @@
-"""DES 确定性数据生成器 —— 制造型企业 5 源系统 9 张主数据表（设计 §2/§3/§4/§5）。
+"""DES 确定性数据生成器 —— 制造型企业 5 源系统 18 张表（9 主数据 + 9 事务，合计 1,000,000 行）。
 
-依据 docs/P1b-DES-横向铺开设计_v0.1.md：
+依据 docs/P1b-DES-横向铺开设计_v0.1.md（§2/§3/§4/§5）：
 - 表注册表驱动：TABLE_SPECS（表 → DDL + 行生成器）；build_enterprise 按 config 表规格的
-  depends_on 拓扑序执行（约定 5：生成顺序固定）；
+  depends_on 拓扑序执行（约定 5：生成顺序固定；阶段 1 主数据 → 阶段 2 事务，§5.2）；
 - 每表独立 RNG 流：random.Random(f"{seed}:{table_id}")，table_id 固定（约定 1 扩展）；
 - 稳定排序：所有集合按各自主键升序生成/落库（约定 2）；
 - 纯函数派生：批次/库位/旧码/校验码/日期/数量全为 seed 随机 + 固定模式（约定 3）；
 - 一物多码：仅 ERP.MARA 15%（精确 1,200 行）注入 BISMT 旧码 HC-{year}{seq:05d}（§2.1/§5.2）；
-- 跨系统一致性：MPLA/WMMD 1:1 对齐 MARA 主码、WMMD.MEINS 复制 MARA.MEINS（D 门禁）；
-- 事务表（EKKO/EKPO/VBAK/VBAP/AUFK/AFPO/COFV/MSEG/ACDOCA）Phase B 实现，本阶段不生成。
+- 跨系统一致性：MPLA/WMMD 1:1 对齐 MARA 主码、WMMD.MEINS 复制 MARA.MEINS（D1-D3/D9）；
+- 事务表（§2.4-2.6）：EKKO/EKPO、VBAK/VBAP、AUFK/AFPO/COFV、MSEG、ACDOCA，合计 861,000 行，
+  跨系统 FK 无孤儿（D4-D8）；MSEG 生成器先定 MARD 账面、再生成流水使净变 = LABST（D10 对账 diff=0）；
+- ACDOCA REF_DOC 确定性抽样映射 VBELN/EBELN/MBLNR（D8，REF 无孤儿，§2.5 R4 推荐）。
 """
 
 from __future__ import annotations
@@ -74,6 +76,24 @@ BOM_PARENT_TYPES = ("FERT", "HALB")  # BOM 所属成品/半成品（MAST）
 BOM_STLAN = "1"  # BOM 用途（1=生产）
 BOM_ITEM_STEP = 10  # STPO.STLKN 步长（00010 起，SAP 习惯）
 STPO_ITEMS_PER_BOM = 5  # BOM 平均组件数（10,000 × 5 = 50,000，§3.3 比率 1:5）
+
+# —— 事务表常量（§2 编码规则总表 / §2.1-2.5 业务枚举，常量化禁硬编码）——
+DOC_CODE_WIDTH = 6  # 单据码序号位数（PO/SO/WO/CF/MV/FI，NNNNNN 6 位，单年 99.9 万行上限）
+VKORG = "1000"  # 销售组织（VBAK）
+BSART = "NB"  # 采购订单类型：标准（EKKO）
+AUART = "PPSM"  # 生产工单类型：生产（AUFK）
+STATUS_POOL = ("REL", "PCNF", "DLV", "CLSD")  # 工单状态：下达/部分确认/交付/关闭（过滤查询载体）
+RECEIPT_BWART = ("101", "301")  # 收货移动类型：101 采购收货 / 301 移库入库（§2.3）
+ISSUE_BWART = ("201", "261", "301")  # 发料移动类型：201 发料 / 261 生产发料 / 301 移库出库
+RACCT_POOL = ("100101", "100201", "112201", "140501", "140502", "140503",
+              "220201", "500101", "600101")  # 会计科目池（ACDOCA）
+KOSTL_POOL = ("CC-PROD-01", "CC-PROD-02", "CC-ASSY-01", "CC-ADMIN-01", "CC-SALES-01")
+ACDOCA_REF_SPLIT = (0.4, 0.3, 0.3)  # ACDOCA 参考单据抽样比例 SO/PO/MV（§2.5 R4，Σ=41,000）
+VBAK_ITEMS_LO, VBAK_ITEMS_HI = 1, 4  # 每销售订单项目数范围（均值 2.5 → 40k:100k，§3.3）
+EKPO_ITEMS_LO, EKPO_ITEMS_HI = 1, 4  # 每采购订单项目数范围（均值 2.67 → 30k:80k，§3.3）
+AFPO_ITEMS_LO, AFPO_ITEMS_HI = 1, 2  # 每工单项目数范围（均值 1.33 → 90k:120k，§3.3）
+COFV_ITEMS_LO, COFV_ITEMS_HI = 1, 3  # 每工单报工次数范围（均值 2 → 90k:180k，§3.3）
+MSEG_COUNT_LO, MSEG_COUNT_HI = 5, 9  # 每 (MATNR,LGORT) 账面行移动笔数（奇；收发对 + 锚点，D10）
 
 # ---------------------------------------------------------------------------
 # 九张主数据表 DDL（设计 §2.1/§2.2/§2.3/§2.4；MARA/MPLA/WMMD 字段不变 = 兼容红线）
@@ -167,6 +187,106 @@ CREATE TABLE WMMD (
   ERDAT TEXT NOT NULL
 );
 """
+VBAK_DDL = """
+CREATE TABLE VBAK (
+  VBELN TEXT PRIMARY KEY,
+  KUNNR TEXT NOT NULL,
+  AUDAT TEXT NOT NULL,
+  NETWR REAL NOT NULL,
+  VKORG TEXT NOT NULL
+);
+"""
+VBAP_DDL = """
+CREATE TABLE VBAP (
+  VBELN TEXT NOT NULL,
+  POSNR TEXT NOT NULL,
+  MATNR TEXT NOT NULL,
+  KWMENG REAL NOT NULL,
+  MEINS TEXT NOT NULL,
+  NETWR REAL NOT NULL,
+  PRIMARY KEY (VBELN, POSNR)
+);
+"""
+EKKO_DDL = """
+CREATE TABLE EKKO (
+  EBELN TEXT PRIMARY KEY,
+  LIFNR TEXT NOT NULL,
+  BSART TEXT NOT NULL,
+  AEDAT TEXT NOT NULL
+);
+"""
+EKPO_DDL = """
+CREATE TABLE EKPO (
+  EBELN TEXT NOT NULL,
+  EBELP TEXT NOT NULL,
+  MATNR TEXT NOT NULL,
+  MENGE REAL NOT NULL,
+  MEINS TEXT NOT NULL,
+  NETWR REAL NOT NULL,
+  PRIMARY KEY (EBELN, EBELP)
+);
+"""
+AUFK_DDL = """
+CREATE TABLE AUFK (
+  AUFNR TEXT PRIMARY KEY,
+  MATNR TEXT NOT NULL,
+  AUART TEXT NOT NULL,
+  WERKS TEXT NOT NULL,
+  FTRMS TEXT NOT NULL,
+  STATUS TEXT NOT NULL
+);
+"""
+AFPO_DDL = """
+CREATE TABLE AFPO (
+  AUFNR TEXT NOT NULL,
+  POSNR TEXT NOT NULL,
+  MATNR TEXT NOT NULL,
+  GAMNG REAL NOT NULL,
+  MEINS TEXT NOT NULL,
+  PRIMARY KEY (AUFNR, POSNR)
+);
+"""
+COFV_DDL = """
+CREATE TABLE COFV (
+  CONFNR TEXT PRIMARY KEY,
+  AUFNR TEXT NOT NULL,
+  MATNR TEXT NOT NULL,
+  WERKS TEXT NOT NULL,
+  ARBPL TEXT NOT NULL,
+  DATUM TEXT NOT NULL,
+  ISM01 REAL NOT NULL,
+  ISMN1 REAL NOT NULL
+);
+"""
+MSEG_DDL = """
+CREATE TABLE MSEG (
+  MBLNR TEXT NOT NULL,
+  ZEILE TEXT NOT NULL,
+  MATNR TEXT NOT NULL,
+  WERKS TEXT NOT NULL,
+  LGORT TEXT NOT NULL,
+  BWART TEXT NOT NULL,
+  MENGE REAL NOT NULL,
+  MEINS TEXT NOT NULL,
+  BUDAT TEXT NOT NULL,
+  EBELN TEXT,
+  AUFNR TEXT,
+  PRIMARY KEY (MBLNR, ZEILE)
+);
+"""
+ACDOCA_DDL = """
+CREATE TABLE ACDOCA (
+  BELNR TEXT NOT NULL,
+  POSNR TEXT NOT NULL,
+  RACCT TEXT NOT NULL,
+  KOSTL TEXT NOT NULL,
+  WSL REAL NOT NULL,
+  BUDAT TEXT NOT NULL,
+  REF_DOC TEXT NOT NULL,
+  REF_TYPE TEXT NOT NULL CHECK (REF_TYPE IN ('SO','PO','MV')),
+  PRIMARY KEY (BELNR, POSNR)
+);
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +307,14 @@ def master_code(year: int, seq: int) -> str:
 def sequence_code(prefix: str, seq: int, width: int = CODE_WIDTH) -> str:
     """定宽顺序码 SU-00000001 / CU-00000001（§2.4/§2.1 编码规则，8 位序号）。"""
     return f"{prefix}-{seq:0{width}d}"
+
+
+def document_code(prefix: str, year: int, seq: int) -> str:
+    """单据码 {prefix}-{year:04d}-{seq:06d}（§2 编码规则总表，NNNNNN 6 位）。
+
+    承载 PO/SO/WO/CF/MV/FI 六类单据；单年 6 位序号上限 999,999，覆盖最大表（COFV/MSEG 180,000）。
+    """
+    return f"{prefix}-{year:04d}-{seq:0{DOC_CODE_WIDTH}d}"
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +384,34 @@ def _row_count(ctx: dict[str, Any], table_id: str) -> int:
 def _sort_rows(rows: list[dict[str, Any]], pk: list[str]) -> list[dict[str, Any]]:
     """按主键列升序稳定排序（约定 2：按自然键排序落库）。"""
     return sorted(rows, key=lambda r: tuple(r[c] for c in pk))
+
+
+def _distribute_counts(
+    rng: random.Random,
+    n: int,
+    total: int,
+    lo: int,
+    hi: int,
+    step: int = 1,
+) -> list[int]:
+    """把 total 行数分配到 n 个父单据（每份 ∈ [lo,hi] 且步长 step），确定性收敛。
+
+    父子单据比率（§3.3）落地：先按 seed 随机给初值，再单向微调索引使 Σ = total 精确；
+    要求 lo*n ≤ total ≤ hi*n 且 total 与初值之和同余（step），否则进入无限循环（fail-fast 由调用方保证）。
+    """
+    counts = [rng.randrange(lo, hi + 1, step) for _ in range(n)]
+    diff = total - sum(counts)
+    while diff > 0:
+        i = rng.randrange(n)
+        if counts[i] + step <= hi:
+            counts[i] += step
+            diff -= step
+    while diff < 0:
+        i = rng.randrange(n)
+        if counts[i] - step >= lo:
+            counts[i] -= step
+            diff += step
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +578,295 @@ def generate_wmmd_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
 
 
 # ---------------------------------------------------------------------------
+# 九张事务/流水表行生成器（§2.4-2.6；每表独立 RNG 流，引用主数据/上级单据确定性输出）
+# ---------------------------------------------------------------------------
+def generate_ekko_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """SCM.EKKO 采购订单抬头（§2.4）：PO-YYYY-NNNNNN，30,000 单，LIFNR FK→LFA1。"""
+    year = ctx["year"]
+    lfa1_keys = [l["LIFNR"] for l in ctx["scm.LFA1"]]
+    rows: list[dict[str, Any]] = []
+    for seq in range(1, _row_count(ctx, "scm.EKKO") + 1):
+        rows.append(
+            {
+                "EBELN": document_code("PO", year, seq),
+                "LIFNR": rng.choice(lfa1_keys),
+                "BSART": BSART,
+                "AEDAT": random_date(rng),
+            }
+        )
+    return rows
+
+
+def generate_ekpo_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """SCM.EKPO 采购订单项目（§2.4）：30,000 单 × 平均 2.67 项目 = 80,000 行。
+
+    MENGE/MEINS 随物料确定性派生（MEINS 复制 MARA，跨表单位一致）。
+    """
+    mara = ctx["erp.MARA"]
+    matnrs = [m["MATNR"] for m in mara]
+    meins_by = {m["MATNR"]: m["MEINS"] for m in mara}
+    counts = _distribute_counts(
+        rng, _row_count(ctx, "scm.EKKO"), _row_count(ctx, "scm.EKPO"),
+        EKPO_ITEMS_LO, EKPO_ITEMS_HI,
+    )
+    rows: list[dict[str, Any]] = []
+    for ekko, c in zip(ctx["scm.EKKO"], counts):
+        for pos in range(1, c + 1):
+            matnr = rng.choice(matnrs)
+            rows.append(
+                {
+                    "EBELN": ekko["EBELN"],
+                    "EBELP": f"{pos:05d}",
+                    "MATNR": matnr,
+                    "MENGE": round(rng.uniform(1, 1000), 2),
+                    "MEINS": meins_by[matnr],
+                    "NETWR": round(rng.uniform(5, 10000), 2),
+                }
+            )
+    return rows
+
+
+def generate_vbak_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """ERP.VBAK 销售订单抬头（§2.1）：SO-YYYY-NNNNNN，40,000 单，KUNNR FK→KNA1。"""
+    year = ctx["year"]
+    kna1_keys = [k["KUNNR"] for k in ctx["erp.KNA1"]]
+    rows: list[dict[str, Any]] = []
+    for seq in range(1, _row_count(ctx, "erp.VBAK") + 1):
+        rows.append(
+            {
+                "VBELN": document_code("SO", year, seq),
+                "KUNNR": rng.choice(kna1_keys),
+                "AUDAT": random_date(rng),
+                "NETWR": round(rng.uniform(100, 100000), 2),
+                "VKORG": VKORG,
+            }
+        )
+    return rows
+
+
+def generate_vbap_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """ERP.VBAP 销售订单项目（§2.1）：40,000 单 × 平均 2.5 项目 = 100,000 行。"""
+    mara = ctx["erp.MARA"]
+    matnrs = [m["MATNR"] for m in mara]
+    meins_by = {m["MATNR"]: m["MEINS"] for m in mara}
+    counts = _distribute_counts(
+        rng, _row_count(ctx, "erp.VBAK"), _row_count(ctx, "erp.VBAP"),
+        VBAK_ITEMS_LO, VBAK_ITEMS_HI,
+    )
+    rows: list[dict[str, Any]] = []
+    for vbak, c in zip(ctx["erp.VBAK"], counts):
+        for pos in range(1, c + 1):
+            matnr = rng.choice(matnrs)
+            rows.append(
+                {
+                    "VBELN": vbak["VBELN"],
+                    "POSNR": f"{pos:05d}",
+                    "MATNR": matnr,
+                    "KWMENG": round(rng.uniform(1, 500), 2),
+                    "MEINS": meins_by[matnr],
+                    "NETWR": round(rng.uniform(10, 20000), 2),
+                }
+            )
+    return rows
+
+
+def generate_aufk_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """MES.AUFK 生产工单抬头（§2.2）：WO-YYYY-NNNNNN，90,000 工单，MATNR FK→MARA。"""
+    year = ctx["year"]
+    matnrs = [m["MATNR"] for m in ctx["erp.MARA"]]
+    rows: list[dict[str, Any]] = []
+    for seq in range(1, _row_count(ctx, "mes.AUFK") + 1):
+        rows.append(
+            {
+                "AUFNR": document_code("WO", year, seq),
+                "MATNR": rng.choice(matnrs),
+                "AUART": AUART,
+                "WERKS": rng.choice(WERKS_POOL),
+                "FTRMS": random_date(rng),
+                "STATUS": rng.choice(STATUS_POOL),
+            }
+        )
+    return rows
+
+
+def generate_afpo_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """MES.AFPO 生产工单项目（§2.2）：90,000 工单 × 平均 1.33 项目 = 120,000 行。"""
+    mara = ctx["erp.MARA"]
+    matnrs = [m["MATNR"] for m in mara]
+    meins_by = {m["MATNR"]: m["MEINS"] for m in mara}
+    counts = _distribute_counts(
+        rng, _row_count(ctx, "mes.AUFK"), _row_count(ctx, "mes.AFPO"),
+        AFPO_ITEMS_LO, AFPO_ITEMS_HI,
+    )
+    rows: list[dict[str, Any]] = []
+    for aufk, c in zip(ctx["mes.AUFK"], counts):
+        for pos in range(1, c + 1):
+            matnr = rng.choice(matnrs)
+            rows.append(
+                {
+                    "AUFNR": aufk["AUFNR"],
+                    "POSNR": f"{pos:05d}",
+                    "MATNR": matnr,
+                    "GAMNG": round(rng.uniform(1, 200), 2),
+                    "MEINS": meins_by[matnr],
+                }
+            )
+    return rows
+
+
+def generate_cofv_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """MES.COFV 报工确认流水（§2.2）：90,000 工单 × 平均 2 次 = 180,000 行，CONFNR=CF-…。"""
+    year = ctx["year"]
+    matnrs = [m["MATNR"] for m in ctx["erp.MARA"]]
+    counts = _distribute_counts(
+        rng, _row_count(ctx, "mes.AUFK"), _row_count(ctx, "mes.COFV"),
+        COFV_ITEMS_LO, COFV_ITEMS_HI,
+    )
+    rows: list[dict[str, Any]] = []
+    seq = 0
+    for aufk, c in zip(ctx["mes.AUFK"], counts):
+        for _ in range(c):
+            seq += 1
+            rows.append(
+                {
+                    "CONFNR": document_code("CF", year, seq),
+                    "AUFNR": aufk["AUFNR"],
+                    "MATNR": rng.choice(matnrs),
+                    "WERKS": aufk["WERKS"],
+                    "ARBPL": rng.choice(ARBPL_POOL),
+                    "DATUM": random_date(rng),
+                    "ISM01": round(rng.uniform(1, 100), 2),
+                    "ISMN1": round(rng.uniform(0.5, 20), 2),
+                }
+            )
+    return rows
+
+
+def _mseg_pair_rows(
+    rng: random.Random,
+    mrow: dict[str, Any],
+    pairs: int,
+    meins_by: dict[str, str],
+    ekko_keys: list[str],
+    aufk_keys: list[str],
+) -> list[dict[str, Any]]:
+    """生成一对收发移动（+X 收货 / -X 发料，净 0.0），返回该账面行的全部收发对。
+
+    101 收货引 EBELN、261 生产发料引 AUFNR（可空 FK，D7）；301 移库收发均不引单。
+    """
+    matnr, werks, lgort = mrow["MATNR"], mrow["WERKS"], mrow["LGORT"]
+    meins = meins_by[matnr]
+    rows: list[dict[str, Any]] = []
+    for _ in range(pairs):
+        qty = round(rng.uniform(1, 300), 2)
+        r_bwart = rng.choice(RECEIPT_BWART)
+        rows.append(
+            {
+                "MATNR": matnr, "WERKS": werks, "LGORT": lgort, "BWART": r_bwart,
+                "MENGE": qty, "MEINS": meins, "BUDAT": random_date(rng),
+                "EBELN": rng.choice(ekko_keys) if r_bwart == "101" else None, "AUFNR": None,
+            }
+        )
+        i_bwart = rng.choice(ISSUE_BWART)
+        rows.append(
+            {
+                "MATNR": matnr, "WERKS": werks, "LGORT": lgort, "BWART": i_bwart,
+                "MENGE": -qty, "MEINS": meins, "BUDAT": random_date(rng),
+                "EBELN": None, "AUFNR": rng.choice(aufk_keys) if i_bwart == "261" else None,
+            }
+        )
+    return rows
+
+
+def _mseg_anchor_row(
+    rng: random.Random,
+    mrow: dict[str, Any],
+    meins_by: dict[str, str],
+    ekko_keys: list[str],
+) -> dict[str, Any]:
+    """锚点 101 收货行：MENGE = MARD.LABST（D10 账面=净变），引 EKKO。"""
+    matnr, werks, lgort = mrow["MATNR"], mrow["WERKS"], mrow["LGORT"]
+    return {
+        "MATNR": matnr, "WERKS": werks, "LGORT": lgort, "BWART": "101",
+        "MENGE": mrow["LABST"], "MEINS": meins_by[matnr], "BUDAT": random_date(rng),
+        "EBELN": rng.choice(ekko_keys), "AUFNR": None,
+    }
+
+
+def generate_mseg_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """WMS.MSEG 库存流水（§2.3）：180,000 行，满足 D10 对账自洽（净变 = MARD.LABST，diff=0）。
+
+    生成器先定 MARD 账面、再生成 MSEG 使按 (MATNR,LGORT) 净变 = MARD.LABST：
+    - 每账面行生成 k 笔移动（k∈{5,7,9} 奇、Σ=180,000）：收发对（+X,-X，IEEE 相邻净 0.0）
+      + 锚点 101 收货（= LABST，引 EKKO）；
+    - 落库按 LGORT 分段（W01→W02→W03）：段内先全部收发对（每对相邻净 0.0）、后全部锚点
+      （按 MATNR 升序，与 MARD 按地点 SUM(LABST) 同序累加）→ 按物料×地点 与 按地点 双口径 diff 精确 0。
+    """
+    year = ctx["year"]
+    meins_by = {m["MATNR"]: m["MEINS"] for m in ctx["erp.MARA"]}
+    ekko_keys = [e["EBELN"] for e in ctx["scm.EKKO"]]
+    aufk_keys = [a["AUFNR"] for a in ctx["mes.AUFK"]]
+    mard = ctx["erp.MARD"]
+    counts = _distribute_counts(
+        rng, len(mard), _row_count(ctx, "wms.MSEG"), MSEG_COUNT_LO, MSEG_COUNT_HI, step=2,
+    )
+    pairs_by_lgort: dict[str, list[dict[str, Any]]] = {lg: [] for lg in LGORT_POOL}
+    anchors_by_lgort: dict[str, list[dict[str, Any]]] = {lg: [] for lg in LGORT_POOL}
+    for mrow, k in zip(mard, counts):
+        lgort = mrow["LGORT"]
+        pairs_by_lgort[lgort].extend(
+            _mseg_pair_rows(rng, mrow, (k - 1) // 2, meins_by, ekko_keys, aufk_keys)
+        )
+        anchors_by_lgort[lgort].append(_mseg_anchor_row(rng, mrow, meins_by, ekko_keys))
+    rows: list[dict[str, Any]] = []
+    seq = 0
+    for lgort in LGORT_POOL:
+        for r in pairs_by_lgort[lgort]:
+            seq += 1
+            rows.append({"MBLNR": document_code("MV", year, seq), "ZEILE": "01", **r})
+        for r in anchors_by_lgort[lgort]:
+            seq += 1
+            rows.append({"MBLNR": document_code("MV", year, seq), "ZEILE": "01", **r})
+    return rows
+
+
+def generate_acdoca_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """FIN.ACDOCA 财务日记账（§2.5）：41,000 行，REF_DOC 确定性抽样映射 VBELN/EBELN/MBLNR。
+
+    从 VBAK/EKKO/MSEG 主键按固定比例（SO/PO/MV = 40/30/30%）rng.sample 确定性抽样，
+    每条抽样单据生成 1 行 ACDOCA → REF_DOC 必能 join 回源表主键（D8 无孤儿）。
+    """
+    year = ctx["year"]
+    total = _row_count(ctx, "fin.ACDOCA")
+    so_n = round(total * ACDOCA_REF_SPLIT[0])
+    po_n = round(total * ACDOCA_REF_SPLIT[1])
+    mv_n = total - so_n - po_n
+    so_refs = rng.sample(sorted(v["VBELN"] for v in ctx["erp.VBAK"]), so_n)
+    po_refs = rng.sample(sorted(e["EBELN"] for e in ctx["scm.EKKO"]), po_n)
+    mv_refs = rng.sample(sorted(m["MBLNR"] for m in ctx["wms.MSEG"]), mv_n)
+    refs = (
+        [("SO", d) for d in so_refs]
+        + [("PO", d) for d in po_refs]
+        + [("MV", d) for d in mv_refs]
+    )
+    rows: list[dict[str, Any]] = []
+    for seq, (ref_type, ref_doc) in enumerate(refs, start=1):
+        rows.append(
+            {
+                "BELNR": document_code("FI", year, seq),
+                "POSNR": "01",
+                "RACCT": rng.choice(RACCT_POOL),
+                "KOSTL": rng.choice(KOSTL_POOL),
+                "WSL": round(rng.uniform(-100000, 100000), 2),
+                "BUDAT": random_date(rng),
+                "REF_DOC": ref_doc,
+                "REF_TYPE": ref_type,
+            }
+        )
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # 表注册表（表 → DDL + 行生成器 + 主键 + 依赖；§7.2 生成器扩展点）
 # ---------------------------------------------------------------------------
 TABLE_SPECS: dict[str, dict[str, Any]] = {
@@ -434,6 +879,16 @@ TABLE_SPECS: dict[str, dict[str, Any]] = {
     "erp.STPO": {"ddl": STPO_DDL, "gen": generate_stpo_rows, "pk": ["STLNR", "STLKN"], "depends_on": ["erp.MARA", "erp.MAST"]},
     "mes.MPLA": {"ddl": MPLA_DDL, "gen": generate_mpla_rows, "pk": ["MPLA_ID"], "depends_on": ["erp.MARA"]},
     "wms.WMMD": {"ddl": WMMD_DDL, "gen": generate_wmmd_rows, "pk": ["MATNR"], "depends_on": ["erp.MARA"]},
+    # —— 事务/流水表（Phase B，§2.4-2.6；依赖主数据与上级单据，拓扑序固定）——
+    "erp.VBAK": {"ddl": VBAK_DDL, "gen": generate_vbak_rows, "pk": ["VBELN"], "depends_on": ["erp.KNA1"]},
+    "erp.VBAP": {"ddl": VBAP_DDL, "gen": generate_vbap_rows, "pk": ["VBELN", "POSNR"], "depends_on": ["erp.VBAK", "erp.MARA"]},
+    "mes.AUFK": {"ddl": AUFK_DDL, "gen": generate_aufk_rows, "pk": ["AUFNR"], "depends_on": ["erp.MARA"]},
+    "mes.AFPO": {"ddl": AFPO_DDL, "gen": generate_afpo_rows, "pk": ["AUFNR", "POSNR"], "depends_on": ["mes.AUFK", "erp.MARA"]},
+    "mes.COFV": {"ddl": COFV_DDL, "gen": generate_cofv_rows, "pk": ["CONFNR"], "depends_on": ["mes.AUFK", "erp.MARA"]},
+    "wms.MSEG": {"ddl": MSEG_DDL, "gen": generate_mseg_rows, "pk": ["MBLNR", "ZEILE"], "depends_on": ["erp.MARA", "scm.EKKO", "mes.AUFK"]},
+    "scm.EKKO": {"ddl": EKKO_DDL, "gen": generate_ekko_rows, "pk": ["EBELN"], "depends_on": ["scm.LFA1"]},
+    "scm.EKPO": {"ddl": EKPO_DDL, "gen": generate_ekpo_rows, "pk": ["EBELN", "EBELP"], "depends_on": ["scm.EKKO", "erp.MARA"]},
+    "fin.ACDOCA": {"ddl": ACDOCA_DDL, "gen": generate_acdoca_rows, "pk": ["BELNR", "POSNR"], "depends_on": ["erp.VBAP", "scm.EKPO", "wms.MSEG"]},
 }
 
 GenFn = Callable[[random.Random, dict[str, Any]], list[dict[str, Any]]]
@@ -450,28 +905,28 @@ def _check_spec_vs_config(config: dict, table_id: str, spec: dict[str, Any]) -> 
 
 
 def _generation_order(config: dict) -> list[str]:
-    """按配置表规格（kind=master）+ depends_on 拓扑排序，得到固定生成顺序（约定 5）。
+    """按配置表规格（master+transaction）+ depends_on 拓扑排序，得到固定生成顺序（约定 5）。
 
-    仅编排主数据表（事务表 Phase B）；依赖只约束主数据表集合内部。
+    依赖约束全部表集合内部：阶段 1 主数据（LFA1/KNA1→MARA→MARC/MARD→MAST→STPO→MPLA/WMMD）
+    → 阶段 2 事务（EKKO→EKPO、VBAK→VBAP、AUFK→AFPO/COFV、MSEG、ACDOCA，§5.2）。
     """
-    masters: dict[str, list[str]] = {}
+    specs: dict[str, list[str]] = {}
     for code, sys_cfg in config["enterprise"]["systems"].items():
         for name, spec in sys_cfg["tables"].items():
-            if spec["kind"] == "master":
-                masters[f"{code}.{name}"] = spec["depends_on"]
+            specs[f"{code}.{name}"] = spec["depends_on"]
     order: list[str] = []
     done: set[str] = set()
-    while len(done) < len(masters):
+    while len(done) < len(specs):
         progress = False
-        for table_id, deps in sorted(masters.items()):
+        for table_id, deps in sorted(specs.items()):
             if table_id in done:
                 continue
-            if all(d in done for d in deps if d in masters):
+            if all(d in done for d in deps):
                 order.append(table_id)
                 done.add(table_id)
                 progress = True
         if not progress:
-            raise DesConfigError(f"主数据表依赖成环或缺失: {sorted(set(masters) - done)}")
+            raise DesConfigError(f"表依赖成环或缺失: {sorted(set(specs) - done)}")
     return order
 
 
@@ -498,13 +953,44 @@ def write_db(db_path: Path, tables: list[tuple[str, str, list[dict[str, Any]]]])
         conn.close()
 
 
+def _persist_enterprise(
+    out: Path,
+    config: dict,
+    seed: int,
+    order: list[str],
+    ctx: dict[str, Any],
+    enterprise_code: str,
+) -> dict[str, Any]:
+    """按系统分组落库 + 写 manifest + 汇总结果（build_enterprise 的收尾阶段）。"""
+    by_sys: dict[str, list[tuple[str, str, list[dict[str, Any]]]]] = {}
+    for table_id in order:
+        code, name = table_id.split(".", 1)
+        by_sys.setdefault(code, []).append((name, TABLE_SPECS[table_id]["ddl"], ctx[table_id]))
+    for code, tables in by_sys.items():
+        write_db(out / config["enterprise"]["systems"][code]["db"], tables)
+
+    build_manifest(config, seed, out, order)
+    injected = sum(1 for r in ctx["erp.MARA"] if r.get("BISMT"))
+    return {
+        "enterprise": enterprise_code,
+        "seed": seed,
+        "out": str(out),
+        "injected": injected,
+        "total_rows": sum(len(ctx[tid]) for tid in order),
+        "tables": {tid: len(ctx[tid]) for tid in order},
+    }
+
+
 def build_enterprise(
     enterprise_code: str,
     out_dir: str | Path | None = None,
     seed: int | None = None,
     config_file: str | Path | None = None,
 ) -> dict[str, Any]:
-    """确定性生成 1 企业 5 源系统 9 张主数据表 + manifest.json（设计 §5，约定 1-5）。
+    """确定性生成 1 企业 5 源系统 18 张表（9 主数据 + 9 事务，合计 1,000,000 行）+ manifest.json。
+
+    设计 §5 约定 1-5 全落地：每表独立 RNG 流、主键升序落库、纯函数派生、canonical 配置 hash、
+    拓扑序固定（依赖 depends_on）。事务表引用主数据/上级单据的确定性内存输出，不重抽。
 
     参数：
         enterprise_code：企业编码（目录名）；
@@ -534,22 +1020,4 @@ def build_enterprise(
         _check_spec_vs_config(config, table_id, spec)
         rng = random.Random(f"{seed}:{table_id}")
         ctx[table_id] = _sort_rows(spec["gen"](rng, ctx), spec["pk"])
-
-    # 按系统分组落库（1 系统 = 1 SQLite 文件）
-    by_sys: dict[str, list[tuple[str, str, list[dict[str, Any]]]]] = {}
-    for table_id in order:
-        code, name = table_id.split(".", 1)
-        by_sys.setdefault(code, []).append((name, TABLE_SPECS[table_id]["ddl"], ctx[table_id]))
-    for code, tables in by_sys.items():
-        write_db(out / ent["systems"][code]["db"], tables)
-
-    build_manifest(config, seed, out, order)
-    injected = sum(1 for r in ctx["erp.MARA"] if r.get("BISMT"))
-    return {
-        "enterprise": enterprise_code,
-        "seed": seed,
-        "out": str(out),
-        "injected": injected,
-        "total_rows": sum(len(ctx[tid]) for tid in order),
-        "tables": {tid: len(ctx[tid]) for tid in order},
-    }
+    return _persist_enterprise(out, config, seed, order, ctx, enterprise_code)

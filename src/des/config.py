@@ -227,8 +227,12 @@ def validate(config: dict) -> None:
     total = config.get("total_target")
     if not isinstance(total, int) or total < 1:
         raise DesConfigError(f"total_target 必须为正整数: {total!r}")
-    # 注：Σ row_count == total_target 的机验在 Phase B（事务表实现后）启用，
-    #     本阶段仅记录口径（见 sum_row_counts），避免未实现表规格造成误判。
+    # Σ row_count == total_target 机验（Phase B 事务表已实现，启用：量级口径 §1.2/§3.1）
+    if sum_row_counts(config) != total:
+        raise DesConfigError(
+            f"Σ row_count ({sum_row_counts(config)}) != total_target ({total})，"
+            "表规格行数合计须精确等于总行数门禁"
+        )
 
 
 def sum_row_counts(config: dict) -> int:
