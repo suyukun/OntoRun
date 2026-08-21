@@ -1,0 +1,117 @@
+version: '0.1'
+domain: mapping-thresholds
+calibrated_at: '2026-08-21 13:58:39'
+gt_size: 62
+full_recall_at_5: 1.0
+auto_coverage: 1.0
+auto_precision: 0.775
+unvalidated_auto_approved:
+- candidate_id: cand_5659ef937aba
+  source_table: erp.MARC
+  source_field: MATNR
+  kind: link
+  target: lnk_erp_marc_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_81f2cb895af6
+  source_table: erp.MARD
+  source_field: MATNR
+  kind: link
+  target: lnk_erp_mard_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_13336e9f0ee0
+  source_table: erp.MAST
+  source_field: MATNR
+  kind: link
+  target: lnk_erp_mast_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_4e077fa94b49
+  source_table: erp.VBAK
+  source_field: KUNNR
+  kind: link
+  target: lnk_erp_vbak_erp_kna1_kunnr
+  confidence_score: 1.0
+- candidate_id: cand_39e8e11d4768
+  source_table: erp.VBAP
+  source_field: MATNR
+  kind: link
+  target: lnk_erp_vbap_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_1956b7916c85
+  source_table: erp.VBAP
+  source_field: VBELN
+  kind: link
+  target: lnk_erp_vbap_erp_vbak_vbeln
+  confidence_score: 1.0
+- candidate_id: cand_582735383cd0
+  source_table: mes.AFPO
+  source_field: AUFNR
+  kind: link
+  target: lnk_mes_afpo_mes_aufk_aufnr
+  confidence_score: 1.0
+- candidate_id: cand_33f544c08b3e
+  source_table: mes.AFPO
+  source_field: MATNR
+  kind: link
+  target: lnk_mes_afpo_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_99f74d0261ce
+  source_table: mes.AUFK
+  source_field: MATNR
+  kind: link
+  target: lnk_mes_aufk_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_56f83e3b3654
+  source_table: mes.COFV
+  source_field: AUFNR
+  kind: link
+  target: lnk_mes_cofv_mes_aufk_aufnr
+  confidence_score: 1.0
+- candidate_id: cand_2f70d16f26bd
+  source_table: mes.COFV
+  source_field: MATNR
+  kind: link
+  target: lnk_mes_cofv_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_be383a4b818c
+  source_table: mes.MPLA
+  source_field: MATNR
+  kind: link
+  target: lnk_mes_mpla_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_35c046e09caf
+  source_table: scm.EKKO
+  source_field: LIFNR
+  kind: link
+  target: lnk_scm_ekko_scm_lfa1_lifnr
+  confidence_score: 1.0
+- candidate_id: cand_c8c058b1b4de
+  source_table: scm.EKPO
+  source_field: EBELN
+  kind: link
+  target: lnk_scm_ekpo_scm_ekko_ebeln
+  confidence_score: 1.0
+- candidate_id: cand_d4013269d9d5
+  source_table: scm.EKPO
+  source_field: MATNR
+  kind: link
+  target: lnk_scm_ekpo_erp_mara_matnr
+  confidence_score: 1.0
+- candidate_id: cand_61393a9f521b
+  source_table: wms.MSEG
+  source_field: EBELN
+  kind: link
+  target: lnk_wms_mseg_scm_ekko_ebeln
+  confidence_score: 0.9999620680499185
+- candidate_id: cand_04341aad9d17
+  source_table: wms.MSEG
+  source_field: MATNR
+  kind: link
+  target: lnk_wms_mseg_erp_mara_matnr
+  confidence_score: 1.0
+thresholds:
+  high: 0.7
+  medium: 0.4
+selection: 满 full_recall@5>=0.80 下 auto_coverage 最大；无解回退 0.9/0.6（C2 不写死）
+selection_note: 选优仅由 high 决定（P2-9）：medium/low 路由均进审核队列，medium 无下游影响，只校准 high 并报告；medium
+  为伴随值
+fallback: false
