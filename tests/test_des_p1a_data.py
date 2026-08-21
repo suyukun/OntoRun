@@ -27,9 +27,12 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTERPRISE_DIR = ROOT / "data" / "des" / "enterprises" / "hc_precision"
 ENTERPRISE_CODE = "hc_precision"
 EXPECTED_SEED = 20260821
-EXPECTED_COUNT = 200
-EXPECTED_INJECTED = 30
-EXPECTED_RATE = 0.15
+# 行数/注入期望值从配置读取（单一事实来源 = 配置，设计 §7.3）：
+# expected = 配置 row_count（erp.MARA = 8,000）；expected_injected = round(row_count × rate)（15% → 1,200）。
+_CONFIG = load_config(ENTERPRISE_CODE)
+EXPECTED_COUNT = _CONFIG["enterprise"]["systems"]["erp"]["tables"]["MARA"]["row_count"]
+EXPECTED_RATE = _CONFIG["injection"]["multi_code"]["rate"]
+EXPECTED_INJECTED = round(EXPECTED_COUNT * EXPECTED_RATE)
 MASTER_RE = re.compile(r"^MAT-\d{4}-\d{4}-[A-Z0-9]{3}$")
 
 # 系统代码 -> (库文件名, 表名)（设计 §1.3/§5）
@@ -45,15 +48,22 @@ SYSTEMS = {
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def gen_dir() -> Path:
-    """确保样例企业库已生成（缺则确定性重建，幂等），返回企业目录。"""
-    build_enterprise(ENTERPRISE_CODE, out_dir=str(ENTERPRISE_DIR))
+    """确保样例企业库为当前配置（config_sha 不符或缺库则确定性重建，幂等），返回企业目录。"""
+    manifest_path = ENTERPRISE_DIR / "manifest.json"
+    current_sha = config_sha256(_CONFIG, EXPECTED_SEED)
+    stale = True
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        stale = manifest.get("config_sha256") != current_sha
+    if stale:
+        build_enterprise(ENTERPRISE_CODE, out_dir=str(ENTERPRISE_DIR))
     return ENTERPRISE_DIR
 
 
 @pytest.fixture()
 def config() -> dict:
-    """hc_precision 生效配置（模板层 + 企业覆盖层合并后）。"""
-    return load_config(ENTERPRISE_CODE)
+    """hc_precision 生效配置（模板层 + 企业覆盖层合并后，模块级缓存）。"""
+    return _CONFIG
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -71,10 +81,16 @@ def _rows(db_path: Path, table: str, order_by: str = "MATNR") -> list[sqlite3.Ro
         conn.close()
 
 
-def _table_shas(db_dir: Path) -> dict[str, str]:
+def _table_pk(config: dict, sys_name: str) -> list[str]:
+    """某系统表的配置主键列（read_table_rows/manifest 泛化排序键，设计 §5.1）。"""
+    db, tbl = SYSTEMS[sys_name]
+    return config["enterprise"]["systems"][sys_name]["tables"][tbl]["pk"]
+
+
+def _table_shas(db_dir: Path, config: dict) -> dict[str, str]:
     """{系统名: 该表 table_sha256}，用于 C 门禁对比。"""
     return {
-        name: table_sha256(read_table_rows(db_dir / db, tbl))
+        name: table_sha256(read_table_rows(db_dir / db, tbl, _table_pk(config, name)))
         for name, (db, tbl) in SYSTEMS.items()
     }
 
@@ -168,19 +184,19 @@ def test_c1_same_seed_same_config_hashes_equal(tmp_path: Path) -> None:
     out1, out2 = tmp_path / "g1", tmp_path / "g2"
     build_enterprise(ENTERPRISE_CODE, out_dir=str(out1))
     build_enterprise(ENTERPRISE_CODE, out_dir=str(out2))
-    assert _table_shas(out1) == _table_shas(out2)
+    assert _table_shas(out1, _CONFIG) == _table_shas(out2, _CONFIG)
 
 
 def test_c2_seed_and_config_change_hashes(tmp_path: Path, config: dict) -> None:
     """C2：改 seed → 三表 sha 全变；改配置（rate）→ config_sha256 变、MARA sha 变（配置参与 hash）。"""
     base = tmp_path / "base"
     build_enterprise(ENTERPRISE_CODE, out_dir=str(base), seed=EXPECTED_SEED)
-    base_shas = _table_shas(base)
+    base_shas = _table_shas(base, config)
 
     # (a) 改 seed → 三表 sha 全变
     alt = tmp_path / "alt_seed"
     build_enterprise(ENTERPRISE_CODE, out_dir=str(alt), seed=EXPECTED_SEED + 1)
-    alt_shas = _table_shas(alt)
+    alt_shas = _table_shas(alt, config)
     for name in SYSTEMS:
         assert alt_shas[name] != base_shas[name], f"改 seed 后 {name} sha 未变"
 
@@ -194,7 +210,7 @@ def test_c2_seed_and_config_change_hashes(tmp_path: Path, config: dict) -> None:
     assert config_sha256(mod_cfg, EXPECTED_SEED) != config_sha256(config, EXPECTED_SEED)
     alt_cfg = tmp_path / "alt_cfg"
     build_enterprise(ENTERPRISE_CODE, out_dir=str(alt_cfg), seed=EXPECTED_SEED, config_file=str(mod_path))
-    assert _table_shas(alt_cfg)["erp"] != base_shas["erp"], "改配置后 erp.MARA sha 未变"
+    assert _table_shas(alt_cfg, config)["erp"] != base_shas["erp"], "改配置后 erp.MARA sha 未变"
 
 
 def test_c3_no_wall_clock_dependence(tmp_path: Path) -> None:
@@ -203,7 +219,7 @@ def test_c3_no_wall_clock_dependence(tmp_path: Path) -> None:
     build_enterprise(ENTERPRISE_CODE, out_dir=str(out1))
     time.sleep(1.1)  # 拉大两次运行的墙钟间隔
     build_enterprise(ENTERPRISE_CODE, out_dir=str(out2))
-    assert _table_shas(out1) == _table_shas(out2)
+    assert _table_shas(out1, _CONFIG) == _table_shas(out2, _CONFIG)
 
 
 def test_c4_manifest_matches_recomputed(gen_dir: Path, config: dict) -> None:
@@ -213,7 +229,7 @@ def test_c4_manifest_matches_recomputed(gen_dir: Path, config: dict) -> None:
     assert manifest["seed"] == EXPECTED_SEED
     assert manifest["config_sha256"] == config_sha256(config, EXPECTED_SEED)
     for name, (db, tbl) in SYSTEMS.items():
-        rows = read_table_rows(gen_dir / db, tbl)
+        rows = read_table_rows(gen_dir / db, tbl, _table_pk(config, name))
         entry = manifest["tables"][f"{name}.{tbl}"]
         assert entry["rows"] == len(rows)
         assert entry["sha256"] == table_sha256(rows)
