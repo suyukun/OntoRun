@@ -58,7 +58,7 @@ class SessionManager:
         # P2-4：启动时惰性清理一次（TTL 过期会话；表不存在/空库时零开销）
         try:
             self.cleanup_expired()
-        except Exception:  # noqa: BLE001 —— 清理失败不阻断启动，仅告警
+        except Exception:  # 清理失败不阻断启动，仅告警
             logger.warning("启动清理过期会话失败（不阻断）", exc_info=True)
 
     # ---- 创建 / 获取 / 恢复 ----
