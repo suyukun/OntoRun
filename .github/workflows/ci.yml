@@ -5,9 +5,9 @@
 #
 # 门禁（对齐 scripts/run_gates.sh + 蓝图 §12 验收）：
 #   - lint：ruff check src/ tests/
-#   - 后端全量 pytest（阶段末 Rose 门禁的自动化镜像；含 governance 制度自检）
-#   - 前端 vitest（npm run test）
-# 注：全量 pytest 仅在本 CI 与阶段末 Rose 门禁跑；子代理/日常增量仍走 run_gates.sh。
+#   - 后端 pytest（排除 slow/live 标记——slow 门禁由阶段末 Rose 跑，CI 不跑百万行规模）
+#   - 前端 vitest（pnpm run test；前端依赖用 pnpm，锁文件 = web/pnpm-lock.yaml）
+# 注：全量 pytest（含 slow）仅阶段末 Rose 门禁跑；子代理/日常增量仍走 run_gates.sh。
 name: ci
 
 on:
@@ -24,9 +24,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install backend deps
-        run: |
-          python -m pip install -r requirements.txt
-          python -m pip install ruff
+        run: python -m pip install -r requirements.txt
       - name: Ruff check
         run: ruff check src/ tests/
 
@@ -40,8 +38,8 @@ jobs:
           python-version: "3.12"
       - name: Install backend deps
         run: python -m pip install -r requirements.txt
-      - name: Pytest (full suite + governance)
-        run: python -m pytest tests/ -q
+      - name: Pytest (exclude slow/live)
+        run: python -m pytest tests/ -q -m "not slow and not live"
 
   frontend:
     runs-on: ubuntu-latest
@@ -50,8 +48,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Enable pnpm (corepack, version pinned by web/package.json packageManager)
+        run: corepack enable
       - name: Install frontend deps
-        run: cd web && npm ci --registry=https://registry.npmmirror.com
+        run: cd web && pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
       - name: Vitest
-        run: cd web && npm run test
+        run: cd web && pnpm run test
