@@ -925,3 +925,91 @@ def test_string_param_length_limits(runtime):
         {"refund_id": refund["refund_id"], "decision": "approved", "review_note": long},
     )
     assert res.outcome == "rejected" and res.error_code == "INVALID_PARAMS"
+
+
+# ======================================================================
+# red-team P1-1/P2-1 修复：真实 enforcer 下的 approve 门 + 动态新动作 fail-closed
+# ======================================================================
+
+
+def test_approve_gate_human_only_with_real_enforcer(runtime):
+    """P1-1 引擎侧：真实 enforcer 下 approve_refund 仅 human 可执行；
+    agent（llm）直调 → PERMISSION_DENIED（R4 兜底），源库零变更。"""
+    from src.runtime.permission_setup import build_permission_enforcer
+
+    enforcer = build_permission_enforcer(runtime.store, runtime.engine.registry)
+    rt = runtime_with_enforcer(runtime, enforcer)
+    refund = _pending_refund(runtime)
+    conn = rt.source()
+    before = table_snapshot(conn)
+
+    res = rt.engine.execute(
+        "approve_refund",
+        {"refund_id": refund["refund_id"], "decision": "approved", "review_note": "x"},
+        actor="llm",
+        request_id="req-approve-llm",
+    )
+    assert res.outcome == "rejected"
+    assert res.error_code == "PERMISSION_DENIED"
+    assert table_snapshot(conn) == before, "agent 审批拒绝路径源库必须零变更"
+
+    # human（种子策略）→ applied
+    res2 = rt.engine.execute(
+        "approve_refund",
+        {"refund_id": refund["refund_id"], "decision": "approved", "review_note": "x"},
+        actor="human",
+        request_id="req-approve-human",
+    )
+    assert res2.outcome == "applied", res2.message
+    conn.close()
+
+
+def test_dynamic_new_action_denied(runtime, monkeypatch):
+    """P2-1：运行时动态注册的新动作（不在 ACTION_PERMISSION_MAP）→ 引擎
+    PERMISSION_DENIED（缺省 deny + 显式 allowlist，零源库变更）。"""
+    from pydantic import BaseModel, Field
+
+    from src.ontology.actions import ActionDef, StateEffects
+    from src.runtime import actions_impl
+    from src.runtime.action_engine import ActionHandler
+    from src.runtime.permission_setup import build_permission_enforcer
+
+    class _DynParams(BaseModel):
+        value: int = Field(ge=0)
+
+    class _DynHandler(ActionHandler):
+        def load_snapshot(self, snapshot, params):
+            return {}
+
+        def check(self, code, snapshot, params):
+            return True, None
+
+        def compute_effects(self, conn, snapshot, params):
+            return [], []
+
+    reg = runtime.engine.registry
+    reg.register_action_type(
+        ActionDef(
+            name="dynamic_new_action",
+            description="动态新动作（未映射权限）",
+            params_model=_DynParams,
+            preconditions=[],
+            state_effects=StateEffects(),
+            error_codes=[],
+        )
+    )
+    monkeypatch.setitem(
+        actions_impl.HANDLERS, "dynamic_new_action", lambda engine: _DynHandler(engine)
+    )
+    enforcer = build_permission_enforcer(runtime.store, reg)
+    rt = runtime_with_enforcer(runtime, enforcer)
+    conn = rt.source()
+    before = table_snapshot(conn)
+
+    res = rt.engine.execute(
+        "dynamic_new_action", {"value": 1}, actor="human", request_id="req-dyn"
+    )
+    assert res.outcome == "rejected"
+    assert res.error_code == "PERMISSION_DENIED"
+    assert table_snapshot(conn) == before, "动态新动作拒绝路径源库必须零变更"
+    conn.close()

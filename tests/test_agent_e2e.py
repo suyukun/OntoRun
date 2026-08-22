@@ -324,9 +324,10 @@ def test_approve_refund_double_sign_confirm(app_source, executor):
     audit = conn.execute(
         "SELECT * FROM audit_log WHERE action_name='approve_refund' ORDER BY ts DESC LIMIT 1"
     ).fetchone()
-    assert (
-        audit is not None and audit["outcome"] == "applied" and audit["actor"] == "llm"
-    )
+    # P1-2：确认后执行以 human 身份留痕，actor_detail 记录确认者（可追溯「谁确认了什么」）
+    assert audit is not None and audit["outcome"] == "applied"
+    assert audit["actor"] == "human"
+    assert "human:" in audit["actor_detail"]
     conn.close()
 
 

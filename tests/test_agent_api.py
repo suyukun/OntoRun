@@ -324,14 +324,15 @@ def test_agent_confirm_approve_refund(agent_client, monkeypatch):
     assert row["status"] == "approved"
     conn.close()
 
-    # 审计留痕
+    # 审计留痕（P1-2：确认后以 human 身份执行，记录确认者身份——可追溯「谁确认了什么」）
     oconn = ontology_db(agent_client)
     audit = oconn.execute(
         "SELECT * FROM audit_log WHERE action_name='approve_refund' ORDER BY ts DESC LIMIT 1"
     ).fetchone()
     assert audit is not None
     assert audit["outcome"] == "applied"
-    assert audit["actor"] == "llm"
+    assert audit["actor"] == "human"
+    assert "human:" in audit["actor_detail"]
     assert json.loads(audit["writeback_json"])  # writeback 自证
     oconn.close()
 
@@ -499,3 +500,99 @@ def test_agent_confirm_unknown_session(agent_client):
     )
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "SESSION_NOT_FOUND"
+
+
+# ======================================================================
+# red-team P1-1 / P1-2 / P2-2：双签身份认证 + owner 绑定 + approve 直调拒绝
+# ======================================================================
+
+
+def test_agent_confirm_requires_human_actor(agent_client):
+    """P1-2：非 human 主体（X-Actor: llm/api）调 /agent/confirm → 明确错误（403）。"""
+    resp = agent_client.post("/agent/chat", json={"message": "你好"})
+    session_id = resp.json()["session_id"]
+    for bad_actor in ("llm", "api"):
+        resp2 = agent_client.post(
+            "/agent/confirm",
+            headers={"X-Actor": bad_actor},
+            json={"session_id": session_id, "call_id": "x", "confirmed": True},
+        )
+        assert resp2.status_code == 403
+        assert resp2.json()["error"]["code"] == "HUMAN_CONFIRM_REQUIRED"
+
+
+def test_agent_confirm_owner_mismatch(agent_client):
+    """P2-2：会话 owner 校验——非 owner 调用方无法确认他人会话（404，不泄漏存在性）。"""
+    # 会话由 X-Actor: api 创建（owner=api）
+    resp = agent_client.post(
+        "/agent/chat", headers={"X-Actor": "api"}, json={"message": "你好"}
+    )
+    session_id = resp.json()["session_id"]
+    # human 尝试确认（owner 不匹配）→ 404 SESSION_NOT_FOUND
+    resp2 = agent_client.post(
+        "/agent/confirm",
+        headers={"X-Actor": "human"},
+        json={"session_id": session_id, "call_id": "x", "confirmed": True},
+    )
+    assert resp2.status_code == 404
+    assert resp2.json()["error"]["code"] == "SESSION_NOT_FOUND"
+
+
+def test_actions_approve_rejects_agent_direct_call(agent_client):
+    """P1-1：API 层拒绝 agent 主体直调 approve 动作（指引走 /agent 双签流）。"""
+    resp = agent_client.post(
+        "/actions/approve_refund",
+        headers={"X-Actor": "llm"},
+        json={"refund_id": "REF-0001", "decision": "approved", "review_note": "x"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "APPROVE_REQUIRES_HUMAN"
+
+
+def test_actions_approve_human_direct_allowed_with_audit(agent_client):
+    """P1-1：human 主体直调 approve_refund → 引擎放行（审计 actor=human 可追溯）。"""
+    resp = agent_client.post(
+        "/actions/approve_refund",
+        headers={"X-Actor": "human"},
+        json={"refund_id": "REF-0001", "decision": "approved", "review_note": "x"},
+    )
+    # REF-0001 已 approved（seed），此处只需断言走权限门而非被 403 拦
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["outcome"] in ("applied", "rejected")
+    if body["outcome"] == "rejected":
+        # 若业务拒绝，也必须是业务错误码（不是权限拒绝）——权限门已放行 human
+        assert body["error"]["code"] != "PERMISSION_DENIED"
+
+
+def test_global_exception_handler_hides_internal_detail(tmp_path, seed_db_path, monkeypatch):
+    """P2-3：全局异常处理器——未捕获异常对外只回显固定文案，内部细节不泄漏。
+
+    模拟 LLM 编排层意外崩溃（run_turn 抛 RuntimeError），断言：
+    - 响应 500 + INTERNAL_ERROR + 固定 message（不含异常原文）；
+    - 完整异常只进日志（logger.exception），响应体不包含内部细节。
+    """
+    from src.agent.agent import Agent as AgentCls
+
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    source = tmp_path / "source.db"
+    shutil.copy(seed_db_path, source)
+    ontology = tmp_path / "ontology.db"
+
+    from src.app.main import create_app as create_agent_app
+
+    app = create_agent_app(source_db=source, ontology_db=ontology)
+
+    def _boom(self, user_message):
+        raise RuntimeError("内部机密: refund-amount-42")
+
+    monkeypatch.setattr(AgentCls, "run_turn", _boom)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.post("/agent/chat", json={"message": "你好"})
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["outcome"] == "error"
+    assert body["error"]["code"] == "INTERNAL_ERROR"
+    assert body["error"]["message"] == "服务器内部错误"
+    # 固定安全文案：内部细节（异常消息原文）不得出现在响应中
+    assert "refund-amount-42" not in resp.text
