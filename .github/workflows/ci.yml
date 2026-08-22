@@ -38,6 +38,10 @@ jobs:
           python-version: "3.12"
       - name: Install backend deps
         run: python -m pip install -r requirements.txt
+      - name: Generate seed databases (module-level create_app needs default dbs; *.db regenerable, gitignored)
+        run: |
+          mkdir -p data/sources data/ontology
+          python data/seed_retail_source.py
       - name: Pytest (exclude slow/live)
         run: python -m pytest tests/ -q -m "not slow and not live"
 
@@ -51,8 +55,7 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - name: Enable pnpm (corepack, version pinned by web/package.json packageManager)
-        run: corepack enable
+          enableCorepack: true
       - name: Install frontend deps
         run: cd web && pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
       - name: Vitest
