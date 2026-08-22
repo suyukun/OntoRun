@@ -11,3 +11,4 @@ uvicorn==0.44.0
 httpx==0.28.1  # fastapi TestClient（约 10 个测试文件模块级 import，缺则收集失败）
 duckdb==1.5.5  # src/des/{materialize,metrics_materialize,contract}.py + 测试
 PyYAML==6.0.3  # src/{config,metrics,calibrate}.py + 4 个测试文件 import yaml
+python-multipart==0.0.20  # fastapi Form/文件上传（TestClient 收集需要，CI 干净环境缺则收集失败）
