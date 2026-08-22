@@ -25,6 +25,9 @@ READ_ERROR_MESSAGES: dict[str, str] = {
     "UNKNOWN_FILTER_FIELD": "过滤字段不存在",
     "INVALID_REQUEST": "请求体不合法（JSON 解析失败）",
     "INVALID_ACTOR": "非法操作者（X-Actor 仅允许 human/llm/api）",
+    # red-team P1-1/P1-2：approve 双签门（审批动作只能由 human 确认）
+    "APPROVE_REQUIRES_HUMAN": "高风险审批动作必须由人类确认（双签），请走 /agent/chat → /agent/confirm 流程",
+    "HUMAN_CONFIRM_REQUIRED": "双签确认必须由人类发起（X-Actor: human）",
 }
 ERROR_MESSAGES.update(READ_ERROR_MESSAGES)
 
@@ -71,6 +74,8 @@ ERROR_CODE_HTTP_STATUS.update(
         "UNKNOWN_FILTER_FIELD": 400,
         "INVALID_REQUEST": 400,
         "INVALID_ACTOR": 400,
+        "APPROVE_REQUIRES_HUMAN": 403,
+        "HUMAN_CONFIRM_REQUIRED": 403,
         # Builder 错误码 HTTP 状态映射（业务类非法流转/校验失败 → 4xx）
         "BUILDER_OBJECT_TYPE_NOT_FOUND": 404,
         "BUILDER_LINK_TYPE_NOT_FOUND": 404,

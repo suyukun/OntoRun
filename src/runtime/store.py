@@ -381,6 +381,7 @@ GOVERNANCE_SCHEMA: str = (
 SESSIONS_SCHEMA: str = """
 CREATE TABLE IF NOT EXISTS sessions (
   session_id    TEXT PRIMARY KEY,
+  owner         TEXT NOT NULL DEFAULT '',     -- 创建者身份（P2-2：get 时校验 owner 匹配）
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL,
   pending_json  TEXT NOT NULL DEFAULT '{}',   -- 待确认 ToolCall JSON（双签恢复）
@@ -469,6 +470,19 @@ def _apply_builder_patches(conn: sqlite3.Connection) -> None:
         )
     # v4 patch（TD-9）：action_runs.executed_by CHECK 白名单。
     _patch_action_runs_executed_by_check(conn)
+
+
+def _apply_session_patches(conn: sqlite3.Connection) -> None:
+    """P2-2 会话段幂等补丁：sessions 加 owner 列（存量库 ALTER，新库已含）。
+
+    仿 v2/v3 ALTER 先例：PRAGMA table_info 检出已加则跳过；存量行 owner 默认
+    空串 = 未绑定（单用户 demo 迁移兼容，见 SessionManager.get 的 legacy 匹配）。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    if cols and "owner" not in cols:
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN owner TEXT NOT NULL DEFAULT ''"
+        )
 
 
 def _apply_governance_patches(conn: sqlite3.Connection) -> None:
@@ -697,6 +711,8 @@ class Store:
             _apply_governance_patches(conn)
             # P4 会话段：sessions/messages 表（幂等 CREATE IF NOT EXISTS）
             conn.executescript(SESSIONS_SCHEMA)
+            # P2-2：sessions.owner 列（存量库幂等 ALTER，新库已含）
+            _apply_session_patches(conn)
             # 单次 INSERT OR REPLACE，note 含两段（red-team E2 修复：避免二次覆盖）
             conn.execute(
                 "INSERT OR REPLACE INTO schema_version (version, note, applied_at) "

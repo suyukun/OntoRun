@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from src.api.schemas import ERROR_CODE_HTTP_STATUS, ERROR_MESSAGES, Envelope, ErrorInfo
 from src.runtime.action_engine import ALLOWED_ACTORS, ActionResult
+from src.runtime.permission_enforcer import ACTION_PERMISSION_MAP
 from src.runtime.query import (
     InvalidDirection,
     LinkNotFound,
@@ -236,6 +237,14 @@ async def submit_action(action_name: str, request: Request) -> JSONResponse:
     # 出现"写已提交、无留痕"——违背"所有提交留痕"；此处与引擎兜底双保险。
     if actor not in ALLOWED_ACTORS:
         return _error_response(request_id, "INVALID_ACTOR", {"actor": actor})
+    # P1-1（red-team）：operation=approve 的动作拒绝 agent 主体直调——双签协议
+    # （LLM 提议 → human 确认才执行）要求审批动作只能经 /agent 流提交；
+    # human 直调由权限门放行（审计 actor=human 可追溯），引擎侧 R4 兜底再拒 agent。
+    approve_mapping = ACTION_PERMISSION_MAP.get(action_name)
+    if approve_mapping is not None and approve_mapping[1] == "approve" and actor == "llm":
+        return _error_response(
+            request_id, "APPROVE_REQUIRES_HUMAN", {"action": action_name}
+        )
     actor_detail = request.headers.get("X-Actor-Detail", "")
     try:
         raw = await request.body()

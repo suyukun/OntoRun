@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from src.agent.agent import ActionExecutor, Agent
 from src.agent.provider import get_provider
 from src.app.session import SessionManager
+from src.runtime.action_engine import ALLOWED_ACTORS
 
 # ======================================================================
 # 请求/响应模型（与前端共享契约）
@@ -205,22 +206,37 @@ def _register_agent_routes(app: FastAPI, store) -> None:
     sessions = SessionManager(store, agent_factory=_get_agent)
 
     @app.post("/agent/chat")
-    async def agent_chat(body: ChatRequest):
+    async def agent_chat(body: ChatRequest, request: Request):
         """用户消息 → LLM 编排 → 回复。
 
         流程：
-        1. 获取或创建会话（session_id 可选）
-        2. 调用 Agent.run_turn() 编排 LLM 往返
-        3. 如有高风险提议（need_confirm），记录到会话待确认区
-        4. 返回 reply + 可选 need_confirm
+        1. 身份解析（X-Actor，缺省 human——demo 单用户控制台）并做 owner 绑定（P2-2）
+        2. 获取或创建会话（session_id 可选；owner 不匹配的既有会话视为不存在）
+        3. 调用 Agent.run_turn() 编排 LLM 往返
+        4. 如有高风险提议（need_confirm），记录到会话待确认区
+        5. 返回 reply + 可选 need_confirm
         """
+        actor = request.headers.get("X-Actor", "human")
+        if actor not in ALLOWED_ACTORS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "INVALID_ACTOR",
+                        "message": f"非法操作者（X-Actor 仅允许 {ALLOWED_ACTORS}）",
+                        "detail": {"actor": actor},
+                    },
+                },
+            )
         session_id = body.session_id
-        state = sessions.get(session_id) if session_id else None
+        state = sessions.get(session_id, owner=actor) if session_id else None
 
         if state is None:
             agent = _get_agent()
-            session_id = sessions.create(agent)
-            state = sessions.get(session_id)
+            session_id = sessions.create(agent, owner=actor)
+            state = sessions.get(session_id, owner=actor)
         else:
             agent = state.agent
 
@@ -265,16 +281,34 @@ def _register_agent_routes(app: FastAPI, store) -> None:
         )
 
     @app.post("/agent/confirm")
-    async def agent_confirm(body: ConfirmRequest):
-        """双签确认/拒绝。
+    async def agent_confirm(body: ConfirmRequest, request: Request):
+        """双签确认/拒绝（P1-2：确认者必须为 human，审计记录确认者身份）。
 
         流程：
-        1. 从会话待确认区取出提议
-        2. 校验 call_id 匹配
-        3. 调用 Agent.confirm_pending() 执行/取消
-        4. 返回回复 + outcome
+        1. 身份校验：X-Actor 必须为 human（agent/api 直调 → 403，防伪造双签）
+        2. 从会话待确认区取出提议（owner 绑定校验，P2-2）
+        3. 校验 call_id 匹配（确认必须绑定发起提议的会话）
+        4. 调用 Agent.confirm_pending() 执行/取消（确认者身份入审计 actor_detail）
+        5. 确认成功后才清 pending + 落历史（P1-3：失败不丢 pending）
+        6. 返回回复 + outcome
         """
-        state = sessions.get(body.session_id)
+        actor = request.headers.get("X-Actor", "human")  # demo 单用户控制台：缺省=人类操作者
+        if actor != "human":
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "HUMAN_CONFIRM_REQUIRED",
+                        "message": "双签确认必须由人类发起（X-Actor: human）",
+                        "detail": {"actor": actor},
+                    },
+                },
+            )
+        actor_detail = request.headers.get("X-Actor-Detail", "")
+
+        state = sessions.get(body.session_id, owner=actor)
         if state is None:
             return JSONResponse(
                 status_code=404,
@@ -315,13 +349,14 @@ def _register_agent_routes(app: FastAPI, store) -> None:
                 },
             )
 
-        # 清除待确认状态
-        sessions.set_pending(body.session_id, None)
-
+        # P1-3：不在确认前清 pending——失败时提议保留（可重试），成功后才清
         try:
             # TD-6：与 /agent/chat 同理，同步编排环扔线程池（真 LLM 不阻塞事件循环）
             turn = await asyncio.to_thread(
-                state.agent.confirm_pending, body.confirmed
+                state.agent.confirm_pending,
+                body.confirmed,
+                confirmant=actor,
+                confirmant_detail=actor_detail,
             )
         except ValueError as exc:
             return JSONResponse(
@@ -335,6 +370,10 @@ def _register_agent_routes(app: FastAPI, store) -> None:
                     },
                 },
             )
+
+        # 确认成功：清 pending + 落历史（工具结果/回复入库，重启不丢）
+        sessions.set_pending(body.session_id, None)
+        sessions.persist(body.session_id, state.agent)
 
         # 推断 outcome
         outcome = body.confirmed and "applied" or "cancelled_by_user"
@@ -353,11 +392,18 @@ def _register_agent_routes(app: FastAPI, store) -> None:
 
 
 def _register_error_handlers(app: FastAPI) -> None:
-    """注册全局异常处理器。"""
+    """注册全局异常处理器（P2-3：固定安全文案 + 完整异常进日志，不回显内部细节）。"""
+    import logging
+
     from fastapi.responses import JSONResponse
+
+    logger = logging.getLogger(__name__)
 
     @app.exception_handler(Exception)
     async def global_exception_handler(_request: Any, exc: Exception):
+        # 原始异常只进日志（含 traceback）；对外 message 固定文案，
+        # 与 action_engine 失败路径口径一致（错误信息不泄漏敏感数据）
+        logger.exception("未捕获异常（对外只返回固定文案）: %s", exc)
         return JSONResponse(
             status_code=500,
             content={
@@ -365,7 +411,7 @@ def _register_error_handlers(app: FastAPI) -> None:
                 "outcome": "error",
                 "error": {
                     "code": "INTERNAL_ERROR",
-                    "message": f"服务器内部错误: {exc}",
+                    "message": "服务器内部错误",
                 },
             },
         )

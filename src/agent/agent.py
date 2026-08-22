@@ -137,6 +137,14 @@ class Agent:
             m for m in messages if m.role in ("user", "assistant", "tool")
         ]
 
+    def set_pending(self, call: ToolCall | None) -> None:
+        """恢复/设置待确认提议（P1-3：会话重启时 SessionManager 回填 _pending）。
+
+        仅用于状态恢复（新会话由 run_turn 提议自然设置）；新一轮用户消息
+        到来时 run_turn 会作废旧提议（双签显式 API 为准）。
+        """
+        self._pending = call
+
     # ---- 对外入口 ----
 
     def run_turn(self, user_message: str) -> AgentTurn:
@@ -147,8 +155,19 @@ class Agent:
         resp = self._provider.chat(self._messages(), self._tools)
         return self._handle_response(resp)
 
-    def confirm_pending(self, decision: bool) -> AgentTurn:
-        """高风险双签（§5.4 人机层）：用户确认/拒绝上一轮 LLM 提议，确认后才提交。"""
+    def confirm_pending(
+        self,
+        decision: bool,
+        *,
+        confirmant: str = "human",
+        confirmant_detail: str = "",
+    ) -> AgentTurn:
+        """高风险双签（§5.4 人机层）：用户确认/拒绝上一轮 LLM 提议，确认后才提交。
+
+        P1-2（red-team）：确认后的执行以 human 身份提交（actor="human"，
+        命中审=人专属种子策略），actor_detail 记录确认者身份与所确认的
+        call_id——审计可追溯「谁确认了什么」；agent（llm）直调引擎会被 R4 拒绝。
+        """
         if self._pending is None:
             raise ValueError("当前没有待确认的高风险动作提议")
         call = self._pending
@@ -169,7 +188,13 @@ class Agent:
                 ),
             )
         else:
-            result = self._execute_tool_call(call)
+            actor_detail = f"human:{confirmant}"
+            if confirmant_detail:
+                actor_detail += f" ({confirmant_detail})"
+            actor_detail += f"; llm:{type(self._provider).__name__}; confirmed_call:{call.id}"
+            result = self._execute_tool_call(
+                call, actor="human", actor_detail=actor_detail
+            )
         self._history.append(
             ChatMessage(role="tool", content=result.content, tool_call_id=call.id)
         )
@@ -222,8 +247,15 @@ class Agent:
         self._history.append(ChatMessage(role="assistant", content=content))
         return AgentTurn(reply=content, tool_results=results)
 
-    def _execute_tool_call(self, call: ToolCall) -> ToolResult:
-        """guard：白名单 → 参数校验（复用 runtime 校验）→ 走统一写入口 POST /actions。"""
+    def _execute_tool_call(
+        self, call: ToolCall, *, actor: str = "llm", actor_detail: str = ""
+    ) -> ToolResult:
+        """guard：白名单 → 参数校验（复用 runtime 校验）→ 走统一写入口 POST /actions。
+
+        - 常规（自主）执行：actor="llm"（审计 actor=llm，LLM 自主行为）；
+        - 双签确认后执行（confirm_pending）：actor="human" + actor_detail 含确认者
+          身份（P1-2），权限门按 human 放行审批动作。
+        """
         # 1) 结构层：工具白名单（无泛化写，D-T3 / §5.2 约束 1）
         if call.name not in self._tool_map:
             return ToolResult(
@@ -266,14 +298,16 @@ class Agent:
                     }
                 ),
             )
-        # 4) 执行：与 UI 同一 REST 动作端点（§5.5 统一写入口，审计 actor=llm）
+        # 4) 执行：与 UI 同一 REST 动作端点（§5.5 统一写入口）
+        #    actor/actor_detail 由调用方决定：自主执行 = llm（审计 actor=llm）；
+        #    双签确认后 = human + 确认者身份（P1-2，审计可追溯）。
         request_id = f"req_{uuid.uuid4().hex[:10]}"
-        actor_detail = f"llm:{type(self._provider).__name__}"
+        detail = actor_detail or f"llm:{type(self._provider).__name__}"
         result = self._executor.execute(
             call.name,
             call.arguments,
-            actor="llm",
-            actor_detail=actor_detail,
+            actor=actor,
+            actor_detail=detail,
             request_id=request_id,
         )
         return ToolResult(tool_call_id=call.id, name=call.name, content=_j(result))

@@ -109,7 +109,8 @@ class PermissionEnforcer(Protocol):
     委托 src.runtime.permissions 的 decide 纯函数即可 fail-closed）。
     - 返回 PermissionDecision：按 allowed 裁决，allowed=False → rejected + PERMISSION_DENIED，
       命中策略 id（matched_policy_ids）落审计 detail_json 溯源；
-    - 返回 None：该动作不纳入权限门（跳过，交给调用方在实现里显式决定哪些动作放行）。
+    - 返回 None：该动作不纳入权限门（跳过——仅限自定义实现显式选择；
+      DefaultPermissionEnforcer 一律不返回 None：未映射动作返回显式 deny，P2-1）。
     缺省不传 enforcer = S1 行为不变（权限门不启用）。
     """
 
@@ -306,7 +307,9 @@ class ActionEngine:
 
         # ①' 权限门（P4）：① 参数校验后、④ 前置规则前（源库事务未开，拒绝零变更）。
         # 缺省 None = S1 不启用；启用时 enforcer 返回 deny → rejected + PERMISSION_DENIED，
-        # 审计落 rejected（matched_policy_ids 溯源）；返回 None（不纳入）→ 跳过。
+        # 审计落 rejected（matched_policy_ids 溯源）。DefaultPermissionEnforcer 为
+        # fail-closed（P2-1）：未映射动作也返回显式 deny，绝不返回 None 默认放行；
+        # 仅自定义 enforcer 可返回 None 表示该动作不纳入权限门。
         if self._enforcer is not None:
             decision = self._enforcer.decide(action_name, validated.model_dump(), actor)
             if decision is not None and not decision.allowed:
