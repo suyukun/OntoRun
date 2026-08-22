@@ -42,6 +42,8 @@ jobs:
         run: |
           mkdir -p data/sources data/ontology
           python data/seed_retail_source.py
+      - name: Generate DES enterprise databases (hc_precision full-scale, needed by des tests; *.db regenerable)
+        run: python -m src.des --enterprise hc_precision
       - name: Pytest (exclude slow/live)
         run: python -m pytest tests/ -q -m "not slow and not live"
 
