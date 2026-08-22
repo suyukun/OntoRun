@@ -8,7 +8,8 @@
 - 契约 v0.2 metric 执行（§3.1/§3.2）：sales_amount_by_mat_month + 维度过滤返回行数与值
   与源库直算一致；非法 metric_id/未知维度键 fail-closed；T3 版本守卫漂移拒答；V5 结果护栏；
 - v0.1 兼容（§6 补充断言）：DQ-01（round(N×rate) 条）、Q2/Q3 原样可执行且结果一致；
-- 读侧权限（§3.3）：无 ctx 兼容 / 无策略 fail-closed / allow 通过 / 属性级 deny fail-closed；
+- 读侧权限（§3.3 + P4 数据权限下沉 §2）：无 ctx 兼容 / 无策略 fail-closed / allow 通过
+  （P4 视图路径：先建权限视图，查询走 perm_<object_type>）/ 属性级 deny fail-closed；
 - 性能冒烟（§4.3 P95≤500ms，宽松判据避免 CI 抖动，标记 slow）。
 
 约束：物化/查询用真实企业库（data/des/enterprises/hc_precision/，已生成），权限用临时
@@ -47,6 +48,7 @@ from src.des.metrics_materialize import (
     reconcile_inventory_r2,
     reconcile_metrics,
 )
+from src.des.permission_views import create_permission_views
 from src.ontology import build_registry
 from src.ontology.registry import Registry
 from src.runtime.permissions import (
@@ -156,6 +158,14 @@ def _executor_with_perm(
     return ContractExecutor(
         mz, registry, metrics=metrics, metrics_db=METRICS_DB_PATH, permission_ctx=ctx
     )
+
+
+def _metrics_db_copy(work: Path) -> Path:
+    """metrics.db 副本 + manifest 符号链接（T3 守卫同版本）；P4 权限视图写副本不碰真库。"""
+    work.mkdir(parents=True)
+    shutil.copy(METRICS_DB_PATH, work / METRICS_DB)
+    os.symlink(ENTERPRISE_DIR / "manifest.json", work / "manifest.json")
+    return work / METRICS_DB
 
 
 def _source_direct_sales(matnr: str) -> list[dict]:
@@ -799,12 +809,20 @@ def test_permission_allow_passes(
     registry: Registry,
     metrics: MetricRegistry,
     perm_service: PermissionService,
+    tmp_path: Path,
+    mat_result: MetricsMaterializationResult,
 ) -> None:
-    """对象级 read allow → 通过；metric 结果列 = 维度 + 度量（对象字段受可见集约束）。"""
+    """对象级 read allow → 通过（P4 视图路径：先建权限视图，查询走 perm_<object_type>）。
+
+    真实策略 ctx 下 metric 查询强制走权限视图（视图缺失/为空即 fail-closed 拒答），
+    结果列 = 维度 + 度量（对象字段受可见集约束），判别列不外泄。
+    """
     perm_service.create(_policy(policy_id="allow-mat"))
     ctx = PermissionContext(subject=_agent(), permission_registry=perm_service.perm_registry)
-    ex = _executor_with_perm(mz, registry, metrics, ctx)
-    conn = duckdb.connect(str(METRICS_DB_PATH), read_only=True)
+    db = _metrics_db_copy(tmp_path / "perm_allow")
+    create_permission_views(db, metrics, ctx.permission_registry, ctx.subject)
+    ex = ContractExecutor(mz, registry, metrics=metrics, metrics_db=db, permission_ctx=ctx)
+    conn = duckdb.connect(str(db), read_only=True)
     try:
         matnr = conn.execute(
             "SELECT matnr FROM metric_sales_amount_by_mat_month "

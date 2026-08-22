@@ -3,6 +3,9 @@
 _execr_op/_build_where（参数化 WHERE，V4）/ _compute_agg（单聚合计算）；ContractExecutor：
 v0.1 对象路径（DuckDB 动态派生：过滤/聚合/≤1 跳 link_traversal + 多码谓词强制 + V5 结果护栏）
 与 v0.2 指标路径（命中 metrics.db 预聚合表，T3 版本守卫，Top-N）。与 v0.1 单文件实现行为一致。
+v0.2 指标路径叠加 P4 数据权限下沉（设计 §2）：真实策略 permission_ctx 下查询强制走
+metrics.db 对象级权限视图 perm_<object_type>（deny 对象无视图 → fail-closed 拒答），
+allow-all 上下文（内部工具/对账）保持直查物化表（行为不变）。
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from src.des.metrics import (
     is_date_dimension,
     metric_table_name,
 )
+from src.des.permission_views import permission_view_name
 from src.ontology.registry import Registry
 
 
@@ -345,9 +349,12 @@ class ContractExecutor:
     # v0.2 指标物化路径（设计 §3.2：命中 metrics.db 预聚合表，不现场算）
     # ------------------------------------------------------------------
     def _execute_metric(self, contract: dict) -> dict:
-        """执行 v0.2 指标契约：M 系列校验 → T3 版本守卫 → 查 metrics.db 物化表。
+        """执行 v0.2 指标契约：M 系列校验 → T3 版本守卫 → 查 metrics.db 物化表（权限视图）。
 
         返回 {object_type, metric_id, count, rows}；结果护栏按指标物化表规模派生（V5，P3-9）。
+        P4 数据权限下沉（设计 §2）：真实策略 ctx 下 _query_metric 强制走权限视图
+        perm_<object_type>（视图缺失/为空 = 对象级 deny，PermissionDeniedError fail-closed）；
+        allow-all ctx（内部工具/对账）直查物化表（行为不变）。
         """
         if self._metrics is None:
             raise ContractError("契约含 metric 但执行器未注入指标注册表（M 系列 fail-closed）")
@@ -447,6 +454,45 @@ class ContractExecutor:
                 return d
         raise ContractError(f"指标 {md.metric_id} 无日期维度，time_range 无法绑定（校验应已拦截）")
 
+    def _permission_is_allow_all(self) -> bool:
+        """是否为 allow-all 直查上下文（内部工具/对账）：静态 allow_all 判定（read 全属性可见）。
+
+        判别语义：真实策略注册表对 read 的判定 allowed 时 visible_attributes 恒为列表
+        （R3 属性集裁剪结果）；visible_attributes=None 仅静态 allow_all 产生 → 判为
+        无属性级约束 → 直查物化表（视图路径仅真实策略 ctx 启用，不施加内部工具）。
+        """
+        decision = self._permission_ctx.permission_registry.decide(
+            self._permission_ctx.subject, "__probe__", "read"
+        )
+        return decision.allowed and decision.visible_attributes is None
+
+    def _metric_source(self, conn: Any, md: MetricDef) -> tuple[str, bool]:
+        """指标查询数据源：(名称, 是否权限视图)。
+
+        allow-all 上下文 → 直查物化表（行为不变）；真实策略上下文 → 强制走权限视图，
+        视图缺失/为空 = 对象级 deny 语义（PermissionDeniedError fail-closed，绝不回落
+        直查物化表，防视图旁路）。
+        """
+        if self._permission_is_allow_all():
+            return metric_table_name(md.metric_id), False
+        view = permission_view_name(md.object_type)
+        exists = conn.execute(
+            "SELECT 1 FROM information_schema.views "
+            "WHERE table_schema='main' AND table_name=?",
+            (view,),
+        ).fetchone()
+        if exists is None:
+            raise PermissionDeniedError(
+                f"读侧权限拒绝（视图缺失，fail-closed）: {view}"
+                "（对象级 deny 或未重建，防视图旁路直查）"
+            )
+        if conn.execute(f"SELECT 1 FROM {view} LIMIT 1").fetchone() is None:
+            raise PermissionDeniedError(
+                f"读侧权限拒绝（视图为空，fail-closed）: {view}"
+                "（对象级 deny 或未物化，防视图旁路直查）"
+            )
+        return view, True
+
     def _query_metric(
         self,
         conn: Any,
@@ -456,25 +502,31 @@ class ContractExecutor:
         params: list[Any],
         top_n: int | None = None,
     ) -> list[dict[str, Any]]:
-        """查 metric_<id> 物化表（参数化，V4）：无 group_by → 维度全列 + 度量列；
-        有 group_by → 物化表子集重聚合（仅可加聚合 sum/count/min/max，校验已挡 avg/count_distinct）。
+        """查指标数据（参数化，V4）：无 group_by → 维度全列 + 度量列；有 group_by → 子集重聚合
+        （仅可加聚合 sum/count/min/max，校验已挡 avg/count_distinct）。
 
-        top_n（v0.2 表达力 Top-N，报告 §6 J4）：按度量值降序截断前 N 行（参数化 LIMIT，
-        N 已校验 ≤1000），有/无 group_by 均生效；缺省 None = 不截断。表名/列名全为注册表
-        派生常量（无用户输入，无注入面），值一律 ? 绑定。
+        数据源 = 权限视图（真实策略 ctx，P4 设计 §2，行按 metric_id 判别列过滤防串表）
+        或物化表 metric_<id>（allow-all 直查）。top_n（v0.2 表达力 Top-N，报告 §6 J4）：
+        按度量值降序截断前 N 行（参数化 LIMIT，N 已校验 ≤1000），有/无 group_by 均生效；
+        缺省 None = 不截断。表名/视图名/列名全为注册表派生常量（无用户输入，无注入面），
+        值一律 ? 绑定。
         """
-        table = metric_table_name(md.metric_id)
+        source, is_view = self._metric_source(conn, md)
+        if is_view:
+            # 视图行含 metric_id 判别列（同对象多指标 UNION ALL，防列名碰撞串表）；
+            # metric_id 为注册表 M7 常量（snake_case，无注入面），返回列显式选择不含它
+            where = f"{where} AND metric_id = '{md.metric_id}'"
         measure_col = md.measure.name
         if gb:
             select = ", ".join(
                 gb + [f"{_METRIC_REAGG_SQL[md.agg_function]}({measure_col}) AS {measure_col}"]
             )
             order = ", ".join(gb)
-            sql = f"SELECT {select} FROM {table} WHERE {where} GROUP BY {order}"
+            sql = f"SELECT {select} FROM {source} WHERE {where} GROUP BY {order}"
         else:
             cols = ", ".join([d.name for d in md.dimension_fields] + [measure_col])
             order = ", ".join(d.name for d in md.dimension_fields)
-            sql = f"SELECT {cols} FROM {table} WHERE {where}"
+            sql = f"SELECT {cols} FROM {source} WHERE {where}"
         if top_n is not None:
             # Top-N：按度量值降序取前 N（J4 退款 Top5 等）；LIMIT 参数化（V4），N 已校验 ≤1000
             sql += f" ORDER BY {measure_col} DESC, {order} LIMIT ?"
