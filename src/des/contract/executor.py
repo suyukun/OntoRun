@@ -1,16 +1,14 @@
-"""结构化查询契约 v0.1/v0.2 执行器 + DQ-01 对账（过渡桥接文件，commit 2 迁入包后删除）。
+"""契约执行器（设计 §3.2）：执行辅助 + ContractExecutor。
 
-errors/permissions/schema 已迁入 src.des.contract 包；本文件仅保留执行辅助
-（_expr_op/_build_where/_compute_agg）、ContractExecutor、ReconcileResult/reconcile_dq01/run_dq01，
-顶部 import 改从包导入，行为与 v0.1 单文件实现完全一致。
+_execr_op/_build_where（参数化 WHERE，V4）/ _compute_agg（单聚合计算）；ContractExecutor：
+v0.1 对象路径（DuckDB 动态派生：过滤/聚合/≤1 跳 link_traversal + 多码谓词强制 + V5 结果护栏）
+与 v0.2 指标路径（命中 metrics.db 预聚合表，T3 版本守卫，Top-N）。与 v0.1 单文件实现行为一致。
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,15 +18,14 @@ from src.des.config import DEFAULT_ENTERPRISES_DIR
 from src.des.contract.errors import ContractError, PermissionDeniedError
 from src.des.contract.permissions import PermissionContext
 from src.des.contract.schema import (
-    DQ01_CONTRACT,
+    _METRIC_REAGG_SQL,
     RESULT_LIMIT_FLOOR,
     RESULT_LIMIT_SCALE_FACTOR,
-    _METRIC_REAGG_SQL,
     _find_link,
     _resolve_type,
     validate_contract,
 )
-from src.des.materialize import DesMaterialization, materialize_des, rows_as_dicts
+from src.des.materialize import DesMaterialization, rows_as_dicts
 from src.des.metrics import (
     METRIC_META_TABLE,
     METRICS_DB,
@@ -39,8 +36,8 @@ from src.des.metrics import (
     is_date_dimension,
     metric_table_name,
 )
-from src.ontology import build_registry
 from src.ontology.registry import Registry
+
 
 def _expr_op(expr: Any) -> str:
     """取过滤表达式的操作符（标量简写 = 等值）。"""
@@ -489,63 +486,3 @@ class ContractExecutor:
         except Exception as exc:  # 表缺失/类型错误即 fail-closed
             raise ContractError(f"指标执行失败（fail-closed 拒答）: {exc}") from exc
 
-
-# ---------------------------------------------------------------------------
-# DQ-01 跑通 + 对账（设计 §2.3/§3.2/§4.3）
-# ---------------------------------------------------------------------------
-@dataclass
-class ReconcileResult:
-    """DQ-01 三方对账结果：本体查询 vs 数据侧注入集 vs manifest。"""
-
-    ok: bool
-    expected_count: int
-    actual_count: int
-    ratio: float
-    differences: list[str]
-
-
-def reconcile_dq01(
-    result: dict,
-    enterprise_code: str = "hc_precision",
-    out_dir: str | Path | None = None,
-    manifest: dict | None = None,
-) -> ReconcileResult:
-    """本体查询结果 vs 数据侧注入集 + manifest.multi_code_count 三方对账（设计 §2.3）。"""
-    out = Path(out_dir) if out_dir else DEFAULT_ENTERPRISES_DIR / enterprise_code
-    conn = sqlite3.connect(str(out / "erp.db"))
-    try:
-        data_side = [r[0] for r in conn.execute("SELECT MATNR FROM MARA WHERE BISMT IS NOT NULL ORDER BY MATNR")]
-    finally:
-        conn.close()
-    if manifest is None:
-        manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
-    erp_entry = manifest["tables"]["erp.MARA"]
-    onto_side = [item["pk"] for item in result.get("items", [])]
-    n = int(erp_entry["rows"])
-    expected = int(erp_entry["multi_code_count"])
-    differences = sorted(set(onto_side) ^ set(data_side))
-    if len(onto_side) != len(data_side):
-        differences.append(f"条数不一致: 本体 {len(onto_side)} ≠ 数据侧 {len(data_side)}")
-    ok = not differences and len(onto_side) == expected
-    return ReconcileResult(
-        ok=ok,
-        expected_count=expected,
-        actual_count=len(onto_side),
-        ratio=len(onto_side) / n if n else 0.0,
-        differences=differences,
-    )
-
-
-def run_dq01(
-    enterprise_code: str = "hc_precision",
-    out_dir: str | Path | None = None,
-    registry: Registry | None = None,
-) -> tuple[dict, DesMaterialization]:
-    """物化 + 执行 DQ-01，返回 (查询结果, 物化对象)。调用方负责 mz.duckdb.close()。"""
-    reg = registry or build_registry()
-    mz = materialize_des(enterprise_code, out_dir=out_dir, registry=reg)
-    # 内部对账工具显式 allow-all 权限上下文（red-team P1-1：权限开关显式可见，不靠缺省放行）
-    return (
-        ContractExecutor(mz, reg, permission_ctx=PermissionContext.allow_all()).execute(DQ01_CONTRACT),
-        mz,
-    )

@@ -28,11 +28,13 @@ from src.des.contract.errors import (
     ContractError,
     PermissionDeniedError,
 )
+from src.des.contract.executor import ContractExecutor
 from src.des.contract.permissions import (
     SYSTEM_SUBJECT,
     PermissionContext,
     PermissionDecider,
 )
+from src.des.contract.reconcile import ReconcileResult, reconcile_dq01, run_dq01
 from src.des.contract.schema import (
     AGG_FUNCS,
     CONTRACT_KEYS,
@@ -47,14 +49,6 @@ from src.des.contract.schema import (
     RESULT_LIMIT_SCALE_FACTOR,
     TIME_RANGE_KEYS,
     validate_contract,
-)
-
-# executor/reconcile 仍驻留 contract_monolith（过渡桥接，commit 2 迁入包后移除）
-from src.des.contract_monolith import (
-    ContractExecutor,
-    ReconcileResult,
-    reconcile_dq01,
-    run_dq01,
 )
 
 __all__ = [
