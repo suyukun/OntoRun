@@ -35,8 +35,9 @@ EXPECTED_OBJECTS = {
     "Shipment",
     "Refund",
 }
-# P2 ChatBI 主体对象（2026-08-21 Jack 拍板；Customer 复用 S1 零售对象，其余 3 个新注册）
-P2_SUBJECT_OBJECTS = {"Customer", "Vendor", "InventoryLocation", "FinanceEntry"}
+# P2 ChatBI 主体对象（2026-08-21 Jack 拍板；2026-08-22 ErpCustomer 独立注册，源表 erp.KNA1，
+# 解决 Customer 同名冲突——S1 零售 Customer 保留不动）
+P2_SUBJECT_OBJECTS = {"ErpCustomer", "Vendor", "InventoryLocation", "FinanceEntry"}
 EXPECTED_ACTIONS = {
     "create_order",
     "confirm_order",
@@ -56,9 +57,9 @@ def registry() -> Registry:
 
 
 def test_registry_loads(registry):
-    # S2 P1a/P2：DES 对象（Material/Code + P2 主体对象 Vendor/InventoryLocation/FinanceEntry）
-    # 与 S1 8 对象同一注册表（设计 §1.4/§1.5），共 13 个
-    assert len(registry.object_types()) == 13
+    # S2 P1a/P2：DES 对象（Material/Code + P2 主体对象 ErpCustomer/Vendor/
+    # InventoryLocation/FinanceEntry）与 S1 8 对象同一注册表（设计 §1.4/§1.5），共 14 个
+    assert len(registry.object_types()) == 14
     assert EXPECTED_OBJECTS <= {t.name for t in registry.object_types()}
     assert {"Material", "Code"} <= {t.name for t in registry.object_types()}
     # P2 4 个指标主体对象全部已注册（解除 planned，M1 前置）

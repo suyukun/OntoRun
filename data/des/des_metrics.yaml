@@ -39,7 +39,7 @@ metrics:
     definition: "按物料组的物料行数 = 行计数（MARA 物料主数据）"
     source_tables: [erp.MARA]
 
-  # —— 组 B · 销售（主体对象 Material / Customer，源表 erp.VBAK + erp.VBAP，设计 §1.5-B）——
+  # —— 组 B · 销售（主体对象 Material / ErpCustomer，源表 erp.VBAK + erp.VBAP，设计 §1.5-B）——
   - metric_id: sales_amount_by_mat_month
     object_type: Material
     dimension_fields:
@@ -51,7 +51,7 @@ metrics:
     source_tables: [erp.VBAK, erp.VBAP]
 
   - metric_id: sales_amount_by_customer_month
-    object_type: Customer
+    object_type: ErpCustomer
     dimension_fields:
       - { name: customer, source: "VBAK.KUNNR" }
       - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
@@ -162,9 +162,9 @@ metrics:
     agg_function: sum
     definition: "按参考单据类型（SO/PO/MV）的财务金额 = Σ ACDOCA.WSL（REF_TYPE 决定 REF_DOC 归属，无孤儿门禁 D8）"
     source_tables: [fin.ACDOCA]
-  # —— 组 F · 订单/客户（主体 Customer，源表 erp.VBAK；报告 §6 J1/A3/T1 口径）——
+  # —— 组 F · 订单/客户（主体 ErpCustomer，源表 erp.VBAK；报告 §6 J1/A3/T1 口径）——
   - metric_id: order_count_by_customer
-    object_type: Customer
+    object_type: ErpCustomer
     dimension_fields:
       - { name: customer, source: "KNA1.KUNNR" }
     measure: { name: order_count, source: "VBAK.VBELN" }
@@ -175,7 +175,7 @@ metrics:
     source_tables: [erp.KNA1, erp.VBAK]
 
   - metric_id: customer_count_by_month
-    object_type: Customer
+    object_type: ErpCustomer
     dimension_fields:
       - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
     measure: { name: customer_count, source: "VBAK.KUNNR" }
@@ -184,7 +184,7 @@ metrics:
     source_tables: [erp.VBAK]
 
   - metric_id: order_count_by_month
-    object_type: Customer
+    object_type: ErpCustomer
     dimension_fields:
       - { name: month, source: "VBAK.AUDAT", transform: "substr(1,7)" }
     measure: { name: order_count, source: "VBAK.VBELN" }
@@ -213,9 +213,9 @@ metrics:
     definition: "各供应商采购收货量 = Σ MSEG.MENGE（仅 BWART='101' 收货；MSEG↔EKKO 以 EBELN 关联；报告 §6 J3：准时率→到货量适配口径）"
     source_tables: [wms.MSEG, scm.EKKO]
 
-  # —— 组 H · 退款（主体 FinanceEntry/Customer，源表 fin.ACDOCA；报告 §6 J4/F4/T4 口径）——
+  # —— 组 H · 退款（主体 FinanceEntry/ErpCustomer，源表 fin.ACDOCA；报告 §6 J4/F4/T4 口径）——
   - metric_id: customer_refund_by_customer
-    object_type: Customer
+    object_type: ErpCustomer
     dimension_fields:
       - { name: customer, source: "VBAK.KUNNR" }
     measure: { name: refund_amount, source: "ACDOCA.WSL" }

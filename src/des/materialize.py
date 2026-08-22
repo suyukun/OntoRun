@@ -20,6 +20,7 @@ import duckdb
 from src.des.config import DEFAULT_ENTERPRISES_DIR, load_config
 from src.ontology.des_objects import (
     Code,
+    ErpCustomer,
     FinanceEntry,
     InventoryLocation,
     Material,
@@ -61,11 +62,20 @@ ORDER BY code_id
 """
 
 # P2 主体对象接线（报告 §5 缺口修复：注册对象 ≠ 可查询对象，源表按对象模型字段映射物化）：
-# Vendor（scm.LFA1）/ InventoryLocation（erp.MARD 地点粒度）/ FinanceEntry（fin.ACDOCA）——
-# 物化成与对象 schema 同构的表（vendor/inventory_location/finance_entry），供 v0.1 对象路径查询。
+# ErpCustomer（erp.KNA1）/ Vendor（scm.LFA1）/ InventoryLocation（erp.MARD 地点粒度）/
+# FinanceEntry（fin.ACDOCA）——物化成与对象 schema 同构的表
+# （erp_customer/vendor/inventory_location/finance_entry），供 v0.1 对象路径查询。
+ERP_CUSTOMER_TABLE = "erp_customer"  # 物化表名（与 ErpCustomer.source_table 对齐）
 VENDOR_TABLE = "vendor"  # 物化表名（与 Vendor.source_table 对齐）
 INV_LOC_TABLE = "inventory_location"  # 物化表名（与 InventoryLocation.source_table 对齐）
 FINANCE_TABLE = "finance_entry"  # 物化表名（与 FinanceEntry.source_table 对齐）
+
+# ERP 客户主数据物化：ERP.KNA1 → ErpCustomer 模型字段（PK = KUNNR，设计 §1.5 表；
+# 2026-08-22 独立对象注册，解决 Customer 同名冲突）
+_ERP_CUSTOMER_SQL = """
+SELECT KUNNR AS erp_customer_id, NAME1 AS name, KTOKD AS customer_group, ORT01 AS city
+FROM sqlite_scan(?, 'KNA1') ORDER BY KUNNR
+"""
 
 # 供应商物化：SCM.LFA1 → Vendor 模型字段（PK = LIFNR，设计 §1.5 表）
 _VENDOR_SQL = """
@@ -107,6 +117,7 @@ class DesMaterialization:
     material_count: int
     code_count: int
     legacy_re: re.Pattern[str]
+    erp_customer_count: int = 0  # P2 接线：ERP.KNA1 行数（2026-08-22 ErpCustomer 独立注册）
     vendor_count: int = 0  # P2 接线：SCM.LFA1 行数
     inventory_location_count: int = 0  # P2 接线：MARD 地点粒度（WERKS+LGORT 去重）
     finance_entry_count: int = 0  # P2 接线：FIN.ACDOCA 行数
@@ -150,14 +161,15 @@ def _write_materialized_db(
     path: Path,
     material_rows: list[dict[str, Any]],
     code_rows: list[dict[str, Any]],
+    erp_customer_rows: list[dict[str, Any]] | None = None,
     vendor_rows: list[dict[str, Any]] | None = None,
     inv_loc_rows: list[dict[str, Any]] | None = None,
     finance_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     """把物化结果落盘为 SQLite 物化库（持久化可机验产物，幂等重建）。
 
-    P2 接线：vendor/inventory_location/finance_entry 三表（对象 schema 同构）随 material/codes
-    一并落盘；不传时（仅 Material/Code 场景）保持旧 schema 行为。
+    P2 接线：erp_customer/vendor/inventory_location/finance_entry 四表（对象 schema 同构）
+    随 material/codes 一并落盘；不传时（仅 Material/Code 场景）保持旧 schema 行为。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -177,6 +189,12 @@ def _write_materialized_db(
             );
             """
         )
+        if erp_customer_rows is not None:
+            conn.execute(
+                f"CREATE TABLE {ERP_CUSTOMER_TABLE} ("
+                "erp_customer_id TEXT PRIMARY KEY, name TEXT NOT NULL, "
+                "customer_group TEXT NOT NULL, city TEXT NOT NULL)"
+            )
         if vendor_rows is not None:
             conn.execute(
                 f"CREATE TABLE {VENDOR_TABLE} ("
@@ -206,6 +224,12 @@ def _write_materialized_db(
             [tuple(r[c] for c in ("code_id", "code_space", "value", "material_matnr"))
              for r in code_rows],
         )
+        if erp_customer_rows is not None:
+            conn.executemany(
+                f"INSERT INTO {ERP_CUSTOMER_TABLE} VALUES (?,?,?,?)",
+                [tuple(r[c] for c in ("erp_customer_id", "name", "customer_group", "city"))
+                 for r in erp_customer_rows],
+            )
         if vendor_rows is not None:
             conn.executemany(
                 f"INSERT INTO {VENDOR_TABLE} VALUES (?,?,?,?)",
@@ -278,12 +302,14 @@ def materialize_des(
     con.execute("CREATE TABLE material AS " + _MATERIAL_SQL, [str(db_paths["erp"]), str(db_paths["mes"]), str(db_paths["wms"])])
     con.execute("CREATE TABLE codes AS " + _CODES_SQL)
     # P2 主体对象接线（报告 §5 缺口修复）：对象 schema 同构物化表，v0.1 对象路径可查询
+    con.execute("CREATE TABLE erp_customer AS " + _ERP_CUSTOMER_SQL, [str(db_paths["erp"])])
     con.execute("CREATE TABLE vendor AS " + _VENDOR_SQL, [str(db_paths["scm"])])
     con.execute("CREATE TABLE inventory_location AS " + _INV_LOC_SQL, [str(db_paths["erp"])])
     con.execute("CREATE TABLE finance_entry AS " + _FIN_SQL, [str(db_paths["fin"])])
 
     material_rows = rows_as_dicts(con, f"SELECT * FROM {MATERIAL_TABLE} ORDER BY matnr")
     code_rows = rows_as_dicts(con, f"SELECT * FROM {CODE_TABLE} ORDER BY code_id")
+    erp_customer_rows = rows_as_dicts(con, f"SELECT * FROM {ERP_CUSTOMER_TABLE} ORDER BY erp_customer_id")
     vendor_rows = rows_as_dicts(con, f"SELECT * FROM {VENDOR_TABLE} ORDER BY vendor_id")
     inv_loc_rows = rows_as_dicts(con, f"SELECT * FROM {INV_LOC_TABLE} ORDER BY location_id")
     finance_rows = rows_as_dicts(con, f"SELECT * FROM {FINANCE_TABLE} ORDER BY entry_id")
@@ -293,6 +319,8 @@ def materialize_des(
         Material.model_validate(row)
     for row in code_rows:
         Code.model_validate(row)
+    for row in erp_customer_rows:
+        ErpCustomer.model_validate(row)
     for row in vendor_rows:
         Vendor.model_validate(row)
     for row in inv_loc_rows:
@@ -315,12 +343,13 @@ def materialize_des(
 
     material_db_path = out / MATERIALIZED_DB
     _write_materialized_db(
-        material_db_path, material_rows, code_rows, vendor_rows, inv_loc_rows, finance_rows
+        material_db_path, material_rows, code_rows, erp_customer_rows, vendor_rows, inv_loc_rows, finance_rows
     )
 
     validation = {
         "material_count": len(material_rows),
         "code_count": len(code_rows),
+        "erp_customer_count": len(erp_customer_rows),
         "vendor_count": len(vendor_rows),
         "inventory_location_count": len(inv_loc_rows),
         "finance_entry_count": len(finance_rows),
@@ -334,6 +363,7 @@ def materialize_des(
         material_db_path=material_db_path,
         material_count=len(material_rows),
         code_count=len(code_rows),
+        erp_customer_count=len(erp_customer_rows),
         vendor_count=len(vendor_rows),
         inventory_location_count=len(inv_loc_rows),
         finance_entry_count=len(finance_rows),

@@ -1,10 +1,11 @@
 """DES 垂直切片本体对象 —— Material（物料概念）+ Code（编码对象）+ hasCode 链接，
-+ P2 ChatBI 主体对象（Vendor / InventoryLocation / FinanceEntry，2026-08-21 Jack 拍板注册）。
-+（Customer 主体对象复用 S1 零售 Customer，同一注册表，见 src/ontology/objects.py。）
++ P2 ChatBI 主体对象（ErpCustomer / Vendor / InventoryLocation / FinanceEntry，2026-08-21
++ Jack 拍板注册，2026-08-22 拍板 ErpCustomer 独立注册：源表 erp.KNA1，解决「Customer 同名
++ 冲突」——S1 零售 Customer 保留不动，同一注册表，见 src/ontology/objects.py。）
 
 source_table 语义（P2 接线，报告 §5 缺口修复）：一律指向本体物化器落盘的表名
-（material/codes/vendor/inventory_location/finance_entry，见 src/des/materialize.py），
-与 Material/Code 同范式；权威源表（scm.LFA1 / erp.MARD / fin.ACDOCA）语义由指标注册表
+（material/codes/erp_customer/vendor/inventory_location/finance_entry，见 src/des/materialize.py），
+与 Material/Code 同范式；权威源表（erp.KNA1 / scm.LFA1 / erp.MARD / fin.ACDOCA）语义由指标注册表
 source_tables 与物化 SQL 承载——注册对象即可查询对象，不再出现「已注册但源表未接线」。
 
 依据 docs/P1a-本体映射与查询契约设计_v0.1.md §1.2/§1.4：
@@ -109,6 +110,19 @@ class FinanceEntry(BaseModel):
     ref_doc: str = own(OWN_SOURCE, "参考单据号（权威列 FIN.ACDOCA.REF_DOC；SO=订单号，退款链路查询用）")
 
 
+class ErpCustomer(BaseModel):
+    """ERP 客户主数据（DES：权威表 ERP.KNA1，与 S1 零售 Customer 语义区分，独立对象）。
+
+    PK/Title = erp_customer_id（权威列 KUNNR）；2026-08-22 Jack 拍板独立注册，
+    解决 P2 指标主体「Customer 同名冲突」（S1 零售 Customer 保留不动）。
+    """
+
+    erp_customer_id: str = own(OWN_SOURCE, "ERP 客户号（PK/Title，权威列 ERP.KNA1.KUNNR）")
+    name: str = own(OWN_SOURCE, "客户名称（权威列 ERP.KNA1.NAME1）")
+    customer_group: str = own(OWN_SOURCE, "客户组（权威列 ERP.KNA1.KTOKD）")
+    city: str = own(OWN_SOURCE, "所在城市（权威列 ERP.KNA1.ORT01）")
+
+
 # hasCode 链接：Material 1:N Code（1 概念多编码），FK 在 Code（target 侧）——
 # 对齐 S1「1:N → 外键在 target」约定（src/ontology/links.py 头注释）
 HAS_CODE_LINK = LinkTypeDef(
@@ -167,6 +181,15 @@ DES_OBJECT_TYPES: list[ObjectTypeDef] = [
         pk_field="entry_id",
         title_field="entry_id",
         source_table="finance_entry",
+    ),
+    ObjectTypeDef(
+        name="ErpCustomer",
+        api_name="erp_customer",
+        description="ERP 客户主数据（DES：权威表 erp.KNA1，PK = KUNNR；独立对象，避免与 S1 零售 Customer 同名冲突）",
+        model=ErpCustomer,
+        pk_field="erp_customer_id",
+        title_field="erp_customer_id",
+        source_table="erp_customer",
     ),
 ]
 

@@ -101,8 +101,8 @@ P2（ChatBI 最小闭环，S2 开发计划阶段 P2）包含四件事：
 ### 1.4 对象 → 指标（对象可指向多个指标）
 
 - 注册表维护 metrics_by_object(object_type) 索引：给定对象返回其全部指标（供 Agent 在本体上「选对象 → 看指标列表 → 选指标 → 落物化结果」）；
-- 当前 15 个指标挂载分布（见 §1.5）：Material 对象指向最多（物料组 3 + 销售按物料 2 + 库存按物料 1 + 采购按物料 1 = **7 个**），Customer/Vendor/InventoryLocation/FinanceEntry 各 1-2 个——**一个对象指向多个指标、一个指标只挂一个主体对象**；
-- **P2 实现第一步 = 注册主体对象**：现有 Registry 仅注册 Material/Code（P1a）；本设计 15 指标所需的 4 个新主体对象（Customer/Vendor/InventoryLocation/FinanceEntry）须按 P1a 范式（ObjectTypeDef + Pydantic + 物化 SQL + 注册）补注册，其源表/主键见 §1.5 表。对象 schema 细化（字段级映射/归属标注）属 P2 本体映射实现工作，本篇只声明指标挂载所需的对象锚点（M1 校验依赖）。
+- 当前 15 个指标挂载分布（见 §1.5）：Material 对象指向最多（物料组 3 + 销售按物料 2 + 库存按物料 1 + 采购按物料 1 = **7 个**），ErpCustomer/Vendor/InventoryLocation/FinanceEntry 各 1-2 个——**一个对象指向多个指标、一个指标只挂一个主体对象**；
+- **P2 实现第一步 = 注册主体对象**：现有 Registry 仅注册 Material/Code（P1a）；本设计 15 指标所需的 4 个新主体对象（ErpCustomer/Vendor/InventoryLocation/FinanceEntry）须按 P1a 范式（ObjectTypeDef + Pydantic + 物化 SQL + 注册）补注册，其源表/主键见 §1.5 表。对象 schema 细化（字段级映射/归属标注）属 P2 本体映射实现工作，本篇只声明指标挂载所需的对象锚点（M1 校验依赖）。
 
 ### 1.5 5 组 15 指标清单（从 18 表挑选）
 
@@ -116,7 +116,7 @@ P2（ChatBI 最小闭环，S2 开发计划阶段 P2）包含四件事：
 | mat_count_by_abc_factory | abc_class(MARC.MAABC), factory(MARC.WERKS) | * | count | erp.MARC |
 | mat_count_by_group | material_group(MARA.MATKL) | * | count | erp.MARA |
 
-**组 B · 销售（主体对象 Material / Customer，源表 erp.VBAK + erp.VBAP）**
+**组 B · 销售（主体对象 Material / ErpCustomer，源表 erp.VBAK + erp.VBAP）**
 
 | metric_id | 维度字段（源列） | 度量（源列） | 聚合 | 来源表 |
 |---|---|---|---|---|
@@ -155,7 +155,7 @@ P2（ChatBI 最小闭环，S2 开发计划阶段 P2）包含四件事：
 | 对象 | 源表（PK） | 状态 |
 |---|---|---|
 | Material | erp.MARA（MATNR） | ✅ 已注册（P1a） |
-| Customer | erp.KNA1（KUNNR） | 待注册（P2 实现） |
+| ErpCustomer | erp.KNA1（KUNNR） | ✅ 已注册为 ErpCustomer（2026-08-22，独立对象：避免与 S1 零售 Customer 同名冲突，零售 Customer 保留不动） |
 | Vendor | scm.LFA1（LIFNR） | 待注册 |
 | InventoryLocation | erp.MARD 地点粒度（WERKS+LGORT） | 待注册 |
 | FinanceEntry | fin.ACDOCA（BELNR+POSNR） | 待注册 |
@@ -332,7 +332,7 @@ metric_id, data_version, config_sha256, refresh_mode, refresh_ts, row_count, sou
 | # | 项 | 类型 | 说明 / 建议 |
 |---|---|---|---|
 | R1 | P2 基线重定义 | 已处理 | P1b 实测 Q2=98ms 快于预估 → 已按「绝对 ≤100ms + 相对 ≥10×（更重聚合 4 指标）」重定义（§2.5），待 P2 实测校准 |
-| R2 | 4 个新主体对象注册量 | 中 | Customer/Vendor/InventoryLocation/FinanceEntry 需按 P1a 范式补注册（对象 schema + 物化 SQL + Registry）；建议先注册 1 个（Customer）验证再批量，避免重复 P1b R2 教训 |
+| R2 | 4 个新主体对象注册量 | 中 | ErpCustomer/Vendor/InventoryLocation/FinanceEntry 需按 P1a 范式补注册（对象 schema + 物化 SQL + Registry）；建议先注册 1 个（ErpCustomer）验证再批量，避免重复 P1b R2 教训 |
 | R3 | 指标 definition 双源漂移 | 中 | 物化 SQL 与 reconcile SQL 必须同源同 definition/transform（§2.3），实现时用「注册表 → 派生 SQL」单点生成，禁两处手写 |
 | R4 | 增量刷新 | 预留 | S2 全量重建 + 版本守卫已覆盖 C4；增量（写回后流水追加）留 S3，届时评估成熟增量物化，不造轮子 |
 | R5 | 指标语义面 vs 30 问实验集 | 待下篇 | 15 指标的语义面是 head-to-head 30 问的候选底座，但 30 问问题集与契约 v0.2 形态留下篇定义，本篇指标清单可能按实验需要增补（新增指标=注册表加一条，成本低） |

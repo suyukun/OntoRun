@@ -8,8 +8,9 @@
   id 唯一 / 命名与 transform 白名单——M8 防未来注册表成为半可信输入时的物化 SQL 注入面）；
 - M9 可选扩展字段校验（row_filter / measure_scale / joins，§1.2 可选扩展字段范式 + 报告 §6）：
   行级过滤 / 度量缩放（如 -1 翻转借贷符号）/ 显式 join 边（配置 fk 无法派生的连接）；
-- 5 个指标主体对象（Material + Customer/Vendor/InventoryLocation/FinanceEntry）均已注册
-  （2026-08-21 Jack 拍板解除 planned 标记），M1 一律要求 object_type 可解析到已注册对象。
+- 5 个指标主体对象（Material + ErpCustomer/Vendor/InventoryLocation/FinanceEntry）均已注册
+  （2026-08-21 Jack 拍板解除 planned 标记；2026-08-22 拍板 ErpCustomer 独立注册，源表 erp.KNA1，
+  解决「Customer 同名冲突」，S1 零售 Customer 保留不动），M1 一律要求 object_type 可解析到已注册对象。
 """
 
 from __future__ import annotations
@@ -40,11 +41,12 @@ ANY_COLUMN_AGGS = ("count", "count_distinct")
 # 可选扩展字段 row_filter 操作符白名单（报告 §6 J3/J4/F4/T4 口径：行级谓词，M8 同源防注入面）
 ROW_FILTER_OPS = ("eq", "ne", "in", "gt", "ge", "lt", "le", "is_null", "is_not_null")
 
-# M1 已注册 DES 主体对象（P1a 注册 Material/Code；P2 注册 Customer/Vendor/InventoryLocation/
-# FinanceEntry——2026-08-21 Jack 拍板解除 planned 标记；Customer 复用 S1 零售 Customer）
+# M1 已注册 DES 主体对象（P1a 注册 Material/Code；P2 注册 ErpCustomer/Vendor/InventoryLocation/
+# FinanceEntry——2026-08-21 Jack 拍板解除 planned 标记；2026-08-22 拍板 ErpCustomer 独立注册，
+# 源表 erp.KNA1，解决「Customer 同名冲突」，S1 零售 Customer 保留不动）
 REGISTERED_OBJECT_TYPES = (
     "Material",
-    "Customer",
+    "ErpCustomer",
     "Vendor",
     "InventoryLocation",
     "FinanceEntry",

@@ -224,6 +224,7 @@
             "enum": [
               "code",
               "customer",
+              "erp_customer",
               "finance_entry",
               "inventory",
               "inventory_location",

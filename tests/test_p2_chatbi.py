@@ -188,12 +188,12 @@ def test_metric_registry_loads_expected() -> None:
 def test_metrics_by_object_index(metrics: MetricRegistry) -> None:
     """§1.4 对象 → 指标索引：Material 指向 7 个；4 个主体对象全部已注册（解除 planned，M1 前置）。"""
     assert len(metrics.metrics_by_object("Material")) == 11
-    assert len(metrics.metrics_by_object("Customer")) == 5
+    assert len(metrics.metrics_by_object("ErpCustomer")) == 5
     assert len(metrics.metrics_by_object("Vendor")) == 3
     assert len(metrics.metrics_by_object("InventoryLocation")) == 2
     assert len(metrics.metrics_by_object("FinanceEntry")) == 5
     # 26 指标全部挂载到 5 个已注册主体对象（Jack 2026-08-21 拍板，无 pending 待补录）
-    subject = ("Material", "Customer", "Vendor", "InventoryLocation", "FinanceEntry")
+    subject = ("Material", "ErpCustomer", "Vendor", "InventoryLocation", "FinanceEntry")
     assert sum(len(metrics.metrics_by_object(o)) for o in subject) == EXPECTED_METRIC_COUNT
     assert not hasattr(metrics, "pending_registration")  # planned 概念已移除
 
