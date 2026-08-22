@@ -58,3 +58,6 @@ research/s2-plan-review-*.md
 research/intensional-modeling-analysis.md
 research/intensional-modeling-linter-spec.md
 
+# 原始爬取文档/会话归档（内部参考，不入库；摘要才进 research/）
+research/palantir-foundry-docs/
+research/p4-session-archive/
