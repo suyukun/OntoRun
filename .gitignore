@@ -30,3 +30,31 @@ htmlcov/
 
 # 原始爬取文档（内部参考，不入库；摘要才进 research/）
 research/palantir_foundry_docs/
+
+# 内部记忆/交接文档（不进公开仓库）
+.dsh/
+
+# 内部过程文档（不进公开仓库；本地文件保留，历史已含旧版）
+docs/S2-议题清单_v0.1.md
+docs/S2-开发计划_v0.1草案.md
+docs/S2-进度地图.md
+docs/red-team-p2p3-review.md
+docs/S2-redteam-处置记录.md
+docs/tech-debt.md
+docs/重写蓝图_v0.1.md
+docs/重写蓝图_v0.2.md
+docs/重写蓝图_v0.3.md
+docs/重写蓝图_v0.3.1_补丁.md
+docs/dsh-bug-evidence.md
+docs/dsh-bug-report-submission.md
+docs/dsh-bug-submission-handoff.md
+docs/deploy-notes.md
+docs/agent-harness-token-economics.md
+docs/ChatBI-智能分析-方向_v0.1.md
+docs/DES-最小垂直切片规划_v0.1草案.md
+docs/S2-P0-执行记录.md
+research/s2-review-*.md
+research/s2-plan-review-*.md
+research/intensional-modeling-analysis.md
+research/intensional-modeling-linter-spec.md
+
