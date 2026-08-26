@@ -179,6 +179,9 @@ def create_app(
     # 注册 agent 端点（P4：会话持久化，SessionManager 在路由内构造并注入 store + agent 工厂）
     _register_agent_routes(app, app.state.runtime.store)
 
+    # 注册风险 Agent 端点（S3 M3b：独立风险运行时而建，不触碰 S1 /agent）
+    register_risk_agent_routes(app)
+
     # 注册错误处理
     _register_error_handlers(app)
 
@@ -415,6 +418,207 @@ def _register_error_handlers(app: FastAPI) -> None:
                 },
             },
         )
+
+
+
+
+# ======================================================================
+# S3 M3b 风险 Agent 会话端点（独立于 S1 /agent，数据源 ap_anping）
+# ----------------------------------------------------------------------
+# 挂载 /agent/risk/chat + /agent/risk/confirm：用户消息 → RiskAgent（LLM tool
+# calling）→ （读）risk_query 受限查询精准问答 / （写）风险动作提议 → need_confirm
+# 双签 → 确认后走 build_risk_engine 真实写回 + 审计。
+# 风险运行时（RiskStore + build_risk_source_registry + build_risk_engine + RiskQuery）
+# 与 S1 零售运行时完全独立，不触碰 S1 共享注册表与既有 /agent。
+# ======================================================================
+
+
+def register_risk_agent_routes(app: FastAPI) -> None:
+    """挂载 /agent/risk/chat 与 /agent/risk/confirm（可在任意 FastAPI 实例上复用）。
+
+    构建生产风险运行时（RiskStore + build_risk_engine + RiskQuery），独立于 S1。
+    """
+    import json as _json
+
+    from src.agent.provider import get_provider
+    from src.agent.risk_agent import RiskActionExecutor, RiskAgent
+    from src.runtime.risk_actions_impl import build_risk_engine
+    from src.runtime.risk_db import RiskStore, build_risk_source_registry
+    from src.runtime.risk_query import RiskQuery
+
+    # ---- 风险运行时（独立于 S1） ----
+    risk_store = RiskStore()
+    risk_store.migrate()
+    risk_registry = build_risk_source_registry()
+    risk_engine = build_risk_engine(store=risk_store, registry=risk_registry)
+    risk_query = RiskQuery(risk_registry, store=risk_store)
+    risk_executor = RiskActionExecutor(risk_engine, risk_query)
+
+    def _get_agent(provider_name: str | None = None) -> RiskAgent:
+        provider = get_provider(provider_name)
+        return RiskAgent(
+            registry=risk_registry,
+            provider=provider,
+            executor=risk_executor,
+            query=risk_query,
+        )
+
+    # 风险会话独立持久化（同 Store 的 sessions/messages 表）
+    risk_sessions = SessionManager(risk_store, agent_factory=_get_agent)
+
+    @app.post("/agent/risk/chat")
+    async def risk_agent_chat(body: ChatRequest, request: Request):
+        """风险场景对话：用户消息 → RiskAgent 编排 → 回复（读精准问答 / 写双签提议）。"""
+        actor = request.headers.get("X-Actor", "human")
+        if actor not in ALLOWED_ACTORS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "INVALID_ACTOR",
+                        "message": f"非法操作者（X-Actor 仅允许 {ALLOWED_ACTORS}）",
+                        "detail": {"actor": actor},
+                    },
+                },
+            )
+        session_id = body.session_id
+        state = risk_sessions.get(session_id, owner=actor) if session_id else None
+        if state is None:
+            agent = _get_agent()
+            session_id = risk_sessions.create(agent, owner=actor)
+            state = risk_sessions.get(session_id, owner=actor)
+        else:
+            agent = state.agent
+
+        turn = await asyncio.to_thread(agent.run_turn, body.message)
+        if turn.need_confirm:
+            risk_sessions.set_pending(session_id, turn.need_confirm)
+        else:
+            risk_sessions.set_pending(session_id, None)
+        risk_sessions.persist(session_id, agent)
+
+        need_confirm_dict = None
+        if turn.need_confirm:
+            tc = turn.need_confirm
+            need_confirm_dict = {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+
+        outcome = None
+        if turn.tool_results:
+            last = turn.tool_results[-1]
+            try:
+                payload = _json.loads(last.content)
+                outcome = payload.get("outcome")
+            except (_json.JSONDecodeError, KeyError):
+                pass
+
+        return ChatResponse(
+            session_id=session_id,
+            reply=turn.reply or "",
+            need_confirm=need_confirm_dict,
+            outcome=outcome,
+        )
+
+    @app.post("/agent/risk/confirm")
+    async def risk_agent_confirm(body: ConfirmRequest, request: Request):
+        """风险双签确认/驳回：仅 human 可确认（防伪造双签），确认后走风险引擎执行 + 审计。"""
+        actor = request.headers.get("X-Actor", "human")
+        if actor != "human":
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "HUMAN_CONFIRM_REQUIRED",
+                        "message": "双签确认必须由人类发起（X-Actor: human）",
+                        "detail": {"actor": actor},
+                    },
+                },
+            )
+        actor_detail = request.headers.get("X-Actor-Detail", "")
+        state = risk_sessions.get(body.session_id, owner=actor)
+        if state is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "SESSION_NOT_FOUND",
+                        "message": "会话不存在或已过期",
+                    },
+                },
+            )
+        pending = state.pending_confirm
+        if pending is None:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "NO_PENDING_CONFIRM",
+                        "message": "当前没有待确认的高风险动作提议",
+                    },
+                },
+            )
+        if pending.id != body.call_id:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "CALL_ID_MISMATCH",
+                        "message": f"call_id 不匹配（期望 {pending.id}，收到 {body.call_id}）",
+                    },
+                },
+            )
+        try:
+            turn = await asyncio.to_thread(
+                state.agent.confirm_pending,
+                body.confirmed,
+                confirmant=actor,
+                confirmant_detail=actor_detail,
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "NO_PENDING_CONFIRM",
+                        "message": str(exc),
+                    },
+                },
+            )
+        risk_sessions.set_pending(body.session_id, None)
+        risk_sessions.persist(body.session_id, state.agent)
+
+        outcome = body.confirmed and "applied" or "cancelled_by_user"
+        if turn.tool_results:
+            last = turn.tool_results[-1]
+            try:
+                payload = _json.loads(last.content)
+                outcome = payload.get("outcome", outcome)
+            except (_json.JSONDecodeError, KeyError):
+                pass
+
+        return ConfirmResponse(
+            reply=turn.reply or "",
+            outcome=outcome,
+        )
+
+
+def create_risk_agent_app() -> FastAPI:
+    """最小风险 Agent 应用（仅 /agent/risk/*，供冒烟/独立部署，不经 S1 API 层）。"""
+    app = FastAPI(title="OntoRun 风险 Agent 对话", version="0.1.0")
+    register_risk_agent_routes(app)
+    _register_error_handlers(app)
+    return app
 
 
 app = create_app()
