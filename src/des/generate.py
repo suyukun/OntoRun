@@ -27,6 +27,7 @@ from .config import (
     DesConfigError,
     load_config,
 )
+from .generators.risk_table_generators import RISK_TABLE_SPECS
 from .manifest import build_manifest
 
 # ---------------------------------------------------------------------------
@@ -890,8 +891,9 @@ def generate_acdoca_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[s
 
 # ---------------------------------------------------------------------------
 # 表注册表（表 → DDL + 行生成器 + 主键 + 依赖；§7.2 生成器扩展点）
+# 制造业 18 表 + 金融风控 12 表合并；build_enterprise 按 config 表规格拓扑序执行，table_id 驱动（行业无关）。
 # ---------------------------------------------------------------------------
-TABLE_SPECS: dict[str, dict[str, Any]] = {
+MANUFACTURING_TABLE_SPECS: dict[str, dict[str, Any]] = {
     "scm.LFA1": {"ddl": LFA1_DDL, "gen": generate_lfa1_rows, "pk": ["LIFNR"], "depends_on": []},
     "erp.KNA1": {"ddl": KNA1_DDL, "gen": generate_kna1_rows, "pk": ["KUNNR"], "depends_on": []},
     "erp.MARA": {"ddl": MARA_DDL, "gen": generate_erp_mara, "pk": ["MATNR"], "depends_on": []},
@@ -912,6 +914,9 @@ TABLE_SPECS: dict[str, dict[str, Any]] = {
     "scm.EKPO": {"ddl": EKPO_DDL, "gen": generate_ekpo_rows, "pk": ["EBELN", "EBELP"], "depends_on": ["scm.EKKO", "erp.MARA"]},
     "fin.ACDOCA": {"ddl": ACDOCA_DDL, "gen": generate_acdoca_rows, "pk": ["BELNR", "POSNR"], "depends_on": ["erp.VBAP", "scm.EKPO", "wms.MSEG"]},
 }
+
+# 合并注册表：制造业（默认）+ 金融风控（risk 模板）。两个行业表 id 互不重叠，合并安全。
+TABLE_SPECS: dict[str, dict[str, Any]] = {**MANUFACTURING_TABLE_SPECS, **RISK_TABLE_SPECS}
 
 GenFn = Callable[[random.Random, dict[str, Any]], list[dict[str, Any]]]
 
@@ -994,7 +999,8 @@ def _persist_enterprise(
         write_db(out / config["enterprise"]["systems"][code]["db"], tables)
 
     build_manifest(config, seed, out, order)
-    injected = sum(1 for r in ctx["erp.MARA"] if r.get("BISMT"))
+    # 一物多码注入计数仅制造业企业有 erp.MARA（金融风控企业无该表，计入 0）
+    injected = sum(1 for r in ctx.get("erp.MARA", []) if r.get("BISMT"))
     return {
         "enterprise": enterprise_code,
         "seed": seed,

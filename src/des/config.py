@@ -251,18 +251,22 @@ def validate(config: dict) -> None:
     if "{YYYY}" not in pattern or "{NNNN}" not in pattern or "{CCC}" not in pattern:
         raise DesConfigError(f"coding.master_pattern 缺少占位符: {pattern!r}")
 
-    multi = config.get("injection", {}).get("multi_code", {})
-    rate = multi.get("rate")
-    if not isinstance(rate, (int, float)) or not 0 <= rate <= 1:
-        raise DesConfigError(f"注入率 multi_code.rate 必须 ∈ [0,1]: {rate!r}")
-    tolerance = multi.get("tolerance")
-    if not isinstance(tolerance, (int, float)) or tolerance <= 0:
-        raise DesConfigError(f"注入容差 multi_code.tolerance 必须 >0: {tolerance!r}")
-    field = multi.get("field")
-    if field not in MARA_COLUMNS:
-        raise DesConfigError(f"注入字段 multi_code.field 不在 MARA 列中: {field!r}")
-    if not multi.get("legacy_pattern") or not multi.get("legacy_prefix"):
-        raise DesConfigError("multi_code 缺少 legacy_pattern/legacy_prefix")
+    # 一物多码注入（multi_code）是制造业专属配置：仅当企业含 erp.MARA（制造业模板，如 hc_precision/nh_heavy）
+    # 或显式声明 injection.multi_code 时校验；金融风控行业（des_risk_industry_template）不携带该项。
+    has_multi_code = "erp.MARA" in table_ids or bool(config.get("injection", {}).get("multi_code"))
+    if has_multi_code:
+        multi = config.get("injection", {}).get("multi_code", {})
+        rate = multi.get("rate")
+        if not isinstance(rate, (int, float)) or not 0 <= rate <= 1:
+            raise DesConfigError(f"注入率 multi_code.rate 必须 ∈ [0,1]: {rate!r}")
+        tolerance = multi.get("tolerance")
+        if not isinstance(tolerance, (int, float)) or tolerance <= 0:
+            raise DesConfigError(f"注入容差 multi_code.tolerance 必须 >0: {tolerance!r}")
+        field = multi.get("field")
+        if field not in MARA_COLUMNS:
+            raise DesConfigError(f"注入字段 multi_code.field 不在 MARA 列中: {field!r}")
+        if not multi.get("legacy_pattern") or not multi.get("legacy_prefix"):
+            raise DesConfigError("multi_code 缺少 legacy_pattern/legacy_prefix")
 
     if not config.get("data_version"):
         raise DesConfigError("data_version 缺失（参与 config_sha256，约定 4）")
