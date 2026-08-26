@@ -23,7 +23,7 @@ from src.runtime.action_engine import (
     ActionHandler,
     Effect,
     Snapshot,
-    Violation,  # noqa: F401 —— approve/close 的 validate_semantics 使用（后续批次）
+    Violation,
     Writeback,
     _now,
 )
@@ -63,7 +63,9 @@ def _disposal_en(status: str) -> str:
     return DISPOSAL_STATUS_FROM_CN.get(status, status)
 
 
-def _risk_seq_id(conn: Any, table: str, pk_field: str, prefix: str, width: int = 8) -> str:
+def _risk_seq_id(
+    conn: Any, table: str, pk_field: str, prefix: str, width: int = 8
+) -> str:
     """取源表主键末 width 位流水 max+1，拼 {PREFIX}-{year}-{8位}（编码规则 4）。"""
     row = conn.execute(
         f"SELECT MAX(CAST(SUBSTR({pk_field}, -{width}) AS INTEGER)) AS m FROM {table}"
@@ -72,19 +74,14 @@ def _risk_seq_id(conn: Any, table: str, pk_field: str, prefix: str, width: int =
     return f"{prefix}-{RISK_DEMO_YEAR:04d}-{seq:0{width}d}"
 
 
-def _find_signal_by_remark(conn: Any, remark: str | None) -> dict | None:
-    """从审批单 remark 解析信号号 → 查 ap_warning_signal（解析失败返回 None）。"""
-    if not remark:
-        return None
-    m = _SIGNAL_ID_RE.search(remark)
+def _resolve_warning_from_order(snapshot: Snapshot, order: dict) -> dict | None:
+    """从审批单 remark 内嵌信号号（SGN-YYYY-XXXXXXXX）解析预警信号；失败返回 None。"""
+    m = _SIGNAL_ID_RE.search(order.get("remark") or "")
     if m is None:
         return None
-    cur = conn.execute(
+    return snapshot.one(
         "SELECT * FROM ap_warning_signal WHERE signal_id=?", (m.group(0),)
     )
-    cols = [c[0] for c in cur.description]
-    row = cur.fetchone()
-    return dict(zip(cols, row)) if row else None
 
 
 # ======================================================================
@@ -108,7 +105,9 @@ class ConfirmWarningHandler(ActionHandler):
         if code == "WARNING_NOT_FOUND":
             return warning is not None, None
         if code == "WARNING_NOT_CONFIRMABLE":
-            ok = warning is not None and warning["signal_status"] == _signal_cn("GENERATED")
+            ok = warning is not None and warning["signal_status"] == _signal_cn(
+                "GENERATED"
+            )
             return ok, {"signal_status": warning["signal_status"]} if warning else None
         return True, None
 
@@ -162,7 +161,9 @@ class AdjustWarningLevelHandler(ActionHandler):
         if code == "WARNING_NOT_FOUND":
             return warning is not None, None
         if code == "WARNING_NOT_ADJUSTABLE":
-            ok = warning is not None and warning["signal_status"] == _signal_cn("CONFIRMED")
+            ok = warning is not None and warning["signal_status"] == _signal_cn(
+                "CONFIRMED"
+            )
             return ok, {"signal_status": warning["signal_status"]} if warning else None
         if code == "WARNING_LEVEL_INVALID":
             # new_level ∈ {RED,YELLOW,BLUE} 由参数模型 Literal 强校验；升级审批走双签
@@ -245,8 +246,12 @@ class SubmitDisposalHandler(ActionHandler):
         if code == "DISPOSAL_NOT_FOUND":
             return disposal is not None, None
         if code == "DISPOSAL_NOT_SUBMITTABLE":
-            ok = disposal is not None and disposal["disposal_status"] == _disposal_cn("DRAFT")
-            return ok, {"disposal_status": disposal["disposal_status"]} if disposal else None
+            ok = disposal is not None and disposal["disposal_status"] == _disposal_cn(
+                "DRAFT"
+            )
+            return ok, {
+                "disposal_status": disposal["disposal_status"]
+            } if disposal else None
         return True, None
 
     def compute_effects(
@@ -305,10 +310,289 @@ class SubmitDisposalHandler(ActionHandler):
         return effects, writebacks
 
 
+# ======================================================================
+# 动作 4：approve_disposal 处置审批（PROCESS → APPROVED/REJECTED，高风险双签）
+# ======================================================================
+
+
+class ApproveDisposalHandler(ActionHandler):
+    """处置审批：审批单仅 PROCESS 可审（语义校验 APPROVE_ORDER_NOT_PROCESSING）；
+    结论 APPROVED/REJECTED 写 ap_approve_order + 未决审批任务，并同步关联处置与
+    预警信号（经 remark 内嵌信号号解析）。高风险双签由 Agent 层承担。
+    """
+
+    def load_snapshot(self, snapshot: Snapshot, params: Any) -> dict:
+        order = snapshot.one(
+            "SELECT * FROM approval.ap_approve_order WHERE approve_order_id=?",
+            (params.approve_order_id,),
+        )
+        warning = None
+        if order:
+            warning = _resolve_warning_from_order(snapshot, order)
+        disposal = None
+        if warning is not None:
+            disposal = snapshot.one(
+                "SELECT * FROM ap_warning_disposal WHERE warning_id=?",
+                (warning["warning_id"],),
+            )
+        pending_tasks = (
+            snapshot.query(
+                "SELECT * FROM approval.ap_approve_task WHERE approve_order_id=? "
+                "AND approve_task_status='PENDING'",
+                (params.approve_order_id,),
+            )
+            if order
+            else []
+        )
+        return {
+            "order": order,
+            "warning": warning,
+            "disposal": disposal,
+            "pending_tasks": pending_tasks,
+        }
+
+    def validate_semantics(self, snapshot: dict, params: Any) -> Violation | None:
+        order = snapshot["order"]
+        if order is not None and order["approve_order_status"] != "PROCESS":
+            return Violation(
+                error_code="APPROVE_ORDER_NOT_PROCESSING",
+                message="审批单状态非 PROCESS，不可审批",
+                detail={"approve_order_status": order["approve_order_status"]},
+            )
+        return None
+
+    def check(self, code: str, snapshot: dict, params: Any) -> tuple[bool, dict | None]:
+        if code == "APPROVE_ORDER_NOT_FOUND":
+            return snapshot["order"] is not None, None
+        return True, None
+
+    def compute_effects(
+        self, conn: Any, snapshot: dict, params: Any
+    ) -> tuple[list[Effect], list[Writeback]]:
+        order = snapshot["order"]
+        now = _now()
+        decision = params.decision
+        effects = [
+            Effect(
+                object_type="ApproveOrder",
+                pk=order["approve_order_id"],
+                prop="approve_order_status",
+                old=order["approve_order_status"],
+                new=decision,
+                note="处置审批结论",
+            ),
+            Effect(
+                object_type="ApproveOrder",
+                pk=order["approve_order_id"],
+                prop="opinion_description",
+                old=order.get("opinion_description"),
+                new=params.opinion,
+                note="审批意见",
+            ),
+        ]
+        writebacks = [
+            Writeback(
+                sql="UPDATE approval.ap_approve_order SET approve_order_status=?, "
+                "approve_time=?, opinion_description=?, update_time=? WHERE approve_order_id=?",
+                params=[
+                    decision,
+                    now,
+                    params.opinion,
+                    now,
+                    order["approve_order_id"],
+                ],
+                table="ap_approve_order",
+            )
+        ]
+        for task in snapshot["pending_tasks"]:
+            effects.append(
+                Effect(
+                    object_type="ApproveTask",
+                    pk=task["approve_task_id"],
+                    prop="approve_task_status",
+                    old=task["approve_task_status"],
+                    new="COMPLETED",
+                    note="审批任务办结",
+                )
+            )
+            writebacks.append(
+                Writeback(
+                    sql="UPDATE approval.ap_approve_task SET approve_task_status='COMPLETED', "
+                    "approve_result=?, approve_remark=?, approve_time=?, update_time=? "
+                    "WHERE approve_task_id=?",
+                    params=[
+                        decision,
+                        params.opinion,
+                        now,
+                        now,
+                        task["approve_task_id"],
+                    ],
+                    table="ap_approve_task",
+                )
+            )
+        disposal = snapshot["disposal"]
+        if disposal is not None:
+            new_status = "APPROVED" if decision == "APPROVED" else "REJECTED"
+            effects.append(
+                Effect(
+                    object_type="Disposal",
+                    pk=disposal["disposal_id"],
+                    prop="disposal_status",
+                    old=_disposal_en(disposal["disposal_status"]),
+                    new=new_status,
+                    note="处置审批结果同步",
+                )
+            )
+            writebacks.append(
+                Writeback(
+                    sql="UPDATE ap_warning_disposal SET disposal_status=?, operate_time=?, "
+                    "operator_user=? WHERE disposal_id=?",
+                    params=[
+                        _disposal_cn(new_status),
+                        now,
+                        "系统",
+                        disposal["disposal_id"],
+                    ],
+                    table="ap_warning_disposal",
+                )
+            )
+        if snapshot["warning"] is not None:
+            signal_status = "处置中" if decision == "APPROVED" else "暂缓处置"
+            writebacks.append(
+                Writeback(
+                    sql="UPDATE ap_warning_signal SET disposal_status=?, update_time=? "
+                    "WHERE warning_id=?",
+                    params=[
+                        signal_status,
+                        now,
+                        snapshot["warning"]["warning_id"],
+                    ],
+                    table="ap_warning_signal",
+                )
+            )
+        return effects, writebacks
+
+
+# ======================================================================
+# 动作 5：push_warning 预警推送（写 ap_warning_signal.to_user + push_at 本体态）
+# ======================================================================
+
+
+class PushWarningHandler(ActionHandler):
+    """推送预警：把信号推给指定对象（to_user 写源库），推送时间落本体自有 push_at。"""
+
+    def load_snapshot(self, snapshot: Snapshot, params: Any) -> dict:
+        return {
+            "warning": snapshot.one(
+                "SELECT * FROM ap_warning_signal WHERE warning_id=?",
+                (params.warning_id,),
+            )
+        }
+
+    def check(self, code: str, snapshot: dict, params: Any) -> tuple[bool, dict | None]:
+        if code == "WARNING_NOT_FOUND":
+            return snapshot["warning"] is not None, None
+        return True, None
+
+    def compute_effects(
+        self, conn: Any, snapshot: dict, params: Any
+    ) -> tuple[list[Effect], list[Writeback]]:
+        warning = snapshot["warning"]
+        now = _now()
+        effects = [
+            Effect(
+                object_type="WarningSignal",
+                pk=warning["warning_id"],
+                prop="push_at",
+                old=None,
+                new=now,
+                note="推送时间（本体自有）",
+            )
+        ]
+        writebacks = [
+            Writeback(
+                sql="UPDATE ap_warning_signal SET to_user=?, push_warn_reason=?, update_time=? "
+                "WHERE warning_id=?",
+                params=[
+                    params.to_user,
+                    warning.get("warn_reason") or "",
+                    now,
+                    warning["warning_id"],
+                ],
+                table="ap_warning_signal",
+            )
+        ]
+        return effects, writebacks
+
+
+# ======================================================================
+# 动作 6：close_warning 预警销号（IN_DISPOSAL → CLOSED，高风险双签）
+# ======================================================================
+
+
+class CloseWarningHandler(ActionHandler):
+    """预警销号：仅处置中（IN_DISPOSAL）信号可销号（语义校验 WARNING_NOT_CLOSABLE）；
+    销号后 signal_status → 已关闭（CLOSED）、disposal_status → 已处置。
+    """
+
+    def load_snapshot(self, snapshot: Snapshot, params: Any) -> dict:
+        return {
+            "warning": snapshot.one(
+                "SELECT * FROM ap_warning_signal WHERE warning_id=?",
+                (params.warning_id,),
+            )
+        }
+
+    def check(self, code: str, snapshot: dict, params: Any) -> tuple[bool, dict | None]:
+        if code == "WARNING_NOT_FOUND":
+            return snapshot["warning"] is not None, None
+        return True, None
+
+    def validate_semantics(self, snapshot: dict, params: Any) -> Violation | None:
+        warning = snapshot["warning"]
+        if warning is not None and warning["signal_status"] != _signal_cn(
+            "IN_DISPOSAL"
+        ):
+            return Violation(
+                error_code="WARNING_NOT_CLOSABLE",
+                message="仅处置中（IN_DISPOSAL）的预警信号可销号",
+                detail={"signal_status": warning["signal_status"]},
+            )
+        return None
+
+    def compute_effects(
+        self, conn: Any, snapshot: dict, params: Any
+    ) -> tuple[list[Effect], list[Writeback]]:
+        warning = snapshot["warning"]
+        now = _now()
+        effects = [
+            Effect(
+                object_type="WarningSignal",
+                pk=warning["warning_id"],
+                prop="signal_status",
+                old=_signal_en(warning["signal_status"]),
+                new="CLOSED",
+                note="预警销号",
+            )
+        ]
+        writebacks = [
+            Writeback(
+                sql="UPDATE ap_warning_signal SET signal_status=?, disposal_status='已处置', "
+                "update_time=? WHERE warning_id=?",
+                params=[_signal_cn("CLOSED"), now, warning["warning_id"]],
+                table="ap_warning_signal",
+            )
+        ]
+        return effects, writebacks
+
+
 HANDLERS: dict[str, type[ActionHandler]] = {
     "confirm_warning": ConfirmWarningHandler,
     "adjust_warning_level": AdjustWarningLevelHandler,
     "submit_disposal": SubmitDisposalHandler,
+    "approve_disposal": ApproveDisposalHandler,
+    "push_warning": PushWarningHandler,
+    "close_warning": CloseWarningHandler,
 }
 
 
