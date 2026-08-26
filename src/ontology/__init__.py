@@ -31,6 +31,7 @@ from src.ontology.des_objects import (
 from src.ontology.links import LINK_TYPES, LinkTypeDef
 from src.ontology.objects import OBJECT_TYPES, ObjectTypeDef, field_ownership
 from src.ontology.registry import Issue, Registry
+from src.ontology.risk_objects import register_risk_objects
 
 
 def build_registry() -> Registry:
@@ -49,6 +50,8 @@ def build_registry() -> Registry:
         reg.register_object_type(obj)
     for link in DES_LINK_TYPES:
         reg.register_link_type(link)
+    # S3 金控风控本体（12 核心对象 + 支撑 User + 14 链接 + 9 动作，M2 设计 §1/§3）
+    register_risk_objects(reg)
     reg.add_self_check(des_self_checks)
     return reg
 

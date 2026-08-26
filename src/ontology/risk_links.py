@@ -1,12 +1,12 @@
-"""S3 金控风险预警场景本体 —— 链接类型定义（14 条，M2 设计 §1）。
+"""S3 金控风控场景本体 —— 链接类型定义（14 条，M2 设计 §1）。
 
 对齐 S1 约定（src/ontology/links.py 头注释）：外键位置由基数决定，
 N:1 → 外键在 source（多对一，多的那侧持 FK）；1:N → 外键在 target。
-双向命名约定：inverse_name = "<target_api_name>.<惯用名>"（如
-warning.for_customer 的反向 = customer.warning_signals）。
+双向命名约定：inverse_name = "<target_api_name>.<惯用名>"。
 
-source_table 语义说明：本模块只声明拓扑，不校验 FK 值是否等于目标 PK
-（数据一致性由物化/接线层保证）；self_check 只校验 FK 字段存在于承载侧模型。
+共享注册表命名：金控单一客户类型 = RiskCustomer（S1 零售已占用 Customer，
+对齐 DES ErpCustomer 先例）；本模块中 source/target 一律用注册类型名，
+inverse_name 以目标类型 api_name（risk_customer.）为前缀。
 """
 
 from src.ontology.links import LinkTypeDef
@@ -15,57 +15,57 @@ RISK_LINK_TYPES: list[LinkTypeDef] = [
     # ---- 客户域 ----
     LinkTypeDef(
         name="customer.belongs_to_group",
-        source_type="Customer",
+        source_type="RiskCustomer",
         target_type="GroupCustomer",
         cardinality="N:1",
         fk_field="group_customer_no",
         inverse_name="group_customer.customers",
-        description="归属集团：一个单一客户属于一个集团客户（FK 在 Customer）",
+        description="归属集团：一个单一客户属于一个集团客户（FK 在 RiskCustomer）",
     ),
     LinkTypeDef(
         name="collateral.for_customer",
         source_type="Collateral",
-        target_type="Customer",
+        target_type="RiskCustomer",
         cardinality="N:1",
         fk_field="customer_id",
-        inverse_name="customer.collateral",
+        inverse_name="risk_customer.collateral",
         description="押品归属：押品记录对应一个客户",
     ),
     LinkTypeDef(
         name="concentration.for_customer",
         source_type="ConcentrationLimit",
-        target_type="Customer",
+        target_type="RiskCustomer",
         cardinality="N:1",
         fk_field="customer_no",
-        inverse_name="customer.concentration_limits",
+        inverse_name="risk_customer.concentration_limits",
         description="集中度限额：限额记录对应一个客户（FK 用源表业务键 customer_no）",
     ),
     LinkTypeDef(
         name="codebt.for_customer",
         source_type="CoDebtCustomer",
-        target_type="Customer",
+        target_type="RiskCustomer",
         cardinality="N:1",
         fk_field="customer_id",
-        inverse_name="customer.codebt_records",
+        inverse_name="risk_customer.codebt_records",
         description="共债：共债记录对应一个客户",
     ),
     LinkTypeDef(
         name="metric.for_customer",
         source_type="Metric",
-        target_type="Customer",
+        target_type="RiskCustomer",
         cardinality="N:1",
         fk_field="customer_no",
-        inverse_name="customer.metrics",
+        inverse_name="risk_customer.metrics",
         description="维度指标：指标行对应一个客户（FK 用源表业务键 customer_no）",
     ),
     # ---- 风险监测域 ----
     LinkTypeDef(
         name="warning.for_customer",
         source_type="WarningSignal",
-        target_type="Customer",
+        target_type="RiskCustomer",
         cardinality="N:1",
         fk_field="customer_id",
-        inverse_name="customer.warning_signals",
+        inverse_name="risk_customer.warning_signals",
         description="客户预警：客户级预警信号对应一个客户",
     ),
     LinkTypeDef(
@@ -137,10 +137,10 @@ RISK_LINK_TYPES: list[LinkTypeDef] = [
     LinkTypeDef(
         name="org.is_risk_monitor_of",
         source_type="Organization",
-        target_type="Customer",
+        target_type="RiskCustomer",
         cardinality="1:N",
         fk_field="org_id",
-        inverse_name="customer.risk_monitor_org",
-        description="风险管理：一个机构负责监测多个客户（FK 在 Customer.org_id）",
+        inverse_name="risk_customer.risk_monitor_org",
+        description="风险管理：一个机构负责监测多个客户（FK 在 RiskCustomer.org_id）",
     ),
 ]

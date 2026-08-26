@@ -8,6 +8,9 @@ PK 命名遵循 M1a「<类型>_id = 主键ID」模式；GroupCustomer 例外：�
 无独立主键列，业务主键即 group_customer_no（全链路 FK 均以 group_customer_no 引用，
 故 M2 草案的 group_customer_id 落地为 group_customer_no，见下）。
 
+共享注册表命名：S1 零售已占用类型名 Customer（src/ontology/objects.py），故 S3 金控单一客户
+模型类保持 Customer，注册类型名用 RiskCustomer（api risk_customer），对齐 DES ErpCustomer 先例。
+
 状态归属沿用 S1 模式（src/ontology/objects.py）：own(OWN_SOURCE/OWN_ONTOLOGY/OWN_DERIVED)。
 - source-backed：源系统权威，动作写回；
 - ontology-owned：本体自有状态（源系统无此列，如 WarningSignal.warn_adjust_reason）；
@@ -28,6 +31,8 @@ from src.ontology.objects import (
     ObjectTypeDef,
     own,
 )
+from src.ontology.risk_actions import RISK_ACTIONS
+from src.ontology.risk_links import RISK_LINK_TYPES
 
 # ---- 脊柱共享枚举（M2 设计 §1） ----
 WarnLevel = Literal["RED", "YELLOW", "BLUE"]  # 预警等级
@@ -344,9 +349,10 @@ class User(BaseModel):
 
 RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
     ObjectTypeDef(
-        name="Customer",
-        api_name="customer",
-        description="单一客户（金控风险预警，源 o_a_erms_cust_info）",
+        name="RiskCustomer",
+        api_name="risk_customer",
+        description="单一客户（金控风险预警，源 o_a_erms_cust_info；共享注册表内区别于 S1 "
+        "零售 Customer，对齐 DES ErpCustomer 先例，2026-08-22 Jack 拍板）",
         model=Customer,
         pk_field="customer_id",
         title_field="customer_id",
@@ -461,3 +467,17 @@ RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
         source_table="ap_user",
     ),
 ]
+
+
+def register_risk_objects(registry) -> None:
+    """安装 S3 金控风控本体（12 核心 + User 支撑对象 + 14 链接 + 9 动作）到 Registry。
+
+    挂载点：src/ontology/__init__.py 的 build_registry()（供 src/app/main.py 与
+    src/api/main.py 统一入口消费）。重复调用会在 Registry 重复注册时报错（防静默覆盖）。
+    """
+    for obj in RISK_OBJECT_TYPES:
+        registry.register_object_type(obj)
+    for link in RISK_LINK_TYPES:
+        registry.register_link_type(link)
+    for action in RISK_ACTIONS:
+        registry.register_action_type(action)
