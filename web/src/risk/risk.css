@@ -1,0 +1,188 @@
+/* S3 M4 风险预警演示 —— 深色金融风控主题（命令中心 / 数据感 / 预警隐喻）
+   仅在风险演示分支加载（web/src/risk/*），不影响 S1 零售浅色界面。 */
+
+.risk-bg {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(76, 141, 255, 0.10), transparent 60%),
+    radial-gradient(900px 500px at -10% 20%, rgba(242, 176, 76, 0.06), transparent 55%),
+    #0a0f1c;
+}
+.risk-bg-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 100%);
+}
+
+/* Hero 雷达扫射（预警监测隐喻）—— 纯 CSS，尊重 reduced-motion */
+.risk-radar {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 176, 76, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(242, 176, 76, 0.18),
+    inset 0 0 44px rgba(242, 176, 76, 0.12);
+}
+.risk-radar::before {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 176, 76, 0.22);
+}
+.risk-radar::after {
+  content: '';
+  position: absolute;
+  inset: 42px;
+  border-radius: 50%;
+  border: 1px dashed rgba(242, 176, 76, 0.18);
+}
+.risk-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: conic-gradient(from 0deg, rgba(242, 176, 76, 0.42), transparent 72deg);
+  animation: risk-sweep 5s linear infinite;
+}
+.risk-radar-blink {
+  position: absolute;
+  top: 26%;
+  left: 58%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f0524d;
+  box-shadow: 0 0 0 0 rgba(240, 82, 77, 0.6);
+  animation: risk-ping 2.2s ease-out infinite;
+}
+.risk-radar-blink.amber {
+  top: 62%;
+  left: 32%;
+  background: #f7c948;
+  box-shadow: 0 0 0 0 rgba(247, 201, 72, 0.6);
+  animation-delay: 0.8s;
+}
+@keyframes risk-sweep {
+  to { transform: rotate(360deg); }
+}
+@keyframes risk-ping {
+  0% { box-shadow: 0 0 0 0 rgba(240, 82, 77, 0.55); }
+  70% { box-shadow: 0 0 0 14px rgba(240, 82, 77, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(240, 82, 77, 0); }
+}
+
+/* 琥珀渐变标题 */
+.risk-gradient-text {
+  background: linear-gradient(92deg, #f8d99a 0%, #f2b04c 45%, #e8923c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 状态脉冲点 */
+.risk-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3ddc97;
+  box-shadow: 0 0 0 0 rgba(61, 220, 151, 0.55);
+  animation: risk-ping 2s ease-out infinite;
+}
+.risk-dot.warn {
+  background: #f7c948;
+  box-shadow: 0 0 0 0 rgba(247, 201, 72, 0.55);
+}
+
+/* 扫描线（微弱数据感） */
+.risk-scanline {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(148, 163, 184, 0.035) 0px,
+    rgba(148, 163, 184, 0.035) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* 入场动画（Hero 元素错落进入；reduced-motion 关闭） */
+.risk-fade-up {
+  animation: risk-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.risk-fade-up.d1 { animation-delay: 0.08s; }
+.risk-fade-up.d2 { animation-delay: 0.18s; }
+.risk-fade-up.d3 { animation-delay: 0.3s; }
+.risk-fade-up.d4 { animation-delay: 0.42s; }
+@keyframes risk-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 数据卡片 hover 抬升 */
+.risk-entry-card {
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.risk-entry-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(242, 176, 76, 0.55);
+  background: #1b2743;
+}
+
+/* 等宽数字 */
+.risk-num {
+  font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .risk-radar-sweep,
+  .risk-radar-blink,
+  .risk-dot,
+  .risk-fade-up,
+  .risk-fade-up.d1,
+  .risk-fade-up.d2,
+  .risk-fade-up.d3,
+  .risk-fade-up.d4 {
+    animation: none !important;
+  }
+}
+
+/* 右侧可查域面板：窄屏隐藏 */
+@media (max-width: 1024px) {
+  .risk-side-panel { display: none; }
+}
+
+
+/* 风险演示侧栏菜单（琥珀选中态） */
+.risk-menu.ant-menu-dark,
+.risk-menu.ant-menu {
+  background: transparent !important;
+}
+.risk-menu.ant-menu-dark .ant-menu-item-selected,
+.risk-menu.ant-menu .ant-menu-item-selected {
+  background: rgba(242, 176, 76, 0.16) !important;
+  color: #f2b04c !important;
+}
+.risk-menu.ant-menu-dark .ant-menu-item-selected::after,
+.risk-menu.ant-menu .ant-menu-item-selected::after {
+  border-right-color: #f2b04c !important;
+}
+.risk-menu.ant-menu-dark .ant-menu-item,
+.risk-menu.ant-menu .ant-menu-item {
+  color: #8fa3c0;
+}
+.risk-menu.ant-menu-dark .ant-menu-item:hover,
+.risk-menu.ant-menu .ant-menu-item:hover {
+  color: #e6edf7 !important;
+}
+.risk-menu.ant-menu-dark .ant-menu-item-group-title,
+.risk-menu.ant-menu .ant-menu-item-group-title {
+  color: #5c6f8f;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
