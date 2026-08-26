@@ -1,0 +1,116 @@
+# des_risk_industry_template.yaml —— 金融风控行业模板（新增行业层，安平金控 ap_anping 继承本层）
+# 依据 docs/S3-M1b-DES金融化设计-v1.md（§一 目录 / §二 6 系统 / §三 行分布）+ docs/S3-M1a-字段脱敏映射-脊柱12表.json（字段）
+# + docs/S3-安平金控-业务规则建模-v1.md（DMN 规则 1-7：预警等级/五级分类/集中度/编码）。
+# 6 系统 12 张核心表注册表：kind/pk/depends_on/fk/row_count（行数口径 §三：核心表 ≥3-5 万行，Σ≈30 万）。
+# 企业层经加载器 deep_merge 继承本层；表规格默认放本层，企业层可覆盖。
+industry: financial_risk_control
+template_version: "0.1"
+data_version: "M1b-1"           # 数据版本（参与 config_sha256，与制造业 P1b-1 区分）
+total_target: 308000            # Σ 12 表 row_count（约 30 万，§三 总门禁）
+
+coding: &coding
+  # 机验占位符（validate 要求 {YYYY}/{NNNN}/{CCC} 齐全）；金融实际编码见 DMN 规则 4：
+  # CUST-{YYYY}-{6位} / GRP-{YYYY}-{6位} / SGN-{YYYY}-{8位} / APP-{YYYY}-{8位} / PROJ-{YYYY}-{8位} / COL-{YYYY}-{8位} / DSP-{YYYY}-{8位}
+  master_pattern: "CUST-{YYYY}-{NNNN}-{CCC}"
+  year: 2026
+
+storage:
+  layout: "one_enterprise_one_dir"   # 1 企业=1 目录，N 系统=N SQLite 文件（复用 S2 约定）
+
+seed_policy: fixed                   # 确定性锚：固定 seed（ap_anping seed=20260827）
+
+# —— 表注册表（§二/§三，12 张核心表 6 系统）——
+# kind: master 主数据 / transaction 事务；row_count 精确行数；pk 主键列；
+# depends_on 生成拓扑依赖；fk 字段级外键声明（同库/跨库，供 D 门禁与本体语义层校验）。
+enterprise:
+  systems:
+    customer:
+      db: customer.db
+      tables:
+        ap_group_customer:
+          kind: master
+          row_count: 8000
+          pk: [group_customer_no]
+          depends_on: []
+          fk: {}
+        ap_customer:
+          kind: master
+          row_count: 50000
+          pk: [customer_id]
+          depends_on: [customer.ap_group_customer]
+          fk: {group_customer_no: customer.ap_group_customer}
+    risk:
+      db: risk.db
+      tables:
+        ap_warning_signal:
+          kind: transaction
+          row_count: 80000
+          pk: [warning_id]
+          depends_on: [customer.ap_customer, customer.ap_group_customer]
+          fk: {customer_id: customer.ap_customer, group_customer_no: customer.ap_group_customer}
+        ap_warning_disposal:
+          kind: transaction
+          row_count: 20000
+          pk: [disposal_id]
+          depends_on: [risk.ap_warning_signal]
+          fk: {warning_id: risk.ap_warning_signal}
+        ap_disposal:
+          kind: transaction
+          row_count: 25000
+          pk: [disposal_id]
+          depends_on: [risk.ap_warning_signal]
+          fk: {}
+        ap_disposal_detail:
+          kind: transaction
+          row_count: 10000
+          pk: [disposal_detail_id]
+          depends_on: [risk.ap_disposal, risk.ap_warning_signal]
+          fk: {batch_id: risk.ap_disposal, signal_id: risk.ap_warning_signal}
+    concentration:
+      db: concentration.db
+      tables:
+        ap_concentration_limit:
+          kind: master
+          row_count: 8000
+          pk: [concentration_limit_id]
+          depends_on: [customer.ap_customer]
+          fk: {customer_no: customer.ap_customer}
+    approval:
+      db: approval.db
+      tables:
+        ap_approve_node:
+          kind: master
+          row_count: 2000
+          pk: [approve_node_id]
+          depends_on: []
+          fk: {}
+        ap_approve_order:
+          kind: transaction
+          row_count: 20000
+          pk: [approve_order_id]
+          depends_on: [risk.ap_warning_signal]
+          fk: {}
+        ap_approve_task:
+          kind: transaction
+          row_count: 30000
+          pk: [approve_task_id]
+          depends_on: [approval.ap_approve_order, approval.ap_approve_node]
+          fk: {approve_order_id: approval.ap_approve_order, approve_node_id: approval.ap_approve_node}
+    project:
+      db: project.db
+      tables:
+        ap_risk_project:
+          kind: transaction
+          row_count: 5000
+          pk: [risk_project_id]
+          depends_on: [customer.ap_group_customer, customer.ap_customer]
+          fk: {}
+    base:
+      db: base.db
+      tables:
+        ap_dim_metric:
+          kind: transaction
+          row_count: 50000
+          pk: [dim_metric_id]
+          depends_on: [customer.ap_customer, customer.ap_group_customer]
+          fk: {}

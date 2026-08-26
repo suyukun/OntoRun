@@ -1,0 +1,11 @@
+# data/des/enterprises/ap_anping/des_enterprise.yaml —— 安平金控企业覆盖层（金融风控行业样例）
+# 依据 docs/S3-M1b-DES金融化设计-v1.md（§一 目录结构）+ des-enterprise-modeling skill（STEP 1-4 已冻结）。
+# 继承：加载器 deep_merge(des_risk_industry_template.yaml, 本文件)；全 12 表注册表
+# （kind/row_count/pk/depends_on/fk）、coding、storage、seed_policy 继承行业模板 ——
+# 本文件只写"企业要声明"的身份：名称 / 编码前缀 AP / seed=20260827（§五 确定性锚）。
+inherit: des_risk_industry_template.yaml
+
+enterprise:
+  name: "安平金融控股集团（Anping Financial Holding Group）"
+  code_prefix: "AP"         # 企业编码前缀 → 目录名 ap_anping、金融编码统一 AP 系
+  seed: 20260827            # 生成 seed（确定性锚：同 seed 同配置 → SHA256 相同，复用 S2 约定 1-5）
