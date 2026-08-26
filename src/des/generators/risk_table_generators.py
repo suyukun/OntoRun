@@ -72,11 +72,63 @@ from .risk_generators import (
     exposure_sim,
     random_date,
 )
+from .risk_table_generators_approval import (
+    generate_ap_approve_oper_log_rows,
+    generate_ap_approve_todo_rows,
+    generate_ap_approve_warn_rel_rows,
+    generate_ap_codebt_customer_rows,
+    generate_ap_codebt_warn_score_rows,
+    generate_ap_concentration_limit_adj_rows,
+    generate_ap_concentration_warn_adj_rows,
+    generate_ap_cust_query_log_rows,
+    generate_ap_serial_counter_rows,
+)
+from .risk_table_generators_base import (
+    generate_ap_biz_dict_rows,
+    generate_ap_custom_param_rows,
+    generate_ap_data_dict_rows,
+    generate_ap_dim_rank_rows,
+    generate_ap_metric_std_rows,
+    generate_ap_org_rows,
+    generate_ap_preference_file_rows,
+    generate_ap_supervise_opinion_rows,
+    generate_ap_sys_param_rows,
+    generate_ap_top_query_log_rows,
+    generate_ap_user_rows,
+)
+from .risk_table_generators_customer import (
+    generate_ap_bank_pledge_detail_rows,
+    generate_ap_collateral_rows,
+    generate_ap_customer_assets_rows,
+    generate_ap_customer_invest_dist_rows,
+    generate_ap_customer_relation_rows,
+    generate_ap_customer_relation_tree_rows,
+    generate_ap_important_customer_list_rows,
+    generate_ap_securities_pledge_detail_rows,
+    generate_ap_subsidiary_credit_detail_rows,
+    generate_ap_subsidiary_mortgage_rows,
+    generate_ap_top500_customer_risk_rows,
+)
+from .risk_table_generators_risk import (
+    generate_ap_audit_detail_rows,
+    generate_ap_compliance_risk_ledger_rows,
+    generate_ap_compliance_risk_ledger_tmp_rows,
+    generate_ap_deviation_warn_score_rows,
+    generate_ap_regulatory_penalty_rows,
+    generate_ap_warn_derive_deal_detail_rows,
+    generate_ap_warn_derive_sub_push_rows,
+    generate_ap_warn_signal_concentration_rows,
+    generate_ap_warn_signal_derive_rows,
+    generate_ap_warn_signal_deviation_rows,
+    generate_ap_warning_push_rows,
+)
 
 
 # 行生成器（每表独立 RNG 流；引用 ctx 缓存的上游表确定性输出）
 # ---------------------------------------------------------------------------
-def generate_ap_group_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_group_customer_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """customer.ap_group_customer 集团客户主数据：资产质量按规则 2 分布，编码 GRP-YYYY-XXXXXX。"""
     year = ctx["year"]
     rows: list[dict[str, Any]] = []
@@ -104,7 +156,9 @@ def generate_ap_group_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> 
     return rows
 
 
-def generate_ap_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_customer_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """customer.ap_customer 单一客户主数据：客户号 CUST-YYYY-XXXXXX，归属集团（FK→集团），工商/股东/投资齐全。"""
     year = ctx["year"]
     groups = ctx["customer.ap_group_customer"]
@@ -153,7 +207,9 @@ def generate_ap_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> list[d
             "general_manager_name": _person_name(rng),
             "customer_status": rng.choice(("正常", "关注", "注销", "吊销")),
             "final_score": score,
-            "final_score_level": "高" if score >= 80 else ("中" if score >= 60 else "低"),
+            "final_score_level": "高"
+            if score >= 80
+            else ("中" if score >= 60 else "低"),
             "industry_commerce_score_level": rng.choice(SCORE_LEVEL_POOL),
             "trading_score_level": rng.choice(SCORE_LEVEL_POOL),
             "credit_score_level": rng.choice(SCORE_LEVEL_POOL),
@@ -187,7 +243,9 @@ def generate_ap_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> list[d
     return rows
 
 
-def generate_ap_warning_signal_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_warning_signal_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """risk.ap_warning_signal 预警信号事实表：等级按规则 1（BLUE70/YELLOW25/RED5）、编码 SGN 唯一、暴露额随主题。"""
     year = ctx["year"]
     customers = ctx["customer.ap_customer"]
@@ -200,7 +258,9 @@ def generate_ap_warning_signal_rows(rng: random.Random, ctx: dict[str, Any]) -> 
         level = _weighted(rng, WARN_LEVEL_DIST)
         inputs = _warn_inputs_for_level(rng, level, driver)
         if driver == "collateral":
-            risk_exp = round(rng.uniform(100, 50000) * (1 - inputs["collateral_depreciation"]), 2)
+            risk_exp = round(
+                rng.uniform(100, 50000) * (1 - inputs["collateral_depreciation"]), 2
+            )
         else:
             risk_exp = round(rng.uniform(100, 50000) * rng.uniform(0.95, 1.20), 2)
         rows.append(
@@ -245,10 +305,14 @@ def generate_ap_warning_signal_rows(rng: random.Random, ctx: dict[str, Any]) -> 
                 "cert_no": cust["cert_no"],
                 "biz_date": random_date(rng),
                 "group_customer_no": cust["group_customer_no"],
-                "group_customer_type": rng.choice(("单一集团", "关联集团", "一致行动人")),
+                "group_customer_type": rng.choice(
+                    ("单一集团", "关联集团", "一致行动人")
+                ),
                 "risk_exposure": risk_exp,
                 "disposal_status": rng.choice(DISPOSAL_STATUS_POOL),
-                "disposal_demand": rng.choice(("3 个工作日内反馈", "10 个工作日内处置完毕", "立即处置")),
+                "disposal_demand": rng.choice(
+                    ("3 个工作日内反馈", "10 个工作日内处置完毕", "立即处置")
+                ),
                 "apply_no": None,
                 "apply_comment": None,
                 "process_status": None,
@@ -260,11 +324,15 @@ def generate_ap_warning_signal_rows(rng: random.Random, ctx: dict[str, Any]) -> 
     return rows
 
 
-def generate_ap_warning_disposal_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_warning_disposal_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """risk.ap_warning_disposal 预警处置跟踪：对抽样预警信号的处置状态/进展记录（FK→预警 warning_id）。"""
     year = ctx["year"]
     signals = ctx["risk.ap_warning_signal"]
-    chosen = rng.sample(signals, min(_row_count(ctx, "risk.ap_warning_disposal"), len(signals)))
+    chosen = rng.sample(
+        signals, min(_row_count(ctx, "risk.ap_warning_disposal"), len(signals))
+    )
     rows: list[dict[str, Any]] = []
     for seq, sig in enumerate(chosen, start=1):
         rows.append(
@@ -272,7 +340,15 @@ def generate_ap_warning_disposal_rows(rng: random.Random, ctx: dict[str, Any]) -
                 "disposal_id": f"WD-{year:04d}-{seq:08d}",
                 "warning_id": sig["warning_id"],
                 "disposal_status": rng.choice(DISPOSAL_STATUS_POOL),
-                "disposal_progress": rng.choice(("已制定处置方案", "方案执行中", "已上报集团", "已完成处置", "待评估")),
+                "disposal_progress": rng.choice(
+                    (
+                        "已制定处置方案",
+                        "方案执行中",
+                        "已上报集团",
+                        "已完成处置",
+                        "待评估",
+                    )
+                ),
                 "disposal_time": random_date(rng),
                 "operator_user": _person_name(rng),
                 "operate_time": random_date(rng),
@@ -281,7 +357,9 @@ def generate_ap_warning_disposal_rows(rng: random.Random, ctx: dict[str, Any]) -
     return rows
 
 
-def generate_ap_disposal_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_disposal_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """risk.ap_disposal 信号处置动作：每动作一条，batch_id 每 5 条一组（明细按 batch 关联），处置类型按规则 6。"""
     year = ctx["year"]
     signals = ctx["risk.ap_warning_signal"]
@@ -307,7 +385,9 @@ def generate_ap_disposal_rows(rng: random.Random, ctx: dict[str, Any]) -> list[d
     return rows
 
 
-def generate_ap_disposal_detail_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_disposal_detail_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """risk.ap_disposal_detail 处置明细：每条引用处置批次（FK→batch）与预警信号号（FK→signal_id）。"""
     year = ctx["year"]
     disposals = ctx["risk.ap_disposal"]
@@ -332,11 +412,16 @@ def generate_ap_disposal_detail_rows(rng: random.Random, ctx: dict[str, Any]) ->
     return rows
 
 
-def generate_ap_concentration_limit_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_concentration_limit_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """concentration.ap_concentration_limit 大额客户集中度限额：敞口/资本净额按规则 3 → 状态/预警/审批。"""
     year = ctx["year"]
     customers = ctx["customer.ap_customer"]
-    chosen = rng.sample(customers, min(_row_count(ctx, "concentration.ap_concentration_limit"), len(customers)))
+    chosen = rng.sample(
+        customers,
+        min(_row_count(ctx, "concentration.ap_concentration_limit"), len(customers)),
+    )
     rows: list[dict[str, Any]] = []
     for seq, cust in enumerate(chosen, start=1):
         net_capital = round(rng.uniform(50000, 200000), 2)  # 集团资本净额（万元）
@@ -363,12 +448,16 @@ def generate_ap_concentration_limit_rows(rng: random.Random, ctx: dict[str, Any]
     return rows
 
 
-def generate_ap_approve_node_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_approve_node_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """approval.ap_approve_node 审批节点配置（规则 7 岗位链：NODE_SEQ 1-3 循环铺开）。"""
     year = ctx["year"]
     rows: list[dict[str, Any]] = []
     for seq in range(1, _row_count(ctx, "approval.ap_approve_node") + 1):
-        node_seq, post_id, node_name, rule = APPROVE_POST_DEFS[(seq - 1) % len(APPROVE_POST_DEFS)]
+        node_seq, post_id, node_name, rule = APPROVE_POST_DEFS[
+            (seq - 1) % len(APPROVE_POST_DEFS)
+        ]
         rows.append(
             {
                 "approve_node_id": f"NODE-{year:04d}-{seq:06d}",
@@ -385,11 +474,15 @@ def generate_ap_approve_node_rows(rng: random.Random, ctx: dict[str, Any]) -> li
     return rows
 
 
-def generate_ap_approve_order_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_approve_order_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """approval.ap_approve_order 预警审批单：状态推进 PROCESS/APPROVED/REJECTED，衍生预警等级随信号。"""
     year = ctx["year"]
     signals = ctx["risk.ap_warning_signal"]
-    chosen = rng.sample(signals, min(_row_count(ctx, "approval.ap_approve_order"), len(signals)))
+    chosen = rng.sample(
+        signals, min(_row_count(ctx, "approval.ap_approve_order"), len(signals))
+    )
     rows: list[dict[str, Any]] = []
     for seq, sig in enumerate(chosen, start=1):
         status = _weighted(rng, ORDER_STATUS_DIST)
@@ -400,7 +493,9 @@ def generate_ap_approve_order_rows(rng: random.Random, ctx: dict[str, Any]) -> l
                 "approve_order_type": "WARN_SGN",
                 "approve_order_title": f"{btype}预警处置审批",
                 "apply_user_id": f"U{rng.randint(1, 5000):05d}",
-                "approved_user_id": f"U{rng.randint(1, 5000):05d}" if status != "PROCESS" else "",
+                "approved_user_id": f"U{rng.randint(1, 5000):05d}"
+                if status != "PROCESS"
+                else "",
                 "apply_time": random_date(rng),
                 "approve_time": random_date(rng) if status != "PROCESS" else None,
                 "approve_order_status": status,
@@ -413,7 +508,14 @@ def generate_ap_approve_order_rows(rng: random.Random, ctx: dict[str, Any]) -> l
                 "derive_warn_level_yellow": 1 if sig["warn_level"] == "YELLOW" else 0,
                 "derive_warn_level_blue": 1 if sig["warn_level"] == "BLUE" else 0,
                 "opinion_description": (
-                    rng.choice(("同意", "同意，按处置方案执行", "驳回，补充材料后再报", "同意，加强贷后监控"))
+                    rng.choice(
+                        (
+                            "同意",
+                            "同意，按处置方案执行",
+                            "驳回，补充材料后再报",
+                            "同意，加强贷后监控",
+                        )
+                    )
                     if status != "PROCESS"
                     else None
                 ),
@@ -422,20 +524,28 @@ def generate_ap_approve_order_rows(rng: random.Random, ctx: dict[str, Any]) -> l
     return rows
 
 
-def generate_ap_approve_task_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_approve_task_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """approval.ap_approve_task 审批任务：按审批单分布任务数（ANY_ONE 短链合法），状态随 approve_flow。"""
     year = ctx["year"]
     orders = ctx["approval.ap_approve_order"]
     nodes = ctx["approval.ap_approve_node"]
-    nodes_by_seq = {s: [nd for nd in nodes if nd["approve_node_seq"] == s] for s in (1, 2, 3)}
-    counts = _distribute_counts(rng, len(orders), _row_count(ctx, "approval.ap_approve_task"), 1, 3)
+    nodes_by_seq = {
+        s: [nd for nd in nodes if nd["approve_node_seq"] == s] for s in (1, 2, 3)
+    }
+    counts = _distribute_counts(
+        rng, len(orders), _row_count(ctx, "approval.ap_approve_task"), 1, 3
+    )
     rows: list[dict[str, Any]] = []
     seq = 0
     for order, k in zip(orders, counts):
         outcomes = approve_flow(rng, order["approve_order_status"], k)
         for i, (tstatus, aresult) in enumerate(outcomes, start=1):
             seq += 1
-            node = rng.choice(nodes_by_seq.get(i) or nodes_by_seq[1])  # 小 scale 下缺高序节点时回退首节点
+            node = rng.choice(
+                nodes_by_seq.get(i) or nodes_by_seq[1]
+            )  # 小 scale 下缺高序节点时回退首节点
             rows.append(
                 {
                     "approve_task_id": f"AT-{year:04d}-{seq:08d}",
@@ -444,8 +554,14 @@ def generate_ap_approve_task_rows(rng: random.Random, ctx: dict[str, Any]) -> li
                     "post_id": node["post_id"],
                     "approve_task_status": tstatus,
                     "approve_result": aresult,
-                    "approve_remark": ("同意" if aresult == "APPROVED" else ("驳回" if aresult == "REJECTED" else None)),
-                    "approve_time": random_date(rng) if tstatus == "COMPLETED" else None,
+                    "approve_remark": (
+                        "同意"
+                        if aresult == "APPROVED"
+                        else ("驳回" if aresult == "REJECTED" else None)
+                    ),
+                    "approve_time": random_date(rng)
+                    if tstatus == "COMPLETED"
+                    else None,
                     "is_deleted": 0,
                     "create_time": random_date(rng),
                     "update_time": random_date(rng),
@@ -454,14 +570,18 @@ def generate_ap_approve_task_rows(rng: random.Random, ctx: dict[str, Any]) -> li
     return rows
 
 
-def generate_ap_risk_project_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_risk_project_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """project.ap_risk_project 风险项目：按集团生成、五级分类按规则 2、减值随分类、跨板块敞口 exposure_sim。"""
     year = ctx["year"]
     groups = ctx["customer.ap_group_customer"]
     members_by_grp: dict[str, list[dict[str, Any]]] = {}
     for c in ctx["customer.ap_customer"]:
         members_by_grp.setdefault(c["group_customer_no"], []).append(c)
-    chosen = rng.sample(groups, min(_row_count(ctx, "project.ap_risk_project"), len(groups)))
+    chosen = rng.sample(
+        groups, min(_row_count(ctx, "project.ap_risk_project"), len(groups))
+    )
     rows: list[dict[str, Any]] = []
     for seq, grp in enumerate(chosen, start=1):
         category = _weighted(rng, FIVE_CLASS_DIST)
@@ -483,14 +603,21 @@ def generate_ap_risk_project_rows(rng: random.Random, ctx: dict[str, Any]) -> li
                 "project_name": f"{grp['group_customer_name']}{rng.choice(('集团授信', '供应链融资', '项目贷款', '并购贷款'))}",
                 "org_id_2": f"ORG{rng.randint(1, 99):03d}",
                 "org_name_2": rng.choice(ORG_POOL[1:]),
-                "business_type": rng.choice(("流动资金贷款", "项目贷款", "并购贷款", "贸易融资", "银团贷款")),
-                "credit_subject": "、".join([grp["group_customer_name"]] + linked) or grp["group_customer_name"],
+                "business_type": rng.choice(
+                    ("流动资金贷款", "项目贷款", "并购贷款", "贸易融资", "银团贷款")
+                ),
+                "credit_subject": "、".join([grp["group_customer_name"]] + linked)
+                or grp["group_customer_name"],
                 "business_balance": base_balance,
                 "risk_exposure_balance": round(sum(e for _, e in exposures), 2),
-                "impairment_provision": round(base_balance * finp["impairment_ratio"], 2),
+                "impairment_provision": round(
+                    base_balance * finp["impairment_ratio"], 2
+                ),
                 "five_classification": category,
                 "guarantee_method": rng.choice(GUARANTEE_METHOD_POOL),
-                "project_progress": f"逾期 {finp['overdue_days']} 天，处置中" if finp["overdue_days"] > 0 else "正常还款",
+                "project_progress": f"逾期 {finp['overdue_days']} 天，处置中"
+                if finp["overdue_days"] > 0
+                else "正常还款",
                 "is_deleted": 0,
                 "create_user": "SYSTEM",
                 "create_time": random_date(rng),
@@ -501,7 +628,9 @@ def generate_ap_risk_project_rows(rng: random.Random, ctx: dict[str, Any]) -> li
     return rows
 
 
-def generate_ap_dim_metric_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_ap_dim_metric_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """base.ap_dim_metric 指标明细：单一客户/集团维度 × 指标库快照（跨库 FK 由客户号/集团号承载）。"""
     year = ctx["year"]
     customers = ctx["customer.ap_customer"]
@@ -512,12 +641,20 @@ def generate_ap_dim_metric_rows(rng: random.Random, ctx: dict[str, Any]) -> list
         mid, mname, munit = rng.choice(METRIC_DEFS)
         if rng.random() < 0.5:
             grp = rng.choice(groups)
-            cust_no, cust_nm, grp_no, grp_nm = "", "", grp["group_customer_no"], grp["group_customer_name"]
+            cust_no, cust_nm, grp_no, grp_nm = (
+                "",
+                "",
+                grp["group_customer_no"],
+                grp["group_customer_name"],
+            )
             dim_code, dim_name = "DIM_GROUP", "集团客户"
         else:
             cust = rng.choice(customers)
             cust_no, cust_nm = cust["customer_no"], cust["customer_name"]
-            grp_no, grp_nm = cust["group_customer_no"], grp_names[cust["group_customer_no"]]
+            grp_no, grp_nm = (
+                cust["group_customer_no"],
+                grp_names[cust["group_customer_no"]],
+            )
             dim_code, dim_name = "DIM_CUST", "单一客户"
         rows.append(
             {
@@ -530,8 +667,12 @@ def generate_ap_dim_metric_rows(rng: random.Random, ctx: dict[str, Any]) -> list
                 "customer_name": cust_nm,
                 "group_customer_no": grp_no,
                 "group_customer_name": grp_nm,
-                "business_type_code": rng.choice(("LOAN", "GUARANTEE", "BILL", "LEASE")),
-                "business_product_code": rng.choice(("PROD-001", "PROD-002", "PROD-003")),
+                "business_type_code": rng.choice(
+                    ("LOAN", "GUARANTEE", "BILL", "LEASE")
+                ),
+                "business_product_code": rng.choice(
+                    ("PROD-001", "PROD-002", "PROD-003")
+                ),
                 "index_id": mid,
                 "index_name": mname,
                 "index_value": round(rng.uniform(1, 1000), 2),
@@ -553,17 +694,338 @@ def generate_ap_dim_metric_rows(rng: random.Random, ctx: dict[str, Any]) -> list
 # 表注册表（表 → DDL + 行生成器 + 主键 + 依赖；generate.build_enterprise 按拓扑序执行）
 # ---------------------------------------------------------------------------
 RISK_TABLE_SPECS: dict[str, dict[str, Any]] = {
-    "customer.ap_group_customer": {"ddl": RISK_DDL["customer.ap_group_customer"], "gen": generate_ap_group_customer_rows, "pk": ["group_customer_no"], "depends_on": []},
-    "customer.ap_customer": {"ddl": RISK_DDL["customer.ap_customer"], "gen": generate_ap_customer_rows, "pk": ["customer_id"], "depends_on": ["customer.ap_group_customer"]},
-    "risk.ap_warning_signal": {"ddl": RISK_DDL["risk.ap_warning_signal"], "gen": generate_ap_warning_signal_rows, "pk": ["warning_id"], "depends_on": ["customer.ap_customer", "customer.ap_group_customer"]},
-    "risk.ap_warning_disposal": {"ddl": RISK_DDL["risk.ap_warning_disposal"], "gen": generate_ap_warning_disposal_rows, "pk": ["disposal_id"], "depends_on": ["risk.ap_warning_signal"]},
-    "risk.ap_disposal": {"ddl": RISK_DDL["risk.ap_disposal"], "gen": generate_ap_disposal_rows, "pk": ["disposal_id"], "depends_on": ["risk.ap_warning_signal"]},
-    "risk.ap_disposal_detail": {"ddl": RISK_DDL["risk.ap_disposal_detail"], "gen": generate_ap_disposal_detail_rows, "pk": ["disposal_detail_id"], "depends_on": ["risk.ap_disposal", "risk.ap_warning_signal"]},
-    "concentration.ap_concentration_limit": {"ddl": RISK_DDL["concentration.ap_concentration_limit"], "gen": generate_ap_concentration_limit_rows, "pk": ["concentration_limit_id"], "depends_on": ["customer.ap_customer"]},
-    "approval.ap_approve_node": {"ddl": RISK_DDL["approval.ap_approve_node"], "gen": generate_ap_approve_node_rows, "pk": ["approve_node_id"], "depends_on": []},
-    "approval.ap_approve_order": {"ddl": RISK_DDL["approval.ap_approve_order"], "gen": generate_ap_approve_order_rows, "pk": ["approve_order_id"], "depends_on": ["risk.ap_warning_signal"]},
-    "approval.ap_approve_task": {"ddl": RISK_DDL["approval.ap_approve_task"], "gen": generate_ap_approve_task_rows, "pk": ["approve_task_id"], "depends_on": ["approval.ap_approve_order", "approval.ap_approve_node"]},
-    "project.ap_risk_project": {"ddl": RISK_DDL["project.ap_risk_project"], "gen": generate_ap_risk_project_rows, "pk": ["risk_project_id"], "depends_on": ["customer.ap_group_customer", "customer.ap_customer"]},
-    "base.ap_dim_metric": {"ddl": RISK_DDL["base.ap_dim_metric"], "gen": generate_ap_dim_metric_rows, "pk": ["dim_metric_id"], "depends_on": ["customer.ap_customer", "customer.ap_group_customer"]},
+    # —— 脊柱 12 表（M1b 保留，不改）——
+    "customer.ap_group_customer": {
+        "ddl": RISK_DDL["customer.ap_group_customer"],
+        "gen": generate_ap_group_customer_rows,
+        "pk": ["group_customer_no"],
+        "depends_on": [],
+    },
+    "customer.ap_customer": {
+        "ddl": RISK_DDL["customer.ap_customer"],
+        "gen": generate_ap_customer_rows,
+        "pk": ["customer_id"],
+        "depends_on": ["customer.ap_group_customer"],
+    },
+    "risk.ap_warning_signal": {
+        "ddl": RISK_DDL["risk.ap_warning_signal"],
+        "gen": generate_ap_warning_signal_rows,
+        "pk": ["warning_id"],
+        "depends_on": ["customer.ap_customer", "customer.ap_group_customer"],
+    },
+    "risk.ap_warning_disposal": {
+        "ddl": RISK_DDL["risk.ap_warning_disposal"],
+        "gen": generate_ap_warning_disposal_rows,
+        "pk": ["disposal_id"],
+        "depends_on": ["risk.ap_warning_signal"],
+    },
+    "risk.ap_disposal": {
+        "ddl": RISK_DDL["risk.ap_disposal"],
+        "gen": generate_ap_disposal_rows,
+        "pk": ["disposal_id"],
+        "depends_on": ["risk.ap_warning_signal"],
+    },
+    "risk.ap_disposal_detail": {
+        "ddl": RISK_DDL["risk.ap_disposal_detail"],
+        "gen": generate_ap_disposal_detail_rows,
+        "pk": ["disposal_detail_id"],
+        "depends_on": ["risk.ap_disposal", "risk.ap_warning_signal"],
+    },
+    "concentration.ap_concentration_limit": {
+        "ddl": RISK_DDL["concentration.ap_concentration_limit"],
+        "gen": generate_ap_concentration_limit_rows,
+        "pk": ["concentration_limit_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "approval.ap_approve_node": {
+        "ddl": RISK_DDL["approval.ap_approve_node"],
+        "gen": generate_ap_approve_node_rows,
+        "pk": ["approve_node_id"],
+        "depends_on": [],
+    },
+    "approval.ap_approve_order": {
+        "ddl": RISK_DDL["approval.ap_approve_order"],
+        "gen": generate_ap_approve_order_rows,
+        "pk": ["approve_order_id"],
+        "depends_on": ["risk.ap_warning_signal"],
+    },
+    "approval.ap_approve_task": {
+        "ddl": RISK_DDL["approval.ap_approve_task"],
+        "gen": generate_ap_approve_task_rows,
+        "pk": ["approve_task_id"],
+        "depends_on": ["approval.ap_approve_order", "approval.ap_approve_node"],
+    },
+    "project.ap_risk_project": {
+        "ddl": RISK_DDL["project.ap_risk_project"],
+        "gen": generate_ap_risk_project_rows,
+        "pk": ["risk_project_id"],
+        "depends_on": ["customer.ap_group_customer", "customer.ap_customer"],
+    },
+    "base.ap_dim_metric": {
+        "ddl": RISK_DDL["base.ap_dim_metric"],
+        "gen": generate_ap_dim_metric_rows,
+        "pk": ["dim_metric_id"],
+        "depends_on": ["customer.ap_customer", "customer.ap_group_customer"],
+    },
+    # —— M1b 全量补全：42 张新表 ——
+    "customer.ap_customer_relation": {
+        "ddl": RISK_DDL["customer.ap_customer_relation"],
+        "gen": generate_ap_customer_relation_rows,
+        "pk": ["customer_relation_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "customer.ap_customer_relation_tree": {
+        "ddl": RISK_DDL["customer.ap_customer_relation_tree"],
+        "gen": generate_ap_customer_relation_tree_rows,
+        "pk": ["customer_relation_tree_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "customer.ap_important_customer_list": {
+        "ddl": RISK_DDL["customer.ap_important_customer_list"],
+        "gen": generate_ap_important_customer_list_rows,
+        "pk": ["important_customer_id"],
+        "depends_on": ["customer.ap_group_customer"],
+    },
+    "customer.ap_top500_customer_risk": {
+        "ddl": RISK_DDL["customer.ap_top500_customer_risk"],
+        "gen": generate_ap_top500_customer_risk_rows,
+        "pk": ["top500_customer_id"],
+        "depends_on": ["customer.ap_customer", "customer.ap_group_customer"],
+    },
+    "customer.ap_customer_assets": {
+        "ddl": RISK_DDL["customer.ap_customer_assets"],
+        "gen": generate_ap_customer_assets_rows,
+        "pk": ["customer_assets_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "customer.ap_customer_invest_dist": {
+        "ddl": RISK_DDL["customer.ap_customer_invest_dist"],
+        "gen": generate_ap_customer_invest_dist_rows,
+        "pk": ["customer_invest_dist_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "customer.ap_subsidiary_credit_detail": {
+        "ddl": RISK_DDL["customer.ap_subsidiary_credit_detail"],
+        "gen": generate_ap_subsidiary_credit_detail_rows,
+        "pk": ["project_id"],
+        "depends_on": ["customer.ap_group_customer", "customer.ap_customer"],
+    },
+    "customer.ap_collateral": {
+        "ddl": RISK_DDL["customer.ap_collateral"],
+        "gen": generate_ap_collateral_rows,
+        "pk": ["collateral_id"],
+        "depends_on": ["customer.ap_customer", "customer.ap_group_customer"],
+    },
+    "customer.ap_subsidiary_mortgage": {
+        "ddl": RISK_DDL["customer.ap_subsidiary_mortgage"],
+        "gen": generate_ap_subsidiary_mortgage_rows,
+        "pk": ["subsidiary_mortgage_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "customer.ap_bank_pledge_detail": {
+        "ddl": RISK_DDL["customer.ap_bank_pledge_detail"],
+        "gen": generate_ap_bank_pledge_detail_rows,
+        "pk": ["bank_pledge_id"],
+        "depends_on": ["customer.ap_customer", "customer.ap_group_customer"],
+    },
+    "customer.ap_securities_pledge_detail": {
+        "ddl": RISK_DDL["customer.ap_securities_pledge_detail"],
+        "gen": generate_ap_securities_pledge_detail_rows,
+        "pk": ["securities_pledge_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "risk.ap_warning_push": {
+        "ddl": RISK_DDL["risk.ap_warning_push"],
+        "gen": generate_ap_warning_push_rows,
+        "pk": ["warning_push_id"],
+        "depends_on": ["risk.ap_warning_signal"],
+    },
+    "risk.ap_audit_detail": {
+        "ddl": RISK_DDL["risk.ap_audit_detail"],
+        "gen": generate_ap_audit_detail_rows,
+        "pk": ["audit_id"],
+        "depends_on": [],
+    },
+    "risk.ap_compliance_risk_ledger": {
+        "ddl": RISK_DDL["risk.ap_compliance_risk_ledger"],
+        "gen": generate_ap_compliance_risk_ledger_rows,
+        "pk": ["compliance_risk_id"],
+        "depends_on": [],
+    },
+    "risk.ap_compliance_risk_ledger_tmp": {
+        "ddl": RISK_DDL["risk.ap_compliance_risk_ledger_tmp"],
+        "gen": generate_ap_compliance_risk_ledger_tmp_rows,
+        "pk": ["compliance_risk_tmp_id"],
+        "depends_on": [],
+    },
+    "risk.ap_regulatory_penalty": {
+        "ddl": RISK_DDL["risk.ap_regulatory_penalty"],
+        "gen": generate_ap_regulatory_penalty_rows,
+        "pk": ["penalty_id"],
+        "depends_on": [],
+    },
+    "risk.ap_warn_signal_concentration": {
+        "ddl": RISK_DDL["risk.ap_warn_signal_concentration"],
+        "gen": generate_ap_warn_signal_concentration_rows,
+        "pk": ["concentration_signal_id"],
+        "depends_on": [
+            "customer.ap_top500_customer_risk",
+            "customer.ap_customer",
+            "customer.ap_group_customer",
+        ],
+    },
+    "risk.ap_warn_signal_derive": {
+        "ddl": RISK_DDL["risk.ap_warn_signal_derive"],
+        "gen": generate_ap_warn_signal_derive_rows,
+        "pk": ["derive_warning_id"],
+        "depends_on": ["customer.ap_customer", "approval.ap_approve_order"],
+    },
+    "risk.ap_warn_derive_deal_detail": {
+        "ddl": RISK_DDL["risk.ap_warn_derive_deal_detail"],
+        "gen": generate_ap_warn_derive_deal_detail_rows,
+        "pk": ["derive_deal_detail_id"],
+        "depends_on": ["risk.ap_warn_signal_derive"],
+    },
+    "risk.ap_warn_derive_sub_push": {
+        "ddl": RISK_DDL["risk.ap_warn_derive_sub_push"],
+        "gen": generate_ap_warn_derive_sub_push_rows,
+        "pk": ["derive_sub_push_id"],
+        "depends_on": ["risk.ap_warn_signal_derive", "customer.ap_customer"],
+    },
+    "risk.ap_warn_signal_deviation": {
+        "ddl": RISK_DDL["risk.ap_warn_signal_deviation"],
+        "gen": generate_ap_warn_signal_deviation_rows,
+        "pk": ["deviation_signal_id"],
+        "depends_on": [
+            "customer.ap_customer",
+            "customer.ap_group_customer",
+            "approval.ap_approve_order",
+        ],
+    },
+    "risk.ap_deviation_warn_score": {
+        "ddl": RISK_DDL["risk.ap_deviation_warn_score"],
+        "gen": generate_ap_deviation_warn_score_rows,
+        "pk": ["deviation_warn_score_id"],
+        "depends_on": ["customer.ap_group_customer"],
+    },
+    "concentration.ap_concentration_limit_adj": {
+        "ddl": RISK_DDL["concentration.ap_concentration_limit_adj"],
+        "gen": generate_ap_concentration_limit_adj_rows,
+        "pk": ["concentration_limit_adj_id"],
+        "depends_on": ["concentration.ap_concentration_limit", "customer.ap_customer"],
+    },
+    "concentration.ap_concentration_warn_adj": {
+        "ddl": RISK_DDL["concentration.ap_concentration_warn_adj"],
+        "gen": generate_ap_concentration_warn_adj_rows,
+        "pk": ["concentration_warn_adj_id"],
+        "depends_on": ["concentration.ap_concentration_limit", "customer.ap_customer"],
+    },
+    "concentration.ap_codebt_customer": {
+        "ddl": RISK_DDL["concentration.ap_codebt_customer"],
+        "gen": generate_ap_codebt_customer_rows,
+        "pk": ["codebt_customer_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "concentration.ap_codebt_warn_score": {
+        "ddl": RISK_DDL["concentration.ap_codebt_warn_score"],
+        "gen": generate_ap_codebt_warn_score_rows,
+        "pk": ["codebt_warn_score_id"],
+        "depends_on": ["customer.ap_customer"],
+    },
+    "approval.ap_approve_oper_log": {
+        "ddl": RISK_DDL["approval.ap_approve_oper_log"],
+        "gen": generate_ap_approve_oper_log_rows,
+        "pk": ["approve_log_id"],
+        "depends_on": ["approval.ap_approve_order", "approval.ap_approve_task"],
+    },
+    "approval.ap_approve_warn_rel": {
+        "ddl": RISK_DDL["approval.ap_approve_warn_rel"],
+        "gen": generate_ap_approve_warn_rel_rows,
+        "pk": ["approve_warn_rel_id"],
+        "depends_on": ["approval.ap_approve_order", "risk.ap_warning_signal"],
+    },
+    "approval.ap_approve_todo": {
+        "ddl": RISK_DDL["approval.ap_approve_todo"],
+        "gen": generate_ap_approve_todo_rows,
+        "pk": ["approve_todo_id"],
+        "depends_on": ["approval.ap_approve_task"],
+    },
+    "project.ap_cust_query_log": {
+        "ddl": RISK_DDL["project.ap_cust_query_log"],
+        "gen": generate_ap_cust_query_log_rows,
+        "pk": ["cust_query_log_id"],
+        "depends_on": [],
+    },
+    "project.ap_serial_counter": {
+        "ddl": RISK_DDL["project.ap_serial_counter"],
+        "gen": generate_ap_serial_counter_rows,
+        "pk": ["serial_counter_id"],
+        "depends_on": [],
+    },
+    "base.ap_metric_std": {
+        "ddl": RISK_DDL["base.ap_metric_std"],
+        "gen": generate_ap_metric_std_rows,
+        "pk": ["index_id"],
+        "depends_on": [],
+    },
+    "base.ap_dim_rank": {
+        "ddl": RISK_DDL["base.ap_dim_rank"],
+        "gen": generate_ap_dim_rank_rows,
+        "pk": ["dim_rank_id"],
+        "depends_on": ["customer.ap_customer", "customer.ap_group_customer"],
+    },
+    "base.ap_custom_param": {
+        "ddl": RISK_DDL["base.ap_custom_param"],
+        "gen": generate_ap_custom_param_rows,
+        "pk": ["custom_param_id"],
+        "depends_on": [],
+    },
+    "base.ap_preference_file": {
+        "ddl": RISK_DDL["base.ap_preference_file"],
+        "gen": generate_ap_preference_file_rows,
+        "pk": ["preference_file_id"],
+        "depends_on": [],
+    },
+    "base.ap_supervise_opinion": {
+        "ddl": RISK_DDL["base.ap_supervise_opinion"],
+        "gen": generate_ap_supervise_opinion_rows,
+        "pk": ["supervise_opinion_id"],
+        "depends_on": [],
+    },
+    "base.ap_top_query_log": {
+        "ddl": RISK_DDL["base.ap_top_query_log"],
+        "gen": generate_ap_top_query_log_rows,
+        "pk": ["top_query_log_id"],
+        "depends_on": [],
+    },
+    "base.ap_data_dict": {
+        "ddl": RISK_DDL["base.ap_data_dict"],
+        "gen": generate_ap_data_dict_rows,
+        "pk": ["dict_id"],
+        "depends_on": [],
+    },
+    "base.ap_sys_param": {
+        "ddl": RISK_DDL["base.ap_sys_param"],
+        "gen": generate_ap_sys_param_rows,
+        "pk": ["sys_param_id"],
+        "depends_on": [],
+    },
+    "base.ap_org": {
+        "ddl": RISK_DDL["base.ap_org"],
+        "gen": generate_ap_org_rows,
+        "pk": ["org_id"],
+        "depends_on": [],
+    },
+    "base.ap_user": {
+        "ddl": RISK_DDL["base.ap_user"],
+        "gen": generate_ap_user_rows,
+        "pk": ["user_id"],
+        "depends_on": [],
+    },
+    "base.ap_biz_dict": {
+        "ddl": RISK_DDL["base.ap_biz_dict"],
+        "gen": generate_ap_biz_dict_rows,
+        "pk": ["biz_dict_id"],
+        "depends_on": [],
+    },
 }
-

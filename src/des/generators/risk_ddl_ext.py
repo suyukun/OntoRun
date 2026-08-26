@@ -610,7 +610,7 @@ CREATE TABLE ap_warn_signal_derive (
   derive_signal_status TEXT NOT NULL,  -- 信号数据状态 字典项P055
   comp_lead_push_status TEXT NOT NULL,  -- 金控领导预警推送状态 字典项P057
   warn_reason_update_status TEXT NOT NULL,  -- 预警事由修改状态 字典项P058
-  warn_reason_updated TEXT NOT NULL,  -- 修改后的预警事由
+  warn_reason_updated TEXT,  -- 修改后的预警事由
   sub_company_push_status TEXT NOT NULL,  -- 子公司推送状态 字典项P059
   sub_company_push_time TEXT NOT NULL,  -- 子公司推送时间
   is_deleted INTEGER NOT NULL,  -- 0:未删除,1:删除
@@ -618,7 +618,7 @@ CREATE TABLE ap_warn_signal_derive (
   create_time TEXT NOT NULL,  -- 创建时间
   update_time TEXT NOT NULL,  -- 更新时间
   update_user TEXT NOT NULL,  -- 更新人
-  opinion_description TEXT NOT NULL,  -- 审批意见
+  opinion_description TEXT,  -- 审批意见
   approve_order_status TEXT NOT NULL,  -- 字典项P061 PROCESS-审批中 APPROVED-已通过 REJECTED-已驳回
   approve_order_id TEXT NOT NULL,  -- 审批单ID（外键→ap_approve_order.approve_order_id）
   is_holding_add INTEGER NOT NULL  -- 是否金控新增 0-否、1-是
@@ -651,7 +651,7 @@ CREATE TABLE ap_warn_derive_sub_push (
   signal_level1_topic TEXT NOT NULL,  -- 信号一级主题 字典项
   signal_level2_topic TEXT NOT NULL,  -- 信号二级主题 字典项
   derive_warn_level TEXT NOT NULL,  -- 衍生预警等级
-  warn_reason_updated TEXT NOT NULL,  -- 修改后的预警事由
+  warn_reason_updated TEXT,  -- 修改后的预警事由
   etl_job_flag INTEGER NOT NULL,  -- etl执行flag 字典项 0未执行、1执行成功、2执行失败
   is_deleted INTEGER NOT NULL,  -- 0:未删除,1:删除
   create_user TEXT NOT NULL,  -- 创建人
@@ -690,7 +690,7 @@ CREATE TABLE ap_warn_signal_deviation (
   create_time TEXT NOT NULL,  -- 创建时间
   update_time TEXT NOT NULL,  -- 更新时间
   update_user TEXT NOT NULL,  -- 更新人
-  opinion_description TEXT NOT NULL,  -- 审批意见
+  opinion_description TEXT,  -- 审批意见
   approve_order_status TEXT NOT NULL,  -- 字典项P061 PROCESS-审批中 APPROVED-已通过 REJECTED-已驳回
   approve_order_id TEXT NOT NULL  -- 申请单ID（外键→ap_approve_order.approve_order_id）
 );

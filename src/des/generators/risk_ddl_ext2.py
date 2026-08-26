@@ -96,7 +96,7 @@ CREATE TABLE ap_approve_oper_log (
   operate_type TEXT NOT NULL,  -- 操作类型：SUBMIT-提交 APPROVE-审批通过 REJECT-审批驳回
   operate_remark TEXT NOT NULL,  -- 操作备注
   operate_time TEXT NOT NULL,  -- 操作时间
-  ext TEXT NOT NULL  -- 扩展字段
+  ext TEXT  -- 扩展字段
 );
 """
 
@@ -298,7 +298,7 @@ CREATE TABLE ap_data_dict (
   create_user TEXT NOT NULL,  -- 创建人
   update_time TEXT NOT NULL,  -- 更新时间
   update_user TEXT NOT NULL,  -- 更新人
-  extended_id TEXT NOT NULL,  -- 扩展编号
+  extended_id TEXT,  -- 扩展编号
   del_ind INTEGER NOT NULL,  -- 删除标志
   version TEXT NOT NULL,  -- 版本号
   tenant_id TEXT NOT NULL,  -- 租户id
@@ -320,7 +320,7 @@ CREATE TABLE ap_sys_param (
   create_user TEXT NOT NULL,  -- 创建人
   update_time TEXT NOT NULL,  -- 更新时间
   update_user TEXT NOT NULL,  -- 更新人
-  extended_id TEXT NOT NULL,  -- 扩展编号
+  extended_id TEXT,  -- 扩展编号
   del_ind INTEGER NOT NULL,  -- 删除标志
   version TEXT NOT NULL,  -- 版本号
   tenant_id TEXT NOT NULL  -- 租户编号
@@ -333,10 +333,10 @@ CREATE TABLE ap_org (
   org_id TEXT NOT NULL,  -- 主键ID
   org_code TEXT NOT NULL,  -- 机构代码
   org_name TEXT NOT NULL,  -- 机构名称
-  parent_org_code TEXT NOT NULL,  -- 父节点机构代码
+  parent_org_code TEXT,  -- 父节点机构代码
   org_level_code TEXT NOT NULL,  -- 机构等级
   sort_no INTEGER NOT NULL,  -- 排序
-  ext_json_data TEXT NOT NULL,  -- 扩展数据
+  ext_json_data TEXT,  -- 扩展数据
   status_code TEXT NOT NULL,  -- 状态
   remark TEXT NOT NULL,  -- 备注
   del_ind INTEGER NOT NULL,  -- 删除标志:0-未删除；1-删除
@@ -344,7 +344,7 @@ CREATE TABLE ap_org (
   create_time TEXT NOT NULL,  -- 创建时间
   update_user TEXT NOT NULL,  -- 更新者
   update_time TEXT NOT NULL,  -- 更新时间
-  extended_id TEXT NOT NULL,  -- 扩展编号
+  extended_id TEXT,  -- 扩展编号
   version TEXT NOT NULL,  -- 版本号
   tenant_id TEXT NOT NULL,  -- 租户编号
   client_id TEXT NOT NULL  -- 客户端编号
@@ -384,7 +384,7 @@ CREATE TABLE ap_user (
   create_user TEXT NOT NULL,  -- 创建人
   update_time TEXT NOT NULL,  -- 更新时间
   update_user TEXT NOT NULL,  -- 更新人
-  extended_id TEXT NOT NULL,  -- 扩展编号
+  extended_id TEXT,  -- 扩展编号
   del_ind INTEGER NOT NULL,  -- 删除标志
   version TEXT NOT NULL,  -- 版本号
   tenant_id TEXT NOT NULL,  -- 租户编号
@@ -408,14 +408,14 @@ CREATE TABLE ap_biz_dict (
   is_sealed INTEGER NOT NULL,  -- 是否已封存
   is_deleted INTEGER NOT NULL,  -- 是否已删除
   system_code TEXT NOT NULL,  -- 子系统编号
-  extension_1 TEXT NOT NULL,  -- 扩展字段1
-  extension_2 TEXT NOT NULL,  -- 扩展字段2
-  extension_3 TEXT NOT NULL,  -- 扩展字段3
-  extension_4 TEXT NOT NULL,  -- 扩展字段4
-  extension_5 TEXT NOT NULL,  -- 扩展字段5
+  extension_1 TEXT,  -- 扩展字段1
+  extension_2 TEXT,  -- 扩展字段2
+  extension_3 TEXT,  -- 扩展字段3
+  extension_4 TEXT,  -- 扩展字段4
+  extension_5 TEXT,  -- 扩展字段5
   dictionary_type TEXT NOT NULL,  -- 字典类型
   data_source_id TEXT NOT NULL,  -- 数据源
-  sql_sentence TEXT NOT NULL  -- sql语句
+  sql_sentence TEXT  -- sql语句
 );
 """
 
