@@ -86,7 +86,7 @@ def generate_ap_group_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> 
             {
                 "group_customer_no": anping_grp_no(year, seq),
                 "data_date": random_date(rng),
-                "group_customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(GROUP_SUFFIX)}",
+                "group_customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(GROUP_SUFFIX)}·{seq:06d}",
                 "customer_status": rng.choice(("正常", "关注", "注销", "吊销")),
                 "group_peer_flag": rng.randint(0, 1),
                 "asset_quality_level_code": code,
@@ -123,7 +123,7 @@ def generate_ap_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> list[d
             "org_id": f"ORG{rng.randint(1, 99):03d}",
             "org_name": rng.choice(ORG_POOL),
             "customer_no": anping_cust_no(year, seq),
-            "customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(CUST_NAME_SUFFIX)}",
+            "customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(CUST_NAME_SUFFIX)}·{seq:06d}",
             "group_customer_no": grp,
             "group_customer_name": group_names[grp],
             "cert_type": CERT_TYPE_CODE,

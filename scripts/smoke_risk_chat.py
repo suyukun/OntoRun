@@ -34,7 +34,7 @@ from src.runtime.risk_query import RiskQuery, RiskQueryError
 
 _FAILURES: list[str] = []
 _MONTH = ("2026-12-01", "2026-12-31")  # 演示数据"本月"（数据截至 2026-12-31）
-_GROUP = "中科智造控股集团有限公司"  # 评测 R01/R19 适配的真实集团
+_GROUP = ""  # 评测 R01/R19 的真实集团（名称带唯一序号后缀，test_read_engine 开头动态解析）
 
 
 def check(cond: bool, msg: str) -> bool:
@@ -78,6 +78,9 @@ def _is_declined(res: dict) -> bool:
 
 def test_read_engine(rq: RiskQuery, store: RiskStore) -> None:
     print("\n[A] 读引擎精准问答（真实 ap_anping 数据，直接 SQL 对答案）")
+    global _GROUP
+    _GROUP = _q1(store, "SELECT group_customer_name FROM customer.ap_group_customer ORDER BY group_customer_no LIMIT 1")["group_customer_name"]
+    print(f"    演示集团（动态解析）: {_GROUP}")
 
     # ---- R01 集团客户编号 + 成员企业数 ----
     print("\n[R01] 集团客户编号和成员企业数")
