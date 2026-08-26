@@ -1,0 +1,57 @@
+{
+  "enterprise": "ap_anping",
+  "seed": 20260827,
+  "data_version": "M1b-1",
+  "config_sha256": "c9e4b616ff8b7f41dbc327808d8be62872f2dcbee3fb305036c1b56ff6d73461",
+  "total_rows": 308000,
+  "tables": {
+    "approval.ap_approve_node": {
+      "rows": 2000,
+      "sha256": "c7d0cc756869e3903e54c266ce9791f0fc715c58eca0e3c0f9e4af329d1aeb45"
+    },
+    "approval.ap_approve_order": {
+      "rows": 20000,
+      "sha256": "07e7d91774efd1c5e4ee053a96a3de66242d4faef03ebcde71f8b324ba89c009"
+    },
+    "approval.ap_approve_task": {
+      "rows": 30000,
+      "sha256": "f3a1bc6b47bdbca2f34ccf07616453c7d6185a239cd1e6df0482daf7f2115937"
+    },
+    "base.ap_dim_metric": {
+      "rows": 50000,
+      "sha256": "efb6bfba89fa3f05a8b233cd1a4e46f995691465b1143d278858f613ae351b00"
+    },
+    "concentration.ap_concentration_limit": {
+      "rows": 8000,
+      "sha256": "b69cbac2840eb13165e8245ce265aaafed3e200fa3bd705bc5c2ceb6349087b0"
+    },
+    "customer.ap_customer": {
+      "rows": 50000,
+      "sha256": "b204c32f6854147ddb2a2d6f3d1de66fa5ed518a39edeab057f41501f9013b3e"
+    },
+    "customer.ap_group_customer": {
+      "rows": 8000,
+      "sha256": "3d8b266c9cb22c1b2e4df2f6deb3087a5cc1ac8deb8017b9fc12bb59af092e5a"
+    },
+    "project.ap_risk_project": {
+      "rows": 5000,
+      "sha256": "6bd1e3d0174ecfcc01281fcc58c897fa1bd4edd71eb368b08867bf6ff1131163"
+    },
+    "risk.ap_disposal": {
+      "rows": 25000,
+      "sha256": "5bc80e1e827d5120f182f982b8aae2c4486a84e238520931abda6243f879f97a"
+    },
+    "risk.ap_disposal_detail": {
+      "rows": 10000,
+      "sha256": "df386c41c70ae473edf778c5d5260f26aa196eae3feb3b633c4670072359b042"
+    },
+    "risk.ap_warning_disposal": {
+      "rows": 20000,
+      "sha256": "2b50773c453071efbdf0b0bb59e2a66b444dc5db7d63cba6fa136890a7ac9bc1"
+    },
+    "risk.ap_warning_signal": {
+      "rows": 80000,
+      "sha256": "a9743ab4cc3400d6beae483a07f2f2147e9a26f2f41f9511f71b08ba1f930672"
+    }
+  }
+}
