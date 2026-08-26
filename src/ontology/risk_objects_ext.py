@@ -37,7 +37,9 @@ class CustomerRelation(BaseModel):
     cert_type_code: str = own(OWN_SOURCE, "客户证件类型")
     cert_no: str = own(OWN_SOURCE, "客户证件号（脱敏）")
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
-    internal_customer_no: str = own(OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    internal_customer_no: str = own(
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     group_cert_type_code: str = own(OWN_SOURCE, "集团客户证件类型")
     group_cert_no: str = own(OWN_SOURCE, "集团客户证件号（脱敏）")
     group_customer_name: str = own(OWN_SOURCE, "集团客户名称（脱敏）")
@@ -55,6 +57,7 @@ class CustomerRelation(BaseModel):
     version: str = own(OWN_SOURCE, "框架版本号")
     tenant_id: str = own(OWN_SOURCE, "多实体标识")
 
+
 class CustomerRelationTree(BaseModel):
     """客户关系树（应用写入）。PK/Title = customer_relation_tree_id（源 o_a_erms_cust_relation_opt）。"""
 
@@ -65,7 +68,9 @@ class CustomerRelationTree(BaseModel):
     cert_type_code: str = own(OWN_SOURCE, "客户证件类型")
     cert_no: str = own(OWN_SOURCE, "客户证件号（脱敏）")
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
-    internal_customer_no: str = own(OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    internal_customer_no: str = own(
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     group_cert_type_code: str = own(OWN_SOURCE, "集团客户证件类型")
     group_cert_no: str = own(OWN_SOURCE, "集团客户证件号（脱敏）")
     group_customer_name: str = own(OWN_SOURCE, "集团客户名称（脱敏）")
@@ -84,8 +89,13 @@ class CustomerRelationTree(BaseModel):
     effective_date: date = own(OWN_SOURCE, "生效日期")
     invalid_date: date = own(OWN_SOURCE, "失效日期")
     current_status: str = own(OWN_SOURCE, "当前状态")
-    cert_type_code_from_bank: str = own(OWN_SOURCE, "客户证件类型(来源为银行报送的关系树)")
-    cert_no_from_bank: str = own(OWN_SOURCE, "客户证件号(来源为银行报送的关系树)（脱敏）")
+    cert_type_code_from_bank: str = own(
+        OWN_SOURCE, "客户证件类型(来源为银行报送的关系树)"
+    )
+    cert_no_from_bank: str = own(
+        OWN_SOURCE, "客户证件号(来源为银行报送的关系树)（脱敏）"
+    )
+
 
 class ImportantCustomerList(BaseModel):
     """重要客户名单管理表。PK/Title = important_customer_id（源 o_a_erms_cust_list）。"""
@@ -109,15 +119,20 @@ class ImportantCustomerList(BaseModel):
     belong_industry: str = own(OWN_SOURCE, "所属行业")
     is_high_leverage: int = own(OWN_SOURCE, "是否高杠杆")
 
+
 class Top500CustomerRisk(BaseModel):
     """前500大客户风险投融资结果表。PK/Title = top500_customer_id（源 o_a_erms_top500_cust_info）。"""
 
     top500_customer_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
     data_date: date = own(OWN_SOURCE, "数据日期")
     org_id: str = own(OWN_SOURCE, "机构编码")
-    customer_no: str = own(OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    customer_no: str = own(
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
-    group_customer_no: str = own(OWN_SOURCE, "客户所属集团编号（FK→GroupCustomer.group_customer_no）（脱敏）")
+    group_customer_no: str = own(
+        OWN_SOURCE, "客户所属集团编号（FK→GroupCustomer.group_customer_no）（脱敏）"
+    )
     group_customer_name: str = own(OWN_SOURCE, "客户所属集团名称（脱敏）")
     customer_type: str = own(OWN_SOURCE, "客户类型")
     group_member_count: int = own(OWN_SOURCE, "集团成员数")
@@ -137,6 +152,7 @@ class Top500CustomerRisk(BaseModel):
     tenant_id: str = own(OWN_SOURCE, "多实体标识")
     invest_balance_new: float = own(OWN_SOURCE, "投融资余额-新（脱敏）")
 
+
 class CustomerAssets(BaseModel):
     """资产结构结果表。PK/Title = customer_assets_id（源 o_a_erms_cust_assets）。"""
 
@@ -144,7 +160,9 @@ class CustomerAssets(BaseModel):
     data_date: date = own(OWN_SOURCE, "数据日期")
     org_id: str = own(OWN_SOURCE, "机构编码")
     org_name: str = own(OWN_SOURCE, "机构名称")
-    customer_no: str = own(OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    customer_no: str = own(
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
     customer_type: str = own(OWN_SOURCE, "客户类型")
     business_type_code: str = own(OWN_SOURCE, "业务类型代码")
@@ -160,12 +178,15 @@ class CustomerAssets(BaseModel):
     tenant_id: str = own(OWN_SOURCE, "多实体标识")
     invest_balance_new: float = own(OWN_SOURCE, "投融资余额-新（脱敏）")
 
+
 class InvestDistribution(BaseModel):
     """投资分布结果表。PK/Title = customer_invest_dist_id（源 o_a_erms_cust_sub_org_invest）。"""
 
     customer_invest_dist_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
     data_date: date = own(OWN_SOURCE, "数据日期")
-    customer_no: str = own(OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    customer_no: str = own(
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
     org_id: str = own(OWN_SOURCE, "机构编号")
     org_name: str = own(OWN_SOURCE, "机构名称")
@@ -183,6 +204,7 @@ class InvestDistribution(BaseModel):
     risk_bad_balance: float = own(OWN_SOURCE, "不良风险暴露余额（脱敏）")
     invest_balance_new: float = own(OWN_SOURCE, "全口径投融资业务余额（脱敏）")
 
+
 class SubsidiaryCreditDetail(BaseModel):
     """集团加工后子公司明细表。PK/Title = project_id（源 o_a_erms_credit_detail_1）。"""
 
@@ -194,12 +216,16 @@ class SubsidiaryCreditDetail(BaseModel):
     project_name: str = own(OWN_SOURCE, "项目名称（脱敏）")
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
     group_customer_name: str = own(OWN_SOURCE, "客户所属集团名称（脱敏）")
-    group_customer_name_processed: str = own(OWN_SOURCE, "集团加工的所属集团名称（脱敏）")
+    group_customer_name_processed: str = own(
+        OWN_SOURCE, "集团加工的所属集团名称（脱敏）"
+    )
     group_peer_flag: int = own(OWN_SOURCE, "集团客户同业标识")
     cert_type_code: str = own(OWN_SOURCE, "客户证件类型代码")
     cert_type: str = own(OWN_SOURCE, "客户证件类型名称")
     cert_no: str = own(OWN_SOURCE, "客户证件号码（脱敏）")
-    internal_customer_no: str = own(OWN_SOURCE, "内部客户号（FK→RiskCustomer.customer_no）（脱敏）")
+    internal_customer_no: str = own(
+        OWN_SOURCE, "内部客户号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     internal_level: str = own(OWN_SOURCE, "客户内部评级")
     external_level: str = own(OWN_SOURCE, "客户外部评级")
     zone_id: str = own(OWN_SOURCE, "区域（境内）代码")
@@ -276,6 +302,7 @@ class SubsidiaryCreditDetail(BaseModel):
     clear_remark_3: str = own(OWN_SOURCE, "备注3（占位，语义不明）")
     clear_remark_4: str = own(OWN_SOURCE, "备注4（占位，语义不明）")
 
+
 class BankPledgeDetail(BaseModel):
     """押品明细（银行业）。PK/Title = bank_pledge_id（源 o_a_erms_pledge_bankdetail）。"""
 
@@ -324,6 +351,7 @@ class BankPledgeDetail(BaseModel):
     biz_date: date = own(OWN_SOURCE, "业务日期(网关自动填充)")
     company_partition: str = own(OWN_SOURCE, "公司划分(网关自动填充)")
 
+
 class SecuritiesPledgeDetail(BaseModel):
     """押品明细（证券业）。PK/Title = securities_pledge_id（源 o_a_erms_pledge_securitiesdetail）。"""
 
@@ -346,6 +374,7 @@ class SecuritiesPledgeDetail(BaseModel):
     biz_date: date = own(OWN_SOURCE, "业务日期(网关自动填充)")
     company_partition: str = own(OWN_SOURCE, "公司划分(网关自动填充)")
     partition_date: date = own(OWN_SOURCE, "分区统计日期")
+
 
 class SubsidiaryMortgage(BaseModel):
     """子公司抵质押物信息。PK/Title = subsidiary_mortgage_id（源 o_a_erms_org_mrtg_prop_info）。"""
@@ -370,6 +399,7 @@ class SubsidiaryMortgage(BaseModel):
     clear_remark_1: str = own(OWN_SOURCE, "备注1（占位，语义不明）")
     clear_remark_2: str = own(OWN_SOURCE, "备注2（占位，语义不明）")
 
+
 class WarningPush(BaseModel):
     """预警推送表。PK/Title = warning_push_id（源 o_a_erms_cust_warn_sgn_push）。"""
 
@@ -382,6 +412,7 @@ class WarningPush(BaseModel):
     receive_instruction: str = own(OWN_SOURCE, "接收批示（脱敏）")
     receive_time: datetime = own(OWN_SOURCE, "接收时间")
 
+
 class CoDebtScore(BaseModel):
     """共债客户风险预警评分表。PK/Title = codebt_warn_score_id（源 p_erms_codebt_cust_warn_score）。"""
 
@@ -389,7 +420,9 @@ class CoDebtScore(BaseModel):
     data_date: date = own(OWN_SOURCE, "数据日期")
     signal_generate_date: date = own(OWN_SOURCE, "预警信号生成日期")
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
-    customer_type: Literal["01", "02"] = own(OWN_SOURCE, "客户类型 01 单一客户，02集团客户")
+    customer_type: Literal["01", "02"] = own(
+        OWN_SOURCE, "客户类型 01 单一客户，02集团客户"
+    )
     risk_exposure: float = own(OWN_SOURCE, "风险暴露额（脱敏）")
     invest_balance: float = own(OWN_SOURCE, "投融资余额（脱敏）")
     industry_id: str = own(OWN_SOURCE, "客户所属行业ID")
@@ -406,12 +439,17 @@ class CoDebtScore(BaseModel):
     calc_detail: str = own(OWN_SOURCE, "计算过程（脱敏）")
     create_time: datetime = own(OWN_SOURCE, "创建时间")
 
+
 class ConcentrationLimitAdj(BaseModel):
     """集中度限额调整表。PK/Title = concentration_limit_adj_id（源 o_a_erms_larg_cust_limit_adj）。"""
 
     concentration_limit_adj_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
-    concentration_limit_id: str = own(OWN_SOURCE, "集中度限额编号（FK→ConcentrationLimit.concentration_limit_id）")
-    customer_no: str = own(OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    concentration_limit_id: str = own(
+        OWN_SOURCE, "集中度限额编号（FK→ConcentrationLimit.concentration_limit_id）"
+    )
+    customer_no: str = own(
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
     concentration_limit: float = own(OWN_SOURCE, "集中度限额（脱敏）")
     concentration_limit_old: str = own(OWN_SOURCE, "集中度限额-更新前的值（脱敏）")
