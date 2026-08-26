@@ -17,14 +17,14 @@ from pathlib import Path
 
 import pytest
 
-from src.des.config import config_sha256, load_config
+from src.des.config import load_config
 from src.des.generate import build_enterprise
-from src.des.manifest import read_table_rows, table_sha256
 from src.des.generators.risk_generators import (
     concentration_calc,
     five_category_assign,
     warn_level_decide,
 )
+from src.des.manifest import read_table_rows, table_sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTERPRISE_CODE = "ap_anping"

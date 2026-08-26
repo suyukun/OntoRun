@@ -17,8 +17,6 @@ import random
 from datetime import date, timedelta
 from typing import Any
 
-from .risk_ddl import RISK_DDL
-
 # ---------------------------------------------------------------------------
 # 确定性锚点
 # ---------------------------------------------------------------------------

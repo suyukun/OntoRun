@@ -73,6 +73,7 @@ from .risk_generators import (
     random_date,
 )
 
+
 # 行生成器（每表独立 RNG 流；引用 ctx 缓存的上游表确定性输出）
 # ---------------------------------------------------------------------------
 def generate_ap_group_customer_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
