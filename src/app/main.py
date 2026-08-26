@@ -466,6 +466,54 @@ def register_risk_agent_routes(app: FastAPI) -> None:
     # 风险会话独立持久化（同 Store 的 sessions/messages 表）
     risk_sessions = SessionManager(risk_store, agent_factory=_get_agent)
 
+    @app.get("/risk-objects/{type}")
+    def risk_object_list(type: str, request: Request, page: int = 1, page_size: int = 20):
+        """风险对象列表（实时查 ap_anping 真实数据，供风险演示数据浏览页）。
+
+        风险对象在独立注册表（build_risk_source_registry），与 S1 共享注册表分离；
+        非 page/page_size 的 query 参数视为等值过滤。
+        """
+        obj = risk_registry.object_type(type)
+        if obj is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "request_id": "", "outcome": "error",
+                    "error": {"code": "OBJECT_TYPE_NOT_FOUND", "message": f"风险对象类型不存在: {type}", "detail": None},
+                },
+            )
+        table = obj.source_table
+        conn = risk_store.source_conn()
+        try:
+            filters = {
+                k: v for k, v in request.query_params.items()
+                if k not in ("page", "page_size")
+            }
+            where = ""
+            args: list = []
+            if filters:
+                conds = []
+                for k, v in filters.items():
+                    conds.append(f"{k} = ?")
+                    args.append(v)
+                where = " WHERE " + " AND ".join(conds)
+            total = conn.execute(f"SELECT COUNT(*) FROM {table}{where}", args).fetchone()[0]
+            limit = max(1, min(page_size, 100))
+            offset = max(0, (page - 1) * limit)
+            rows = conn.execute(
+                f"SELECT * FROM {table}{where} ORDER BY {obj.pk_field} LIMIT ? OFFSET ?",
+                args + [limit, offset],
+            ).fetchall()
+            items = [dict(rr) for rr in rows]
+        finally:
+            conn.close()
+        return JSONResponse(
+            content={
+                "request_id": "", "outcome": "ok",
+                "data": {"type": type, "page": page, "page_size": limit, "total": total, "items": items},
+            },
+        )
+
     @app.post("/agent/risk/chat")
     async def risk_agent_chat(body: ChatRequest, request: Request):
         """风险场景对话：用户消息 → RiskAgent 编排 → 回复（读精准问答 / 写双签提议）。"""
