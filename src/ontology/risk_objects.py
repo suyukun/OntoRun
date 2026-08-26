@@ -8,8 +8,13 @@ PK 命名遵循 M1a「<类型>_id = 主键ID」模式；GroupCustomer 例外：�
 无独立主键列，业务主键即 group_customer_no（全链路 FK 均以 group_customer_no 引用，
 故 M2 草案的 group_customer_id 落地为 group_customer_no，见下）。
 
-共享注册表命名：S1 零售已占用类型名 Customer（src/ontology/objects.py），故 S3 金控单一客户
-模型类保持 Customer，注册类型名用 RiskCustomer（api risk_customer），对齐 DES ErpCustomer 先例。
+注册形态：本模块是自洽的独立注册体——新建 Registry() 后调用 register_risk_objects(reg) 即可，
+类型名直接用 M2 设计名（Customer 等，独立注册表内无同名冲突）。
+【M3 挂载注意】若要并入共享注册表 build_registry()（src/ontology/__init__.py），需适配：
+① 类型名 Customer 与 S1 零售冲突 → 改注册名 RiskCustomer（对齐 DES ErpCustomer 先例，模型类不变）；
+② 链接 inverse_name 前缀随之由 customer. 改 risk_customer.（self_check 按目标 api_name 校验前缀）；
+③ ActionEngine 要求每个注册动作有运行时写回 handler（src/runtime/actions_impl.HANDLERS），
+   9 个风险动作的写回实现属 M3 范围（本任务只交付动作模板骨架声明）。
 
 状态归属沿用 S1 模式（src/ontology/objects.py）：own(OWN_SOURCE/OWN_ONTOLOGY/OWN_DERIVED)。
 - source-backed：源系统权威，动作写回；
@@ -349,10 +354,9 @@ class User(BaseModel):
 
 RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
     ObjectTypeDef(
-        name="RiskCustomer",
-        api_name="risk_customer",
-        description="单一客户（金控风险预警，源 o_a_erms_cust_info；共享注册表内区别于 S1 "
-        "零售 Customer，对齐 DES ErpCustomer 先例，2026-08-22 Jack 拍板）",
+        name="Customer",
+        api_name="customer",
+        description="单一客户（金控风险预警，源 o_a_erms_cust_info）",
         model=Customer,
         pk_field="customer_id",
         title_field="customer_id",
@@ -472,8 +476,10 @@ RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
 def register_risk_objects(registry) -> None:
     """安装 S3 金控风控本体（12 核心 + User 支撑对象 + 14 链接 + 9 动作）到 Registry。
 
-    挂载点：src/ontology/__init__.py 的 build_registry()（供 src/app/main.py 与
-    src/api/main.py 统一入口消费）。重复调用会在 Registry 重复注册时报错（防静默覆盖）。
+    用法：新建独立注册表（reg = Registry(); register_risk_objects(reg)）供 S3 演示用，
+    self_check 全绿。挂载点 = src/ontology/__init__.py 的 build_registry()（src/app/main.py
+    与 src/api/main.py 统一入口）；因 ActionEngine 要求每个动作有运行时 handler（M3 写回），
+    暂不并入共享注册表，M3 接线时按模块 docstring 的三条适配做。重复注册会报错（防静默覆盖）。
     """
     for obj in RISK_OBJECT_TYPES:
         registry.register_object_type(obj)
