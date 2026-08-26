@@ -59,6 +59,19 @@ ERROR_MESSAGES: dict[str, str] = {
     "AMOUNT_EXCEEDS_PAID": "退款金额超过实付（含已批准退款）",
     "REFUND_NOT_ALLOWED": "订单状态不允许退款",
     ERROR_CODE_PERMISSION_DENIED: "权限不足，动作被拒绝（PERMISSION_DENIED）",
+    # S3 金控风控场景错误码（src/ontology/risk_error_codes.py）
+    "WARNING_NOT_FOUND": "预警信号不存在",
+    "WARNING_NOT_CONFIRMABLE": "预警信号状态非待确认，不可确认",
+    "WARNING_NOT_ADJUSTABLE": "预警信号状态非确认中，不可调整等级",
+    "WARNING_LEVEL_INVALID": "预警等级非法，或升级至更高等级需审批",
+    "DISPOSAL_NOT_FOUND": "处置记录不存在",
+    "DISPOSAL_NOT_SUBMITTABLE": "处置状态非草稿，不可提交",
+    "APPROVE_ORDER_NOT_FOUND": "审批单不存在",
+    "APPROVE_ORDER_NOT_PROCESSING": "审批单状态非审批中，不可审批",
+    "WARNING_NOT_CLOSABLE": "预警信号状态非处置中，不可销号",
+    "CONCENTRATION_LIMIT_NOT_FOUND": "集中度限额记录不存在",
+    "RISK_PROJECT_NOT_FOUND": "风险项目不存在",
+    "RISK_PROJECT_ALREADY_EXISTS": "风险项目重复登记",
 }
 
 # failed 路径对外稳定错误码/文案（安全摘要，不含原始异常文本——AGENTS.md
