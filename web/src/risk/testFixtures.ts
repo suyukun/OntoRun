@@ -1,5 +1,5 @@
 // 测试用小快照（迷你版 risk-snapshot，结构与物化快照一致）
-import type { RiskSnapshot } from '../riskData';
+import type { RiskSnapshot } from './riskData';
 
 export const miniSnapshot: RiskSnapshot = {
   schema_version: 1,
