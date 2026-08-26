@@ -293,7 +293,7 @@ def infer_type(field: str) -> str:
         "rectification_complete_flag",
     ):
         return "INTEGER"
-    if f.endswith("_quantity") or f.endswith("_sort_no"):
+    if f.endswith(("_quantity", "_sort_no")):
         return "INTEGER"
     if f.endswith(
         (
