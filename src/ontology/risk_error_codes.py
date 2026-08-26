@@ -16,6 +16,9 @@ RISK_ERROR_CODES: tuple[str, ...] = (
     "DISPOSAL_NOT_SUBMITTABLE",  # 处置状态非 DRAFT，不可提交
     # 审批
     "APPROVE_ORDER_NOT_FOUND",  # 审批单不存在
+    "APPROVE_ORDER_NOT_PROCESSING",  # 审批单状态非 PROCESS，不可审批
+    # 预警销号
+    "WARNING_NOT_CLOSABLE",  # 信号状态非 IN_DISPOSAL，不可销号
     # 集中度限额
     "CONCENTRATION_LIMIT_NOT_FOUND",  # 集中度限额不存在
     # 风险项目

@@ -269,12 +269,20 @@ class ObjectIndex:
     # ---- 增量更新（§3.3 ⑦：源库提交后同步索引） ----
 
     def refresh(self, type_name: str, pk: str, conn: sqlite3.Connection) -> None:
-        """从源库重读单行并更新对象与链接（FK 变更也能正确处理）。"""
+        """从源库重读单行并更新对象与链接（FK 变更也能正确处理）。
+
+        源表缺失时静默跳过（如 S3 风险对象的逻辑表名未适配到 ap_anping 实际表，
+        或 M1a 未覆盖的占位对象无源表）——该类型本库无实例，无增量可同步。
+        """
         obj = self._registry.object_type(type_name)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            f"SELECT * FROM {obj.source_table} WHERE {obj.pk_field}=?", (str(pk),)
-        ).fetchone()
+        try:
+            row = conn.execute(
+                f"SELECT * FROM {obj.source_table} WHERE {obj.pk_field}=?",
+                (str(pk),),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return  # 源表不存在 → 该类型本库无实例，跳过
         if row is None:
             self._remove_object(type_name, str(pk))
             return

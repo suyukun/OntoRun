@@ -225,12 +225,14 @@ class ActionEngine:
             a.name: self._build_handler(a.name) for a in registry.actions()
         }
 
-    def _build_handler(self, action_name: str) -> ActionHandler:
+    def _build_handler(self, action_name: str) -> ActionHandler | None:
         from src.runtime import actions_impl  # 延迟导入避免循环
 
         factory = actions_impl.HANDLERS.get(action_name)
         if factory is None:
-            raise ValueError(f"动作实现缺失: {action_name}")
+            # S3 风险动作 handler 由独立模块 register_risk_action_handlers 注入
+            # （src.runtime.risk_actions_impl），构造期留空占位，执行期缺失会清晰失败。
+            return None
         return factory(self)
 
     # ---- 主入口 ----
@@ -283,6 +285,18 @@ class ActionEngine:
                 [],
             )
         handler = self._handlers[action_name]
+        if handler is None:
+            # 注册了动作但无运行时写回 handler（如占位注册后未 register_risk_action_handlers）
+            return self._failed(
+                action_name,
+                params,
+                actor,
+                actor_detail,
+                request_id,
+                t0,
+                "动作实现缺失（写回 handler 未注册）",
+                error_code=FAILED_CODE_EXECUTION,
+            )
 
         # ① 参数校验（LLM 输出视为不可信输入，Pydantic 强校验）
         try:
