@@ -137,6 +137,20 @@ class RiskStore(Store):
         return conn
 
 
+def risk_seq_id(
+    conn: sqlite3.Connection, table: str, pk_field: str, prefix: str, width: int = 8
+) -> str:
+    """取源表主键末 width 位流水 max+1，拼 {PREFIX}-{year}-{8位}（编码规则 4）。
+
+    源主键形如 PROJ-2026-00001234，末 8 位即流水号（SUBSTR 负偏移）。
+    """
+    row = conn.execute(
+        f"SELECT MAX(CAST(SUBSTR({pk_field}, -{width}) AS INTEGER)) AS m FROM {table}"
+    ).fetchone()
+    seq = (row[0] or 0) + 1
+    return f"{prefix}-{RISK_DEMO_YEAR:04d}-{seq:0{width}d}"
+
+
 def build_risk_source_registry() -> Registry:
     """风险本体独立注册 + 源表名适配（逻辑表名 → ap_anping 真实表）。
 
