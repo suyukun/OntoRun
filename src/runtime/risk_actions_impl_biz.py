@@ -19,6 +19,94 @@ from src.runtime.action_engine import (
 )
 from src.runtime.risk_db import RISK_DEMO_YEAR, risk_seq_id
 
+
+def _risk_project_effects(proj_id: str, params: Any) -> list[Effect]:
+    """风险项目登记的 5 条状态效果（纯函数）。"""
+    return [
+        Effect(
+            object_type="RiskProject",
+            pk=proj_id,
+            prop="risk_project_id",
+            old=None,
+            new=proj_id,
+            note="风险项目登记",
+        ),
+        Effect(
+            object_type="RiskProject",
+            pk=proj_id,
+            prop="group_customer_no",
+            old=None,
+            new=params.group_customer_no,
+        ),
+        Effect(
+            object_type="RiskProject",
+            pk=proj_id,
+            prop="project_name",
+            old=None,
+            new=params.project_name,
+        ),
+        Effect(
+            object_type="RiskProject",
+            pk=proj_id,
+            prop="business_type",
+            old=None,
+            new=params.business_type,
+        ),
+        Effect(
+            object_type="RiskProject",
+            pk=proj_id,
+            prop="five_classification",
+            old=None,
+            new=params.five_classification,
+        ),
+    ]
+
+
+def _risk_project_insert(
+    proj_id: str, group_name: str, params: Any, now: str
+) -> list[Writeback]:
+    """风险项目登记 INSERT 写回（纯函数；补齐全部 NOT NULL 列）。"""
+    seq = int(proj_id[-8:])  # 取流水号拼批次号
+    return [
+        Writeback(
+            sql="INSERT INTO project.ap_risk_project (risk_project_id, sort_no, "
+            "group_customer_name, batch_id, division, enterprise_overview, org_id_1, "
+            "org_name_1, project_name, org_id_2, org_name_2, business_type, "
+            "credit_subject, business_balance, risk_exposure_balance, impairment_provision, "
+            "five_classification, guarantee_method, project_progress, is_deleted, "
+            "create_user, create_time, update_time, update_user) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            params=[
+                proj_id,
+                0,
+                group_name,
+                f"BATCH-RISK-{RISK_DEMO_YEAR}-{seq:06d}",
+                "风险监控部",
+                "",
+                "",
+                "",
+                params.project_name,
+                "",
+                "",
+                params.business_type,
+                group_name,
+                0.0,
+                0.0,
+                0.0,
+                params.five_classification,
+                "信用",
+                "登记待评估",
+                0,
+                "系统",
+                now,
+                now,
+                "系统",
+            ],
+            table="ap_risk_project",
+        )
+    ]
+
+
 # ======================================================================
 # 动作 7：adjust_concentration_limit 集中度限额调整（保留旧值审计，高风险双签）
 # ======================================================================
@@ -127,83 +215,8 @@ class RegisterRiskProjectHandler(ActionHandler):
         proj_id = risk_seq_id(
             conn, "project.ap_risk_project", "risk_project_id", "PROJ"
         )
-        effects = [
-            Effect(
-                object_type="RiskProject",
-                pk=proj_id,
-                prop="risk_project_id",
-                old=None,
-                new=proj_id,
-                note="风险项目登记",
-            ),
-            Effect(
-                object_type="RiskProject",
-                pk=proj_id,
-                prop="group_customer_no",
-                old=None,
-                new=params.group_customer_no,
-            ),
-            Effect(
-                object_type="RiskProject",
-                pk=proj_id,
-                prop="project_name",
-                old=None,
-                new=params.project_name,
-            ),
-            Effect(
-                object_type="RiskProject",
-                pk=proj_id,
-                prop="business_type",
-                old=None,
-                new=params.business_type,
-            ),
-            Effect(
-                object_type="RiskProject",
-                pk=proj_id,
-                prop="five_classification",
-                old=None,
-                new=params.five_classification,
-            ),
-        ]
-        seq = int(proj_id[-8:])  # 取流水号拼批次号
-        writebacks = [
-            Writeback(
-                sql="INSERT INTO project.ap_risk_project (risk_project_id, sort_no, "
-                "group_customer_name, batch_id, division, enterprise_overview, org_id_1, "
-                "org_name_1, project_name, org_id_2, org_name_2, business_type, "
-                "credit_subject, business_balance, risk_exposure_balance, impairment_provision, "
-                "five_classification, guarantee_method, project_progress, is_deleted, "
-                "create_user, create_time, update_time, update_user) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                params=[
-                    proj_id,
-                    0,
-                    snapshot["group_name"],
-                    f"BATCH-RISK-{RISK_DEMO_YEAR}-{seq:06d}",
-                    "风险监控部",
-                    "",
-                    "",
-                    "",
-                    params.project_name,
-                    "",
-                    "",
-                    params.business_type,
-                    snapshot["group_name"],
-                    0.0,
-                    0.0,
-                    0.0,
-                    params.five_classification,
-                    "信用",
-                    "登记待评估",
-                    0,
-                    "系统",
-                    now,
-                    now,
-                    "系统",
-                ],
-                table="ap_risk_project",
-            )
-        ]
+        effects = _risk_project_effects(proj_id, params)
+        writebacks = _risk_project_insert(proj_id, snapshot["group_name"], params, now)
         return effects, writebacks
 
 

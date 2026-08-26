@@ -246,62 +246,186 @@ class SubmitDisposalHandler(ActionHandler):
     def compute_effects(
         self, conn: Any, snapshot: dict, params: Any
     ) -> tuple[list[Effect], list[Writeback]]:
-        disposal, warning = snapshot["disposal"], snapshot["warning"]
-        now = _now()
-        effects = [
+        return _submit_disposal_effects(
+            snapshot["disposal"], snapshot["warning"], _now()
+        )
+
+
+def _submit_disposal_effects(
+    disposal: dict, warning: dict | None, now: str
+) -> tuple[list[Effect], list[Writeback]]:
+    """处置提交：处置 DRAFT→SUBMITTED，关联信号 → IN_DISPOSAL（纯函数）。"""
+    effects = [
+        Effect(
+            object_type="Disposal",
+            pk=disposal["disposal_id"],
+            prop="disposal_status",
+            old=_disposal_en(disposal["disposal_status"]),
+            new="SUBMITTED",
+            note="处置方案提交",
+        )
+    ]
+    writebacks = [
+        Writeback(
+            sql="UPDATE ap_warning_disposal SET disposal_status=?, disposal_progress=?, "
+            "operate_time=?, operator_user=? WHERE disposal_id=?",
+            params=[
+                _disposal_cn("SUBMITTED"),
+                "已制定处置方案",
+                now,
+                "系统",
+                disposal["disposal_id"],
+            ],
+            table="ap_warning_disposal",
+        )
+    ]
+    if warning is not None:
+        se, sw = _signal_to_disposal_writebacks(warning, now)
+        effects.extend(se)
+        writebacks.extend(sw)
+    return effects, writebacks
+
+
+def _signal_to_disposal_writebacks(
+    warning: dict, now: str
+) -> tuple[list[Effect], list[Writeback]]:
+    """处置提交后信号进入处置流转（signal_status → IN_DISPOSAL，纯函数）。"""
+    return (
+        [
+            Effect(
+                object_type="WarningSignal",
+                pk=warning["warning_id"],
+                prop="signal_status",
+                old=_signal_en(warning["signal_status"]),
+                new="IN_DISPOSAL",
+                note="信号进入处置流转",
+            )
+        ],
+        [
+            Writeback(
+                sql="UPDATE ap_warning_signal SET signal_status=?, disposal_status=?, "
+                "update_time=? WHERE warning_id=?",
+                params=[
+                    _signal_cn("IN_DISPOSAL"),
+                    "处置中",
+                    now,
+                    warning["warning_id"],
+                ],
+                table="ap_warning_signal",
+            )
+        ],
+    )
+
+
+# ======================================================================
+# 动作 4：approve_disposal 处置审批（PROCESS → APPROVED/REJECTED，高风险双签）
+# ======================================================================
+
+
+def _approve_order_effects(
+    order: dict, decision: str, opinion: str, now: str
+) -> tuple[list[Effect], list[Writeback]]:
+    """审批单状态与意见写回（纯函数）。"""
+    effects = [
+        Effect(
+            object_type="ApproveOrder",
+            pk=order["approve_order_id"],
+            prop="approve_order_status",
+            old=order["approve_order_status"],
+            new=decision,
+            note="处置审批结论",
+        ),
+        Effect(
+            object_type="ApproveOrder",
+            pk=order["approve_order_id"],
+            prop="opinion_description",
+            old=order.get("opinion_description"),
+            new=opinion,
+            note="审批意见",
+        ),
+    ]
+    writebacks = [
+        Writeback(
+            sql="UPDATE approval.ap_approve_order SET approve_order_status=?, "
+            "approve_time=?, opinion_description=?, update_time=? WHERE approve_order_id=?",
+            params=[decision, now, opinion, now, order["approve_order_id"]],
+            table="ap_approve_order",
+        )
+    ]
+    return effects, writebacks
+
+
+def _approve_tasks_effects(
+    pending_tasks: list[dict], decision: str, opinion: str, now: str
+) -> tuple[list[Effect], list[Writeback]]:
+    """未决审批任务办结（纯函数）。"""
+    effects: list[Effect] = []
+    writebacks: list[Writeback] = []
+    for task in pending_tasks:
+        effects.append(
+            Effect(
+                object_type="ApproveTask",
+                pk=task["approve_task_id"],
+                prop="approve_task_status",
+                old=task["approve_task_status"],
+                new="COMPLETED",
+                note="审批任务办结",
+            )
+        )
+        writebacks.append(
+            Writeback(
+                sql="UPDATE approval.ap_approve_task SET approve_task_status='COMPLETED', "
+                "approve_result=?, approve_remark=?, approve_time=?, update_time=? "
+                "WHERE approve_task_id=?",
+                params=[decision, opinion, now, now, task["approve_task_id"]],
+                table="ap_approve_task",
+            )
+        )
+    return effects, writebacks
+
+
+def _approve_disposal_sync(
+    disposal: dict | None, warning: dict | None, decision: str, now: str
+) -> tuple[list[Effect], list[Writeback]]:
+    """审批结论同步处置状态与信号处置状态（纯函数）。"""
+    effects: list[Effect] = []
+    writebacks: list[Writeback] = []
+    if disposal is not None:
+        new_status = "APPROVED" if decision == "APPROVED" else "REJECTED"
+        effects.append(
             Effect(
                 object_type="Disposal",
                 pk=disposal["disposal_id"],
                 prop="disposal_status",
                 old=_disposal_en(disposal["disposal_status"]),
-                new="SUBMITTED",
-                note="处置方案提交",
+                new=new_status,
+                note="处置审批结果同步",
             )
-        ]
-        writebacks = [
+        )
+        writebacks.append(
             Writeback(
-                sql="UPDATE ap_warning_disposal SET disposal_status=?, disposal_progress=?, "
-                "operate_time=?, operator_user=? WHERE disposal_id=?",
+                sql="UPDATE ap_warning_disposal SET disposal_status=?, operate_time=?, "
+                "operator_user=? WHERE disposal_id=?",
                 params=[
-                    _disposal_cn("SUBMITTED"),
-                    "已制定处置方案",
+                    _disposal_cn(new_status),
                     now,
                     "系统",
                     disposal["disposal_id"],
                 ],
                 table="ap_warning_disposal",
             )
-        ]
-        if warning is not None:
-            effects.append(
-                Effect(
-                    object_type="WarningSignal",
-                    pk=warning["warning_id"],
-                    prop="signal_status",
-                    old=_signal_en(warning["signal_status"]),
-                    new="IN_DISPOSAL",
-                    note="信号进入处置流转",
-                )
+        )
+    if warning is not None:
+        signal_status = "处置中" if decision == "APPROVED" else "暂缓处置"
+        writebacks.append(
+            Writeback(
+                sql="UPDATE ap_warning_signal SET disposal_status=?, update_time=? "
+                "WHERE warning_id=?",
+                params=[signal_status, now, warning["warning_id"]],
+                table="ap_warning_signal",
             )
-            writebacks.append(
-                Writeback(
-                    sql="UPDATE ap_warning_signal SET signal_status=?, disposal_status=?, "
-                    "update_time=? WHERE warning_id=?",
-                    params=[
-                        _signal_cn("IN_DISPOSAL"),
-                        "处置中",
-                        now,
-                        warning["warning_id"],
-                    ],
-                    table="ap_warning_signal",
-                )
-            )
-        return effects, writebacks
-
-
-# ======================================================================
-# 动作 4：approve_disposal 处置审批（PROCESS → APPROVED/REJECTED，高风险双签）
-# ======================================================================
+        )
+    return effects, writebacks
 
 
 class ApproveDisposalHandler(ActionHandler):
@@ -361,105 +485,14 @@ class ApproveDisposalHandler(ActionHandler):
         order = snapshot["order"]
         now = _now()
         decision = params.decision
-        effects = [
-            Effect(
-                object_type="ApproveOrder",
-                pk=order["approve_order_id"],
-                prop="approve_order_status",
-                old=order["approve_order_status"],
-                new=decision,
-                note="处置审批结论",
-            ),
-            Effect(
-                object_type="ApproveOrder",
-                pk=order["approve_order_id"],
-                prop="opinion_description",
-                old=order.get("opinion_description"),
-                new=params.opinion,
-                note="审批意见",
-            ),
-        ]
-        writebacks = [
-            Writeback(
-                sql="UPDATE approval.ap_approve_order SET approve_order_status=?, "
-                "approve_time=?, opinion_description=?, update_time=? WHERE approve_order_id=?",
-                params=[
-                    decision,
-                    now,
-                    params.opinion,
-                    now,
-                    order["approve_order_id"],
-                ],
-                table="ap_approve_order",
-            )
-        ]
-        for task in snapshot["pending_tasks"]:
-            effects.append(
-                Effect(
-                    object_type="ApproveTask",
-                    pk=task["approve_task_id"],
-                    prop="approve_task_status",
-                    old=task["approve_task_status"],
-                    new="COMPLETED",
-                    note="审批任务办结",
-                )
-            )
-            writebacks.append(
-                Writeback(
-                    sql="UPDATE approval.ap_approve_task SET approve_task_status='COMPLETED', "
-                    "approve_result=?, approve_remark=?, approve_time=?, update_time=? "
-                    "WHERE approve_task_id=?",
-                    params=[
-                        decision,
-                        params.opinion,
-                        now,
-                        now,
-                        task["approve_task_id"],
-                    ],
-                    table="ap_approve_task",
-                )
-            )
-        disposal = snapshot["disposal"]
-        if disposal is not None:
-            new_status = "APPROVED" if decision == "APPROVED" else "REJECTED"
-            effects.append(
-                Effect(
-                    object_type="Disposal",
-                    pk=disposal["disposal_id"],
-                    prop="disposal_status",
-                    old=_disposal_en(disposal["disposal_status"]),
-                    new=new_status,
-                    note="处置审批结果同步",
-                )
-            )
-            writebacks.append(
-                Writeback(
-                    sql="UPDATE ap_warning_disposal SET disposal_status=?, operate_time=?, "
-                    "operator_user=? WHERE disposal_id=?",
-                    params=[
-                        _disposal_cn(new_status),
-                        now,
-                        "系统",
-                        disposal["disposal_id"],
-                    ],
-                    table="ap_warning_disposal",
-                )
-            )
-        if snapshot["warning"] is not None:
-            signal_status = "处置中" if decision == "APPROVED" else "暂缓处置"
-            writebacks.append(
-                Writeback(
-                    sql="UPDATE ap_warning_signal SET disposal_status=?, update_time=? "
-                    "WHERE warning_id=?",
-                    params=[
-                        signal_status,
-                        now,
-                        snapshot["warning"]["warning_id"],
-                    ],
-                    table="ap_warning_signal",
-                )
-            )
-        return effects, writebacks
+        e1, w1 = _approve_order_effects(order, decision, params.opinion, now)
+        e2, w2 = _approve_tasks_effects(
+            snapshot["pending_tasks"], decision, params.opinion, now
+        )
+        e3, w3 = _approve_disposal_sync(
+            snapshot["disposal"], snapshot["warning"], decision, now
+        )
+        return e1 + e2 + e3, w1 + w2 + w3
 
 
 # ======================================================================
