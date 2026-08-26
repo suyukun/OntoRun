@@ -27,7 +27,7 @@ from .config import (
     DesConfigError,
     load_config,
 )
-from .generators.risk_table_generators import RISK_TABLE_SPECS
+from .generators.risk_table_specs import RISK_TABLE_SPECS
 from .manifest import build_manifest
 
 # ---------------------------------------------------------------------------
@@ -37,13 +37,35 @@ CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # 32 字符，剔除易混 0/O/1/I�
 ANCHOR_START = date(2025, 1, 1)
 ANCHOR_END = date(2026, 12, 31)
 
-MATERIAL_TYPES = ("FERT", "HALB", "ROH", "VERP", "HAWA")  # 枚举：成品/半成品/原材料/包装/贸易商品
+MATERIAL_TYPES = (
+    "FERT",
+    "HALB",
+    "ROH",
+    "VERP",
+    "HAWA",
+)  # 枚举：成品/半成品/原材料/包装/贸易商品
 UNITS = ("PC", "EA", "KG", "M", "箱", "SET")
 MATERIAL_NAMES = (
-    "铝合金外壳", "不锈钢紧固件", "伺服电机", "精密齿轮", "滚珠轴承",
-    "PCB 主板", "散热模组", "注塑壳体", "线束总成", "气动元件",
-    "减速器箱体", "密封圈", "传感器模组", "钣金支架", "数控刀具",
-    "驱动控制板", "橡胶衬套", "冲压件", "联轴器", "紧固标准件",
+    "铝合金外壳",
+    "不锈钢紧固件",
+    "伺服电机",
+    "精密齿轮",
+    "滚珠轴承",
+    "PCB 主板",
+    "散热模组",
+    "注塑壳体",
+    "线束总成",
+    "气动元件",
+    "减速器箱体",
+    "密封圈",
+    "传感器模组",
+    "钣金支架",
+    "数控刀具",
+    "驱动控制板",
+    "橡胶衬套",
+    "冲压件",
+    "联轴器",
+    "紧固标准件",
 )
 NAME_VARIANTS = ("A 型", "B 型", "C 型", "标准型", "加强型", "轻量型")
 WERKS_POOL = ("PL01", "PL02")
@@ -51,7 +73,11 @@ ARBPL_POOL = ("WC-ASSY-01", "WC-CNC-01", "WC-MOLD-02", "WC-TEST-01", "WC-PACK-01
 VERID_POOL = ("01", "02", "03")
 DISPO_POOL = ("MRP-01", "MRP-02", "MRP-03")
 LGORT_POOL = ("W01", "W02", "W03")
-LGORT_PLANT = {"W01": "PL01", "W02": "PL02", "W03": "PL01"}  # 库存地点 → 所属工厂（MARD）
+LGORT_PLANT = {
+    "W01": "PL01",
+    "W02": "PL02",
+    "W03": "PL01",
+}  # 库存地点 → 所属工厂（MARD）
 BESTQ_POOL = ("非限制", "非限制", "非限制", "质检", "冻结")  # 权重模拟：非限制为主
 ZONE_POOL = ("A", "B", "C")
 MAABC_POOL = ("A", "B", "C")  # ABC 分类（MARC）
@@ -61,16 +87,53 @@ CUSTOMER_CODE_PREFIX = "CU"  # 客户号前缀（§2.1 编码规则）
 CODE_WIDTH = 8  # 供应商/客户定宽序号位数（SU-00000001）
 LAND1 = "CN"
 KTOKD_POOL = ("0001", "0002", "0003")  # 客户账户组：零售/中小企业/集团
-CITY_POOL = ("深圳", "上海", "苏州", "东莞", "杭州", "宁波", "青岛", "天津", "成都", "武汉", "佛山", "合肥")
+CITY_POOL = (
+    "深圳",
+    "上海",
+    "苏州",
+    "东莞",
+    "杭州",
+    "宁波",
+    "青岛",
+    "天津",
+    "成都",
+    "武汉",
+    "佛山",
+    "合肥",
+)
 VENDOR_NAMES = (
-    "东成金属材料", "南方精密零件", "恒力标准件", "瑞鑫塑胶制品", "长城模具钢",
-    "华东电子元件", "精工轴承", "天工传动件", "顺达包装材料", "晶圆半导体材料",
-    "华泰紧固件", "立讯传感器", "中兴线缆", "山河液压件", "博世电机配件",
+    "东成金属材料",
+    "南方精密零件",
+    "恒力标准件",
+    "瑞鑫塑胶制品",
+    "长城模具钢",
+    "华东电子元件",
+    "精工轴承",
+    "天工传动件",
+    "顺达包装材料",
+    "晶圆半导体材料",
+    "华泰紧固件",
+    "立讯传感器",
+    "中兴线缆",
+    "山河液压件",
+    "博世电机配件",
 )
 CUSTOMER_NAMES = (
-    "华北智能装备", "联盛机电", "拓维自动化", "凯捷电子", "中科智能",
-    "精诚数控", "蓝海机器人", "瑞驰汽车零部件", "恒泰家电", "广达工控",
-    "远望通讯", "江川泵业", "长虹智能家居", "力神电池", "欧姆电子",
+    "华北智能装备",
+    "联盛机电",
+    "拓维自动化",
+    "凯捷电子",
+    "中科智能",
+    "精诚数控",
+    "蓝海机器人",
+    "瑞驰汽车零部件",
+    "恒泰家电",
+    "广达工控",
+    "远望通讯",
+    "江川泵业",
+    "长虹智能家居",
+    "力神电池",
+    "欧姆电子",
 )
 NAME_SUFFIXES = ("有限公司", "集团", "股份公司", "有限责任公司")
 BOM_PARENT_TYPES = ("FERT", "HALB")  # BOM 所属成品/半成品（MAST）
@@ -79,22 +142,49 @@ BOM_ITEM_STEP = 10  # STPO.STLKN 步长（00010 起，SAP 习惯）
 STPO_ITEMS_PER_BOM = 5  # BOM 平均组件数（10,000 × 5 = 50,000，§3.3 比率 1:5）
 
 # —— 事务表常量（§2 编码规则总表 / §2.1-2.5 业务枚举，常量化禁硬编码）——
-DOC_CODE_WIDTH = 6  # 单据码序号位数（PO/SO/WO/CF/MV/FI，NNNNNN 6 位，单年 99.9 万行上限）
+DOC_CODE_WIDTH = (
+    6  # 单据码序号位数（PO/SO/WO/CF/MV/FI，NNNNNN 6 位，单年 99.9 万行上限）
+)
 VKORG = "1000"  # 销售组织（VBAK）
 BSART = "NB"  # 采购订单类型：标准（EKKO）
 AUART = "PPSM"  # 生产工单类型：生产（AUFK）
-STATUS_POOL = ("REL", "PCNF", "DLV", "CLSD")  # 工单状态：下达/部分确认/交付/关闭（过滤查询载体）
+STATUS_POOL = (
+    "REL",
+    "PCNF",
+    "DLV",
+    "CLSD",
+)  # 工单状态：下达/部分确认/交付/关闭（过滤查询载体）
 RECEIPT_BWART = ("101", "301")  # 收货移动类型：101 采购收货 / 301 移库入库（§2.3）
-ISSUE_BWART = ("201", "261", "301")  # 发料移动类型：201 发料 / 261 生产发料 / 301 移库出库
-RACCT_POOL = ("100101", "100201", "112201", "140501", "140502", "140503",
-              "220201", "500101", "600101")  # 会计科目池（ACDOCA）
+ISSUE_BWART = (
+    "201",
+    "261",
+    "301",
+)  # 发料移动类型：201 发料 / 261 生产发料 / 301 移库出库
+RACCT_POOL = (
+    "100101",
+    "100201",
+    "112201",
+    "140501",
+    "140502",
+    "140503",
+    "220201",
+    "500101",
+    "600101",
+)  # 会计科目池（ACDOCA）
 KOSTL_POOL = ("CC-PROD-01", "CC-PROD-02", "CC-ASSY-01", "CC-ADMIN-01", "CC-SALES-01")
-ACDOCA_REF_SPLIT = (0.4, 0.3, 0.3)  # ACDOCA 参考单据抽样比例 SO/PO/MV（§2.5 R4，Σ=41,000）
+ACDOCA_REF_SPLIT = (
+    0.4,
+    0.3,
+    0.3,
+)  # ACDOCA 参考单据抽样比例 SO/PO/MV（§2.5 R4，Σ=41,000）
 VBAK_ITEMS_LO, VBAK_ITEMS_HI = 1, 4  # 每销售订单项目数范围（均值 2.5 → 40k:100k，§3.3）
 EKPO_ITEMS_LO, EKPO_ITEMS_HI = 1, 4  # 每采购订单项目数范围（均值 2.67 → 30k:80k，§3.3）
 AFPO_ITEMS_LO, AFPO_ITEMS_HI = 1, 2  # 每工单项目数范围（均值 1.33 → 90k:120k，§3.3）
 COFV_ITEMS_LO, COFV_ITEMS_HI = 1, 3  # 每工单报工次数范围（均值 2 → 90k:180k，§3.3）
-MSEG_COUNT_LO, MSEG_COUNT_HI = 5, 9  # 每 (MATNR,LGORT) 账面行移动笔数（奇；收发对 + 锚点，D10）
+MSEG_COUNT_LO, MSEG_COUNT_HI = (
+    5,
+    9,
+)  # 每 (MATNR,LGORT) 账面行移动笔数（奇；收发对 + 锚点，D10）
 
 # ---------------------------------------------------------------------------
 # 九张主数据表 DDL（设计 §2.1/§2.2/§2.3/§2.4；MARA/MPLA/WMMD 字段不变 = 兼容红线）
@@ -328,7 +418,9 @@ def random_date(rng: random.Random) -> str:
     return day.strftime("%Y-%m-%d")
 
 
-def generate_mara_rows(rng: random.Random, year: int, count: int) -> list[dict[str, Any]]:
+def generate_mara_rows(
+    rng: random.Random, year: int, count: int
+) -> list[dict[str, Any]]:
     """ERP.MARA 物料主数据（§2.1）：MATNR 升序生成，BISMT 待注入阶段回填（字段不变）。"""
     rows: list[dict[str, Any]] = []
     for seq in range(1, count + 1):
@@ -366,7 +458,9 @@ def inject_legacy_codes(
     selected = set(rng.sample(sorted_matnrs, count))
     legacy_by_matnr: dict[str, str] = {}
     for idx, matnr in enumerate(sorted(selected), start=1):
-        legacy_by_matnr[matnr] = legacy_pattern.format(prefix=prefix, year=year, seq=idx)
+        legacy_by_matnr[matnr] = legacy_pattern.format(
+            prefix=prefix, year=year, seq=idx
+        )
     rows = []
     for row in sorted(mara_rows, key=lambda r: r["MATNR"]):
         rows.append({**row, "BISMT": legacy_by_matnr.get(row["MATNR"])})
@@ -624,8 +718,11 @@ def generate_ekpo_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     matnrs = [m["MATNR"] for m in mara]
     meins_by = {m["MATNR"]: m["MEINS"] for m in mara}
     counts = _distribute_counts(
-        rng, _row_count(ctx, "scm.EKKO"), _row_count(ctx, "scm.EKPO"),
-        EKPO_ITEMS_LO, EKPO_ITEMS_HI,
+        rng,
+        _row_count(ctx, "scm.EKKO"),
+        _row_count(ctx, "scm.EKPO"),
+        EKPO_ITEMS_LO,
+        EKPO_ITEMS_HI,
     )
     rows: list[dict[str, Any]] = []
     for ekko, c in zip(ctx["scm.EKKO"], counts):
@@ -668,8 +765,11 @@ def generate_vbap_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     matnrs = [m["MATNR"] for m in mara]
     meins_by = {m["MATNR"]: m["MEINS"] for m in mara}
     counts = _distribute_counts(
-        rng, _row_count(ctx, "erp.VBAK"), _row_count(ctx, "erp.VBAP"),
-        VBAK_ITEMS_LO, VBAK_ITEMS_HI,
+        rng,
+        _row_count(ctx, "erp.VBAK"),
+        _row_count(ctx, "erp.VBAP"),
+        VBAK_ITEMS_LO,
+        VBAK_ITEMS_HI,
     )
     rows: list[dict[str, Any]] = []
     for vbak, c in zip(ctx["erp.VBAK"], counts):
@@ -713,8 +813,11 @@ def generate_afpo_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     matnrs = [m["MATNR"] for m in mara]
     meins_by = {m["MATNR"]: m["MEINS"] for m in mara}
     counts = _distribute_counts(
-        rng, _row_count(ctx, "mes.AUFK"), _row_count(ctx, "mes.AFPO"),
-        AFPO_ITEMS_LO, AFPO_ITEMS_HI,
+        rng,
+        _row_count(ctx, "mes.AUFK"),
+        _row_count(ctx, "mes.AFPO"),
+        AFPO_ITEMS_LO,
+        AFPO_ITEMS_HI,
     )
     rows: list[dict[str, Any]] = []
     for aufk, c in zip(ctx["mes.AUFK"], counts):
@@ -737,8 +840,11 @@ def generate_cofv_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     year = ctx["year"]
     matnrs = [m["MATNR"] for m in ctx["erp.MARA"]]
     counts = _distribute_counts(
-        rng, _row_count(ctx, "mes.AUFK"), _row_count(ctx, "mes.COFV"),
-        COFV_ITEMS_LO, COFV_ITEMS_HI,
+        rng,
+        _row_count(ctx, "mes.AUFK"),
+        _row_count(ctx, "mes.COFV"),
+        COFV_ITEMS_LO,
+        COFV_ITEMS_HI,
     )
     rows: list[dict[str, Any]] = []
     seq = 0
@@ -780,17 +886,29 @@ def _mseg_pair_rows(
         r_bwart = rng.choice(RECEIPT_BWART)
         rows.append(
             {
-                "MATNR": matnr, "WERKS": werks, "LGORT": lgort, "BWART": r_bwart,
-                "MENGE": qty, "MEINS": meins, "BUDAT": random_date(rng),
-                "EBELN": rng.choice(ekko_keys) if r_bwart == "101" else None, "AUFNR": None,
+                "MATNR": matnr,
+                "WERKS": werks,
+                "LGORT": lgort,
+                "BWART": r_bwart,
+                "MENGE": qty,
+                "MEINS": meins,
+                "BUDAT": random_date(rng),
+                "EBELN": rng.choice(ekko_keys) if r_bwart == "101" else None,
+                "AUFNR": None,
             }
         )
         i_bwart = rng.choice(ISSUE_BWART)
         rows.append(
             {
-                "MATNR": matnr, "WERKS": werks, "LGORT": lgort, "BWART": i_bwart,
-                "MENGE": -qty, "MEINS": meins, "BUDAT": random_date(rng),
-                "EBELN": None, "AUFNR": rng.choice(aufk_keys) if i_bwart == "261" else None,
+                "MATNR": matnr,
+                "WERKS": werks,
+                "LGORT": lgort,
+                "BWART": i_bwart,
+                "MENGE": -qty,
+                "MEINS": meins,
+                "BUDAT": random_date(rng),
+                "EBELN": None,
+                "AUFNR": rng.choice(aufk_keys) if i_bwart == "261" else None,
             }
         )
     return rows
@@ -805,9 +923,15 @@ def _mseg_anchor_row(
     """锚点 101 收货行：MENGE = MARD.LABST（D10 账面=净变），引 EKKO。"""
     matnr, werks, lgort = mrow["MATNR"], mrow["WERKS"], mrow["LGORT"]
     return {
-        "MATNR": matnr, "WERKS": werks, "LGORT": lgort, "BWART": "101",
-        "MENGE": mrow["LABST"], "MEINS": meins_by[matnr], "BUDAT": random_date(rng),
-        "EBELN": rng.choice(ekko_keys), "AUFNR": None,
+        "MATNR": matnr,
+        "WERKS": werks,
+        "LGORT": lgort,
+        "BWART": "101",
+        "MENGE": mrow["LABST"],
+        "MEINS": meins_by[matnr],
+        "BUDAT": random_date(rng),
+        "EBELN": rng.choice(ekko_keys),
+        "AUFNR": None,
     }
 
 
@@ -826,7 +950,12 @@ def generate_mseg_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     aufk_keys = [a["AUFNR"] for a in ctx["mes.AUFK"]]
     mard = ctx["erp.MARD"]
     counts = _distribute_counts(
-        rng, len(mard), _row_count(ctx, "wms.MSEG"), MSEG_COUNT_LO, MSEG_COUNT_HI, step=2,
+        rng,
+        len(mard),
+        _row_count(ctx, "wms.MSEG"),
+        MSEG_COUNT_LO,
+        MSEG_COUNT_HI,
+        step=2,
     )
     pairs_by_lgort: dict[str, list[dict[str, Any]]] = {lg: [] for lg in LGORT_POOL}
     anchors_by_lgort: dict[str, list[dict[str, Any]]] = {lg: [] for lg in LGORT_POOL}
@@ -848,7 +977,9 @@ def generate_mseg_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str
     return rows
 
 
-def generate_acdoca_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_acdoca_rows(
+    rng: random.Random, ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
     """FIN.ACDOCA 财务日记账（§2.5）：41,000 行，REF_DOC 确定性抽样映射 VBELN/EBELN/MBLNR。
 
     从 VBAK/EKKO/MSEG 主键按固定比例（SO/PO/MV = 40/30/30%）rng.sample 确定性抽样，
@@ -894,29 +1025,122 @@ def generate_acdoca_rows(rng: random.Random, ctx: dict[str, Any]) -> list[dict[s
 # 制造业 18 表 + 金融风控 12 表合并；build_enterprise 按 config 表规格拓扑序执行，table_id 驱动（行业无关）。
 # ---------------------------------------------------------------------------
 MANUFACTURING_TABLE_SPECS: dict[str, dict[str, Any]] = {
-    "scm.LFA1": {"ddl": LFA1_DDL, "gen": generate_lfa1_rows, "pk": ["LIFNR"], "depends_on": []},
-    "erp.KNA1": {"ddl": KNA1_DDL, "gen": generate_kna1_rows, "pk": ["KUNNR"], "depends_on": []},
-    "erp.MARA": {"ddl": MARA_DDL, "gen": generate_erp_mara, "pk": ["MATNR"], "depends_on": []},
-    "erp.MARC": {"ddl": MARC_DDL, "gen": generate_marc_rows, "pk": ["MATNR", "WERKS"], "depends_on": ["erp.MARA"]},
-    "erp.MARD": {"ddl": MARD_DDL, "gen": generate_mard_rows, "pk": ["MATNR", "WERKS", "LGORT"], "depends_on": ["erp.MARA"]},
-    "erp.MAST": {"ddl": MAST_DDL, "gen": generate_mast_rows, "pk": ["MATNR", "WERKS", "STLNR"], "depends_on": ["erp.MARA"]},
-    "erp.STPO": {"ddl": STPO_DDL, "gen": generate_stpo_rows, "pk": ["STLNR", "STLKN"], "depends_on": ["erp.MARA", "erp.MAST"]},
-    "mes.MPLA": {"ddl": MPLA_DDL, "gen": generate_mpla_rows, "pk": ["MPLA_ID"], "depends_on": ["erp.MARA"]},
-    "wms.WMMD": {"ddl": WMMD_DDL, "gen": generate_wmmd_rows, "pk": ["MATNR"], "depends_on": ["erp.MARA"]},
+    "scm.LFA1": {
+        "ddl": LFA1_DDL,
+        "gen": generate_lfa1_rows,
+        "pk": ["LIFNR"],
+        "depends_on": [],
+    },
+    "erp.KNA1": {
+        "ddl": KNA1_DDL,
+        "gen": generate_kna1_rows,
+        "pk": ["KUNNR"],
+        "depends_on": [],
+    },
+    "erp.MARA": {
+        "ddl": MARA_DDL,
+        "gen": generate_erp_mara,
+        "pk": ["MATNR"],
+        "depends_on": [],
+    },
+    "erp.MARC": {
+        "ddl": MARC_DDL,
+        "gen": generate_marc_rows,
+        "pk": ["MATNR", "WERKS"],
+        "depends_on": ["erp.MARA"],
+    },
+    "erp.MARD": {
+        "ddl": MARD_DDL,
+        "gen": generate_mard_rows,
+        "pk": ["MATNR", "WERKS", "LGORT"],
+        "depends_on": ["erp.MARA"],
+    },
+    "erp.MAST": {
+        "ddl": MAST_DDL,
+        "gen": generate_mast_rows,
+        "pk": ["MATNR", "WERKS", "STLNR"],
+        "depends_on": ["erp.MARA"],
+    },
+    "erp.STPO": {
+        "ddl": STPO_DDL,
+        "gen": generate_stpo_rows,
+        "pk": ["STLNR", "STLKN"],
+        "depends_on": ["erp.MARA", "erp.MAST"],
+    },
+    "mes.MPLA": {
+        "ddl": MPLA_DDL,
+        "gen": generate_mpla_rows,
+        "pk": ["MPLA_ID"],
+        "depends_on": ["erp.MARA"],
+    },
+    "wms.WMMD": {
+        "ddl": WMMD_DDL,
+        "gen": generate_wmmd_rows,
+        "pk": ["MATNR"],
+        "depends_on": ["erp.MARA"],
+    },
     # —— 事务/流水表（Phase B，§2.4-2.6；依赖主数据与上级单据，拓扑序固定）——
-    "erp.VBAK": {"ddl": VBAK_DDL, "gen": generate_vbak_rows, "pk": ["VBELN"], "depends_on": ["erp.KNA1"]},
-    "erp.VBAP": {"ddl": VBAP_DDL, "gen": generate_vbap_rows, "pk": ["VBELN", "POSNR"], "depends_on": ["erp.VBAK", "erp.MARA"]},
-    "mes.AUFK": {"ddl": AUFK_DDL, "gen": generate_aufk_rows, "pk": ["AUFNR"], "depends_on": ["erp.MARA"]},
-    "mes.AFPO": {"ddl": AFPO_DDL, "gen": generate_afpo_rows, "pk": ["AUFNR", "POSNR"], "depends_on": ["mes.AUFK", "erp.MARA"]},
-    "mes.COFV": {"ddl": COFV_DDL, "gen": generate_cofv_rows, "pk": ["CONFNR"], "depends_on": ["mes.AUFK", "erp.MARA"]},
-    "wms.MSEG": {"ddl": MSEG_DDL, "gen": generate_mseg_rows, "pk": ["MBLNR", "ZEILE"], "depends_on": ["erp.MARA", "scm.EKKO", "mes.AUFK"]},
-    "scm.EKKO": {"ddl": EKKO_DDL, "gen": generate_ekko_rows, "pk": ["EBELN"], "depends_on": ["scm.LFA1"]},
-    "scm.EKPO": {"ddl": EKPO_DDL, "gen": generate_ekpo_rows, "pk": ["EBELN", "EBELP"], "depends_on": ["scm.EKKO", "erp.MARA"]},
-    "fin.ACDOCA": {"ddl": ACDOCA_DDL, "gen": generate_acdoca_rows, "pk": ["BELNR", "POSNR"], "depends_on": ["erp.VBAP", "scm.EKPO", "wms.MSEG"]},
+    "erp.VBAK": {
+        "ddl": VBAK_DDL,
+        "gen": generate_vbak_rows,
+        "pk": ["VBELN"],
+        "depends_on": ["erp.KNA1"],
+    },
+    "erp.VBAP": {
+        "ddl": VBAP_DDL,
+        "gen": generate_vbap_rows,
+        "pk": ["VBELN", "POSNR"],
+        "depends_on": ["erp.VBAK", "erp.MARA"],
+    },
+    "mes.AUFK": {
+        "ddl": AUFK_DDL,
+        "gen": generate_aufk_rows,
+        "pk": ["AUFNR"],
+        "depends_on": ["erp.MARA"],
+    },
+    "mes.AFPO": {
+        "ddl": AFPO_DDL,
+        "gen": generate_afpo_rows,
+        "pk": ["AUFNR", "POSNR"],
+        "depends_on": ["mes.AUFK", "erp.MARA"],
+    },
+    "mes.COFV": {
+        "ddl": COFV_DDL,
+        "gen": generate_cofv_rows,
+        "pk": ["CONFNR"],
+        "depends_on": ["mes.AUFK", "erp.MARA"],
+    },
+    "wms.MSEG": {
+        "ddl": MSEG_DDL,
+        "gen": generate_mseg_rows,
+        "pk": ["MBLNR", "ZEILE"],
+        "depends_on": ["erp.MARA", "scm.EKKO", "mes.AUFK"],
+    },
+    "scm.EKKO": {
+        "ddl": EKKO_DDL,
+        "gen": generate_ekko_rows,
+        "pk": ["EBELN"],
+        "depends_on": ["scm.LFA1"],
+    },
+    "scm.EKPO": {
+        "ddl": EKPO_DDL,
+        "gen": generate_ekpo_rows,
+        "pk": ["EBELN", "EBELP"],
+        "depends_on": ["scm.EKKO", "erp.MARA"],
+    },
+    "fin.ACDOCA": {
+        "ddl": ACDOCA_DDL,
+        "gen": generate_acdoca_rows,
+        "pk": ["BELNR", "POSNR"],
+        "depends_on": ["erp.VBAP", "scm.EKPO", "wms.MSEG"],
+    },
 }
 
 # 合并注册表：制造业（默认）+ 金融风控（risk 模板）。两个行业表 id 互不重叠，合并安全。
-TABLE_SPECS: dict[str, dict[str, Any]] = {**MANUFACTURING_TABLE_SPECS, **RISK_TABLE_SPECS}
+TABLE_SPECS: dict[str, dict[str, Any]] = {
+    **MANUFACTURING_TABLE_SPECS,
+    **RISK_TABLE_SPECS,
+}
 
 GenFn = Callable[[random.Random, dict[str, Any]], list[dict[str, Any]]]
 
@@ -926,9 +1150,13 @@ def _check_spec_vs_config(config: dict, table_id: str, spec: dict[str, Any]) -> 
     code, name = table_id.split(".", 1)
     cfg = config["enterprise"]["systems"][code]["tables"][name]
     if spec["pk"] != cfg["pk"]:
-        raise DesConfigError(f"表 {table_id} 主键注册表与配置不一致: {spec['pk']} != {cfg['pk']}")
+        raise DesConfigError(
+            f"表 {table_id} 主键注册表与配置不一致: {spec['pk']} != {cfg['pk']}"
+        )
     if spec["depends_on"] != cfg["depends_on"]:
-        raise DesConfigError(f"表 {table_id} 依赖注册表与配置不一致: {spec['depends_on']} != {cfg['depends_on']}")
+        raise DesConfigError(
+            f"表 {table_id} 依赖注册表与配置不一致: {spec['depends_on']} != {cfg['depends_on']}"
+        )
 
 
 def _generation_order(config: dict) -> list[str]:
@@ -960,7 +1188,9 @@ def _generation_order(config: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # 建库入口
 # ---------------------------------------------------------------------------
-def write_db(db_path: Path, tables: list[tuple[str, str, list[dict[str, Any]]]]) -> None:
+def write_db(
+    db_path: Path, tables: list[tuple[str, str, list[dict[str, Any]]]]
+) -> None:
     """重建 SQLite 库并写入多张表（幂等：存在则删除重建，*.db 不入 git）。"""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if db_path.exists():
@@ -994,7 +1224,9 @@ def _persist_enterprise(
     by_sys: dict[str, list[tuple[str, str, list[dict[str, Any]]]]] = {}
     for table_id in order:
         code, name = table_id.split(".", 1)
-        by_sys.setdefault(code, []).append((name, TABLE_SPECS[table_id]["ddl"], ctx[table_id]))
+        by_sys.setdefault(code, []).append(
+            (name, TABLE_SPECS[table_id]["ddl"], ctx[table_id])
+        )
     for code, tables in by_sys.items():
         write_db(out / config["enterprise"]["systems"][code]["db"], tables)
 
