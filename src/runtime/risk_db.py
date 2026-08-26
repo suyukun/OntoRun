@@ -38,8 +38,7 @@ from src.runtime.store import Store
 
 # ap_anping 数据根目录（6 库 12 表，308k 行，des 生成物）
 AP_ANPING_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "data" / "des" / "enterprises" / "ap_anping"
+    Path(__file__).resolve().parents[2] / "data" / "des" / "enterprises" / "ap_anping"
 )
 # S3 风险本体库（审计/ontology_state 落库），与零售本体库分离
 DEFAULT_RISK_ONTOLOGY_DB = (
@@ -109,7 +108,11 @@ class RiskStore(Store):
     """
 
     ATTACH_DBS: tuple[str, ...] = (
-        "approval", "concentration", "project", "customer", "base",
+        "approval",
+        "concentration",
+        "project",
+        "customer",
+        "base",
     )
 
     def __init__(
