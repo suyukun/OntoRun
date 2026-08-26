@@ -348,6 +348,10 @@ CREATE TABLE ap_dim_metric (
 );
 """
 
+# M1b 全量补全：42 张新表 DDL（由 scripts/s3_m1b_scaffold_risk_ext.py 生成，字典 key = {system}.{table}）。
+from .risk_ddl_ext import RISK_EXT_DDL_1
+from .risk_ddl_ext2 import RISK_EXT_DDL_2
+
 RISK_DDL: dict[str, str] = {
     "customer.ap_group_customer": AP_GROUP_CUSTOMER_DDL,
     "customer.ap_customer": AP_CUSTOMER_DDL,
@@ -361,4 +365,6 @@ RISK_DDL: dict[str, str] = {
     "approval.ap_approve_task": AP_APPROVE_TASK_DDL,
     "project.ap_risk_project": AP_RISK_PROJECT_DDL,
     "base.ap_dim_metric": AP_DIM_METRIC_DDL,
+    **RISK_EXT_DDL_1,
+    **RISK_EXT_DDL_2,
 }
