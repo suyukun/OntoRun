@@ -8,13 +8,11 @@ PK 命名遵循 M1a「<类型>_id = 主键ID」模式；GroupCustomer 例外：�
 无独立主键列，业务主键即 group_customer_no（全链路 FK 均以 group_customer_no 引用，
 故 M2 草案的 group_customer_id 落地为 group_customer_no，见下）。
 
-注册形态：本模块是自洽的独立注册体——新建 Registry() 后调用 register_risk_objects(reg) 即可，
-类型名直接用 M2 设计名（Customer 等，独立注册表内无同名冲突）。
-【M3 挂载注意】若要并入共享注册表 build_registry()（src/ontology/__init__.py），需适配：
-① 类型名 Customer 与 S1 零售冲突 → 改注册名 RiskCustomer（对齐 DES ErpCustomer 先例，模型类不变）；
-② 链接 inverse_name 前缀随之由 customer. 改 risk_customer.（self_check 按目标 api_name 校验前缀）；
-③ ActionEngine 要求每个注册动作有运行时写回 handler（src/runtime/actions_impl.HANDLERS），
-   9 个风险动作的写回实现属 M3 范围（本任务只交付动作模板骨架声明）。
+注册形态：本模块是自洽的独立注册体——新建 Registry() 后调用 register_risk_objects(reg) 即可。
+【M3 挂载适配（已落地）】类型名/模型类统一用 RiskCustomer（对齐 DES ErpCustomer 先例，
+避免与 S1 零售 Customer 同名冲突）；链接 inverse_name 前缀随之用 risk_customer.
+（self_check 按目标 api_name 校验前缀）；ActionEngine 的 9 个风险动作写回 handler 已由
+src/runtime/risk_actions_impl.register_risk_action_handlers 注入（M3 写引擎）。
 
 状态归属沿用 S1 模式（src/ontology/objects.py）：own(OWN_SOURCE/OWN_ONTOLOGY/OWN_DERIVED)。
 - source-backed：源系统权威，动作写回；
@@ -53,8 +51,12 @@ FiveClassification = Literal[  # 五级分类
 ]
 
 
-class Customer(BaseModel):
-    """单一客户。PK/Title = customer_id（源 o_a_erms_cust_info）。"""
+class RiskCustomer(BaseModel):
+    """单一客户（金控风险预警）。PK/Title = customer_id（源 o_a_erms_cust_info）。
+
+    与 S1 零售 Customer 区分：金控风控单一客户独立对象（对齐 DES ErpCustomer 先例），
+    避免与 S1 零售客户同名冲突，风险独立注册表内注册名 = RiskCustomer。
+    """
 
     customer_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
     customer_no: str = own(OWN_SOURCE, "单一客户编号（脱敏）")
@@ -158,7 +160,7 @@ class Metric(BaseModel):
     org_id: str = own(OWN_SOURCE, "机构编码")
     dim_type_code: str = own(OWN_SOURCE, "维度类型代码")
     dim_type_name: str = own(OWN_SOURCE, "维度类型名称")
-    customer_no: str = own(OWN_SOURCE, "单一客户编号（FK→Customer.customer_no）（脱敏）")
+    customer_no: str = own(OWN_SOURCE, "单一客户编号（FK→RiskCustomer.customer_no）（脱敏）")
     customer_name: str = own(OWN_SOURCE, "单一客户名称（脱敏）")
     group_customer_no: str | None = own(
         OWN_SOURCE, "所属集团编号（脱敏）", default=None
@@ -196,7 +198,7 @@ class Collateral(BaseModel):
     """押品。PK/Title = collateral_id（源 ap_collateral，M1a 未覆盖，按 M2 设计补全）。"""
 
     collateral_id: str = own(OWN_SOURCE, "押品记录号（PK/Title）")
-    customer_id: str = own(OWN_SOURCE, "所属客户（FK→Customer.customer_id）（脱敏）")
+    customer_id: str = own(OWN_SOURCE, "所属客户（FK→RiskCustomer.customer_id）（脱敏）")
     collateral_type: str = own(OWN_SOURCE, "押品类型（如 银行存单/证券/房产/其他）")
     estimated_value: float = own(OWN_SOURCE, "评估价值（万元）（脱敏）")
     appraisal_date: date = own(OWN_SOURCE, "评估日期")
@@ -268,7 +270,7 @@ class ConcentrationLimit(BaseModel):
 
     concentration_limit_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
     customer_no: str = own(
-        OWN_SOURCE, "客户编号（FK→Customer.customer_no）（脱敏）"
+        OWN_SOURCE, "客户编号（FK→RiskCustomer.customer_no）（脱敏）"
     )
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
     warning_value: float = own(OWN_SOURCE, "预警阈值（脱敏）")
@@ -293,7 +295,7 @@ class CoDebtCustomer(BaseModel):
     """共债客户。PK/Title = codebt_id（源 ap_codebt_customer，M1a 未覆盖，按 M2 设计补全）。"""
 
     codebt_id: str = own(OWN_SOURCE, "共债记录号（PK/Title）")
-    customer_id: str = own(OWN_SOURCE, "客户（FK→Customer.customer_id）（脱敏）")
+    customer_id: str = own(OWN_SOURCE, "客户（FK→RiskCustomer.customer_id）（脱敏）")
     codebt_count: int = own(OWN_SOURCE, "共债客户数")
     total_debt: float = own(OWN_SOURCE, "共债总额（万元）（脱敏）")
     risk_score: float = own(OWN_SOURCE, "共债风险评分")
@@ -354,10 +356,10 @@ class User(BaseModel):
 
 RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
     ObjectTypeDef(
-        name="Customer",
-        api_name="customer",
-        description="单一客户（金控风险预警，源 o_a_erms_cust_info）",
-        model=Customer,
+        name="RiskCustomer",
+        api_name="risk_customer",
+        description="单一客户（金控风险预警，源 o_a_erms_cust_info；M3 挂载改名为 RiskCustomer）",
+        model=RiskCustomer,
         pk_field="customer_id",
         title_field="customer_id",
         source_table="o_a_erms_cust_info",

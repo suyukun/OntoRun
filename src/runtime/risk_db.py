@@ -80,7 +80,7 @@ DISPOSAL_STATUS_FROM_CN: dict[str, str] = {
 # ---- 对象类型 → ap_anping 实际表（含库别名限定；主库 risk.db 表不带别名） ----
 # M1a 未覆盖的四类对象（Collateral/CoDebtCustomer/Organization/User）无源表，不映射。
 SOURCE_TABLE_MAP: dict[str, str] = {
-    "Customer": "customer.ap_customer",
+    "RiskCustomer": "customer.ap_customer",
     "GroupCustomer": "customer.ap_group_customer",
     "WarningSignal": "ap_warning_signal",
     "Metric": "base.ap_dim_metric",

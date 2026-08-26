@@ -29,7 +29,7 @@ from src.ontology.risk_objects import (
 )
 
 CORE_NAMES = [
-    "Customer", "GroupCustomer", "WarningSignal", "Disposal", "Collateral",
+    "RiskCustomer", "GroupCustomer", "WarningSignal", "Disposal", "Collateral",
     "ApproveOrder", "ApproveTask", "ConcentrationLimit", "CoDebtCustomer",
     "RiskProject", "Metric", "Organization",
 ]
@@ -82,7 +82,7 @@ def main() -> int:
     payload: dict = {
         "objects": {},
         "actions": {},
-        "meta": {"core_object_classes": CORE_NAMES, "registered_customer_type": "Customer"},
+        "meta": {"core_object_classes": CORE_NAMES, "registered_customer_type": "RiskCustomer"},
     }
     for o in RISK_OBJECT_TYPES:
         payload["objects"][o.name] = {
@@ -115,9 +115,9 @@ def main() -> int:
         rp["five_classification"]["enum"] == ["NORMAL", "ATTENTION", "SECONDARY", "DOUBTFUL", "LOSS"],
         "RiskProject.five_classification 枚举 = NORMAL/ATTENTION/SECONDARY/DOUBTFUL/LOSS",
     )
-    cust = payload["objects"]["Customer"]["schema"]["properties"]
+    cust = payload["objects"]["RiskCustomer"]["schema"]["properties"]
     gc = payload["objects"]["GroupCustomer"]["schema"]["properties"]
-    check("（脱敏）" in cust["cert_no"].get("description", ""), "Customer.cert_no 注释标注（脱敏）")
+    check("（脱敏）" in cust["cert_no"].get("description", ""), "RiskCustomer.cert_no 注释标注（脱敏）")
     check("（脱敏）" in gc["group_customer_no"].get("description", ""), "GroupCustomer.group_customer_no 注释标注（脱敏）")
 
     for name in ("confirm_warning", "adjust_warning_level", "submit_disposal"):
