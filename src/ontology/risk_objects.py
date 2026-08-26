@@ -1,5 +1,9 @@
 """S3 金控风险预警场景本体 —— 核心脊柱对象（M2 设计 v1，12 个核心 + 1 个支撑对象）。
 
+全量补全（M1b）：risk_objects_ext.py + risk_objects_ext2.py 再注册 20 个全量对象
+（客户关系/资产/押品/集中度调整/预警派生/共债评分/审批待办等，源自 42 表脱敏映射），
+RISK_OBJECT_TYPES 合计 33 个（脊柱 13 + 扩展 20）；本模块仅做拼接与统一注册。
+
 对象/字段来源：docs/S3-M1a-字段脱敏映射-脊柱12表.json（字段名 = renamed 新英文名，
 description = field_comments 中文注释；value_desensitize 命中的字段在注释标注「（脱敏）」）。
 M1a 未覆盖的三张脊柱表（ap_collateral / ap_codebt_customer / ap_org）与支撑表（ap_user）
@@ -475,8 +479,19 @@ RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
 ]
 
 
+# ---- 全量补全拼接（M1b 42 表 → M2，脊柱 13 + 扩展 20 = 33） ----
+from src.ontology.risk_objects_ext import RISK_OBJECT_TYPES_EXT_1
+from src.ontology.risk_objects_ext2 import RISK_OBJECT_TYPES_EXT_2
+
+RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
+    *RISK_OBJECT_TYPES,
+    *RISK_OBJECT_TYPES_EXT_1,
+    *RISK_OBJECT_TYPES_EXT_2,
+]
+
+
 def register_risk_objects(registry) -> None:
-    """安装 S3 金控风控本体（12 核心 + User 支撑对象 + 14 链接 + 9 动作）到 Registry。
+    """安装 S3 金控风控本体（脊柱 13 + 全量扩展 20 = 33 对象 + 35 链接 + 9 动作）到 Registry。
 
     用法：新建独立注册表（reg = Registry(); register_risk_objects(reg)）供 S3 演示用，
     self_check 全绿。挂载点 = src/ontology/__init__.py 的 build_registry()（src/app/main.py

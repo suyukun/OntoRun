@@ -1,10 +1,10 @@
-"""S3 M2 本体脊柱冒烟验证（独立脚本，不经 pytest，用 /opt/anaconda3/bin/python3 直跑）。
+"""S3 M2 本体冒烟验证（脊柱 + M1b 全量扩展；独立脚本，不经 pytest，用 /opt/anaconda3/bin/python3 直跑）。
 
 验证（对应任务交付物 5）：
 1. 金控风控本体独立注册：新 Registry() + register_risk_objects(reg) → self_check 0 致命 issue；
 2. 共享注册表 build_registry()（S1 零售 + DES，风险本体未并入——ActionEngine 要求每个
    动作有运行时 handler，风险写回实现属 M3）→ 原状不受影响，self_check 0 致命 issue；
-3. 12 个核心对象（+ 支撑 User）类型齐全，PK/Title/own 标注就位；
+3. 脊柱 12 核心 + 支撑 User + M1b 全量扩展 20 对象类型齐全，PK/Title/own 标注就位；
 4. 对象 schema 可导出：12 核心 + User 的 JSON Schema 落盘 scripts/out/s3_risk_schema.json，
    动作参数 schema 一并导出；抽查枚举字段（signal_status / five_classification / warn_level）
    与脱敏标注。
@@ -28,6 +28,15 @@ from src.ontology.risk_objects import (
     register_risk_objects,
 )
 
+EXT_NAMES = [
+    "CustomerRelation", "CustomerRelationTree", "ImportantCustomerList",
+    "Top500CustomerRisk", "CustomerAssets", "InvestDistribution",
+    "SubsidiaryCreditDetail", "BankPledgeDetail", "SecuritiesPledgeDetail",
+    "SubsidiaryMortgage", "WarningPush", "CoDebtScore",
+    "ConcentrationLimitAdj", "ConcentrationWarnAdj", "WarningConcentration",
+    "WarningDerive", "WarningDeviation", "DeviationScore",
+    "ApproveTodo", "ApproveOperLog",
+]
 CORE_NAMES = [
     "RiskCustomer", "GroupCustomer", "WarningSignal", "Disposal", "Collateral",
     "ApproveOrder", "ApproveTask", "ConcentrationLimit", "CoDebtCustomer",
@@ -66,13 +75,15 @@ def main() -> int:
     print("       （风险本体暂不并入：ActionEngine 要求每个注册动作有运行时写回 handler，属 M3 范围）")
 
     # 3) 12 核心对象 + 支撑 User
-    print("\n[3] 12 核心对象 + 支撑 User")
+    print("\n[3] 脊柱 12 核心 + User + M1b 全量扩展 20 对象")
     model_names = {o.model.__name__ for o in reg.object_types()}
     for n in CORE_NAMES:
         check(n in model_names, f"核心对象 {n} 已注册")
     check("User" in model_names, "支撑对象 User 已注册（org.has_users 可解析）")
-    check(len(RISK_OBJECT_TYPES) == 13, f"RISK_OBJECT_TYPES = 13（12 核心 + User，实际 {len(RISK_OBJECT_TYPES)}）")
-    check(len(RISK_LINK_TYPES) == 14, f"RISK_LINK_TYPES = 14（实际 {len(RISK_LINK_TYPES)}）")
+    for n in EXT_NAMES:
+        check(n in model_names, f"全量扩展对象 {n} 已注册")
+    check(len(RISK_OBJECT_TYPES) == 33, f"RISK_OBJECT_TYPES = 33（脊柱 12 核心 + User + 全量扩展 20，实际 {len(RISK_OBJECT_TYPES)}）")
+    check(len(RISK_LINK_TYPES) == 37, f"RISK_LINK_TYPES = 37（M2 14 + M1b 扩展 23，实际 {len(RISK_LINK_TYPES)}）")
     check(len(RISK_ACTIONS) == 9, f"RISK_ACTIONS = 9（实际 {len(RISK_ACTIONS)}）")
 
     # 4) schema 导出（对象 + 动作参数） + 枚举/脱敏抽查
@@ -82,7 +93,7 @@ def main() -> int:
     payload: dict = {
         "objects": {},
         "actions": {},
-        "meta": {"core_object_classes": CORE_NAMES, "registered_customer_type": "RiskCustomer"},
+        "meta": {"core_object_classes": CORE_NAMES, "ext_object_classes": EXT_NAMES, "registered_customer_type": "RiskCustomer"},
     }
     for o in RISK_OBJECT_TYPES:
         payload["objects"][o.name] = {
@@ -119,6 +130,27 @@ def main() -> int:
     gc = payload["objects"]["GroupCustomer"]["schema"]["properties"]
     check("（脱敏）" in cust["cert_no"].get("description", ""), "RiskCustomer.cert_no 注释标注（脱敏）")
     check("（脱敏）" in gc["group_customer_no"].get("description", ""), "GroupCustomer.group_customer_no 注释标注（脱敏）")
+    cr = payload["objects"]["CustomerRelation"]["schema"]["properties"]
+    check(
+        cr["customer_relation_id"]["description"] == "主键ID（PK/Title）",
+        "CustomerRelation.customer_relation_id 主键标注（PK/Title）",
+    )
+    check("（脱敏）" in cr["internal_customer_no"].get("description", ""), "CustomerRelation.internal_customer_no 注释标注（脱敏）")
+    wc = payload["objects"]["WarningConcentration"]["schema"]["properties"]
+    check(
+        wc["warn_level"]["enum"] == ["RED", "YELLOW"],
+        "WarningConcentration.warn_level 枚举 = RED/YELLOW",
+    )
+    at = payload["objects"]["ApproveTodo"]["schema"]["properties"]
+    check(
+        at["approve_todo_status"]["enum"] == ["UNHANDLED", "HANDLED", "INVALID"],
+        "ApproveTodo.approve_todo_status 枚举 = UNHANDLED/HANDLED/INVALID",
+    )
+    sd = payload["objects"]["SubsidiaryCreditDetail"]["schema"]["properties"]
+    check(
+        sd["project_id"]["description"] == "主键ID（PK/Title）",
+        "SubsidiaryCreditDetail.project_id 主键标注（PK/Title，源表无独立主键列）",
+    )
 
     for name in ("confirm_warning", "adjust_warning_level", "submit_disposal"):
         check(
