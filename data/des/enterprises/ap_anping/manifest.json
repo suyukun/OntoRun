@@ -1,13 +1,17 @@
 {
   "enterprise": "ap_anping",
   "seed": 20260827,
-  "data_version": "M1b-1",
-  "config_sha256": "c9e4b616ff8b7f41dbc327808d8be62872f2dcbee3fb305036c1b56ff6d73461",
-  "total_rows": 308000,
+  "data_version": "M1b-2",
+  "config_sha256": "3e346e8ff7eba445b867f5ee350d1263b2b9d9a1bc79f2e6aa8474c561f52a28",
+  "total_rows": 436265,
   "tables": {
     "approval.ap_approve_node": {
       "rows": 2000,
       "sha256": "c7d0cc756869e3903e54c266ce9791f0fc715c58eca0e3c0f9e4af329d1aeb45"
+    },
+    "approval.ap_approve_oper_log": {
+      "rows": 4000,
+      "sha256": "6918816ca1b37b20b9085f84932d297a7bd8bd354921aca21c473aab7c5c5afc"
     },
     "approval.ap_approve_order": {
       "rows": 20000,
@@ -17,25 +21,161 @@
       "rows": 30000,
       "sha256": "f3a1bc6b47bdbca2f34ccf07616453c7d6185a239cd1e6df0482daf7f2115937"
     },
+    "approval.ap_approve_todo": {
+      "rows": 5000,
+      "sha256": "2d8fe37bd47f453751d4c0de16afbf6f193289aa4ba6f0e6ce8d20e58d2aa583"
+    },
+    "approval.ap_approve_warn_rel": {
+      "rows": 6000,
+      "sha256": "71506819d0ecab7f07efd4ddb66d4be11a0db7fc9960eba2d8267df7e0b7c249"
+    },
+    "base.ap_biz_dict": {
+      "rows": 400,
+      "sha256": "ad333b1e1d8cc6ee844901d34ca1154bf10710a233e9a380dbf7273ec8b146df"
+    },
+    "base.ap_custom_param": {
+      "rows": 500,
+      "sha256": "7d87cedc039961fc3d6ead9c83379323f602feb033da9212f713ae5be8e9e6db"
+    },
+    "base.ap_data_dict": {
+      "rows": 500,
+      "sha256": "fb5d572d2ee01153366c455dab8ee10e9b65d53367ee1b79e1a14764255500e3"
+    },
     "base.ap_dim_metric": {
       "rows": 50000,
       "sha256": "529f4b74ca52455f999249625a4ff458946c0e52af4466ff2a00ec1764ffbe42"
+    },
+    "base.ap_dim_rank": {
+      "rows": 5000,
+      "sha256": "3bdca7ba41c8dd801bf82b2b66acbc894857c93a8806a5d4d501af7f17fe3bbb"
+    },
+    "base.ap_metric_std": {
+      "rows": 6000,
+      "sha256": "a68a1ef2bfad7198f2f1bc74ed57cd80988ee29be81a6f1d999144a8e0f8262e"
+    },
+    "base.ap_org": {
+      "rows": 100,
+      "sha256": "59ca24197cfcff3b3ece2b3b3d108211aa21d7076802da39fb555f35471e3d7d"
+    },
+    "base.ap_preference_file": {
+      "rows": 500,
+      "sha256": "1da7fcf290be385b1056d23d9a362311006d2f5c8f0bffb6f0b3d455d5992d15"
+    },
+    "base.ap_supervise_opinion": {
+      "rows": 300,
+      "sha256": "aa0de8730f0e9c1650a529c7bea0b0309ffff3e59cea665b787e3e080dbe7641"
+    },
+    "base.ap_sys_param": {
+      "rows": 300,
+      "sha256": "8496c9f53894074bbe0b33f3feb5d8b3798eacb394bf9c50c0dff9360143a777"
+    },
+    "base.ap_top_query_log": {
+      "rows": 500,
+      "sha256": "3a92d4357e27c52efb86d6cb1dac48e7ddbdf925aa1e764e7820dbef77af7556"
+    },
+    "base.ap_user": {
+      "rows": 500,
+      "sha256": "cf4ae80c619b67ff13c3d55acb0dafb8147d12592ca84ce2efb4f2e9b7215b6d"
+    },
+    "concentration.ap_codebt_customer": {
+      "rows": 3000,
+      "sha256": "466f6c90fe3b37358786232c8b224b1dc25462783cf4159750c6186f19efee86"
+    },
+    "concentration.ap_codebt_warn_score": {
+      "rows": 4000,
+      "sha256": "e7a554cb9c7d3496f6cca6677ed6cf15cd8f4414c1227ca5713a3a7ae412d41a"
     },
     "concentration.ap_concentration_limit": {
       "rows": 8000,
       "sha256": "54faefbc9311e8deea955eafd51846a87bfc6580324fe469c097fee790d9dce9"
     },
+    "concentration.ap_concentration_limit_adj": {
+      "rows": 3000,
+      "sha256": "4ef537fa6dd7a239e226a6d146aea67d3073d835b48c91943e8e5bc35ced588b"
+    },
+    "concentration.ap_concentration_warn_adj": {
+      "rows": 3000,
+      "sha256": "6f41a48bb29650c2df284d39496be341865153fb41f9370fb0ae0bba54fa15a7"
+    },
+    "customer.ap_bank_pledge_detail": {
+      "rows": 3000,
+      "sha256": "1075fb3cb2ca444dbef7fffa42dc51931164ff8eeee3819899a1f502477d2653"
+    },
+    "customer.ap_collateral": {
+      "rows": 4000,
+      "sha256": "124e6022bedf619c4796c3ad3f7e87b25c834957cd018f2be3990be30b63f6ee"
+    },
     "customer.ap_customer": {
       "rows": 50000,
       "sha256": "60b1009ed473f015c46f5fb4ba1b0bbb6e3afe029cb6da99ce508068238dd2c4"
+    },
+    "customer.ap_customer_assets": {
+      "rows": 6000,
+      "sha256": "433f9d13a9d98c2aa5c67f670420a02e4140262b70cd3f84400aa921a9fa46d6"
+    },
+    "customer.ap_customer_invest_dist": {
+      "rows": 5000,
+      "sha256": "ec36e8bfe60edb4ffdaec49d0f0b4be2005a1f02241a485a68cb05656d15f969"
+    },
+    "customer.ap_customer_relation": {
+      "rows": 4000,
+      "sha256": "ba0f5640c97e43932262f95bf584c9ddde4deb95627a10130f65f8631b10e2b8"
+    },
+    "customer.ap_customer_relation_tree": {
+      "rows": 3000,
+      "sha256": "3ba26cdf0528e9fba0db72d31e40858b82a3c16ef4c582ca826295b99d8f439c"
     },
     "customer.ap_group_customer": {
       "rows": 8000,
       "sha256": "50da2e89f519c591e2a2b6e71969487b9046a4e95ba7b5afb8afaa3079339f25"
     },
+    "customer.ap_important_customer_list": {
+      "rows": 1500,
+      "sha256": "7d8dfd893de47862653fa86f3cc7ecd5588ccf04128f9ac482487fadedee3724"
+    },
+    "customer.ap_securities_pledge_detail": {
+      "rows": 2000,
+      "sha256": "6173cf03522f1bb62d9c19b8ba2ea6773de31dd97e478bc72a2d042fbda14f35"
+    },
+    "customer.ap_subsidiary_credit_detail": {
+      "rows": 8000,
+      "sha256": "5747e4953bfb6c9be67109f677cb83341dea464eec0bee34eed3446f8db3558c"
+    },
+    "customer.ap_subsidiary_mortgage": {
+      "rows": 3000,
+      "sha256": "62f9a11063da0141005135b1452dcccf35329193f4f6a793ad126e019ea272e2"
+    },
+    "customer.ap_top500_customer_risk": {
+      "rows": 500,
+      "sha256": "f58a1074c0484339f0f2f1897cfca505b7efad76f0985b8fbbe3b41f94f1d80e"
+    },
+    "project.ap_cust_query_log": {
+      "rows": 500,
+      "sha256": "8b7f9ac41f154c1771fb1ca2b2cb2819087d960c7533ffd2240fb991ebd78261"
+    },
     "project.ap_risk_project": {
       "rows": 5000,
       "sha256": "34c9a7563562758c7a67cf717b4b6f403719f7d1ce3cfa07ec4fb37a0229fc4b"
+    },
+    "project.ap_serial_counter": {
+      "rows": 365,
+      "sha256": "fcd6b8ea017aa8970e51407c8e3e9b5ebb300d494179f50faecbd12cf54724f5"
+    },
+    "risk.ap_audit_detail": {
+      "rows": 2000,
+      "sha256": "263f9e59b7ada529055667b72d302f83313599deabdc915180d6d73271406ff8"
+    },
+    "risk.ap_compliance_risk_ledger": {
+      "rows": 1000,
+      "sha256": "54222606ab942070db6684b568e1718d7e31a78866cfce2de876cd92372baa35"
+    },
+    "risk.ap_compliance_risk_ledger_tmp": {
+      "rows": 300,
+      "sha256": "31877b9c9ed698419a14b6bc5b2b93157743e29963346b022a3abe7d32417851"
+    },
+    "risk.ap_deviation_warn_score": {
+      "rows": 3000,
+      "sha256": "afa579708e99fe47e2647305318fb9576eb07015fc4903de42f80fca711b1295"
     },
     "risk.ap_disposal": {
       "rows": 25000,
@@ -45,9 +185,37 @@
       "rows": 10000,
       "sha256": "df386c41c70ae473edf778c5d5260f26aa196eae3feb3b633c4670072359b042"
     },
+    "risk.ap_regulatory_penalty": {
+      "rows": 1500,
+      "sha256": "6cdd770ecd1e74fbc2580483a9d68c50104bb97406fc51e46cd83f6df77fa2cb"
+    },
+    "risk.ap_warn_derive_deal_detail": {
+      "rows": 4000,
+      "sha256": "c2053c1118101b778b59a7b88d06a430771716e9d91be676e1fdc7cbbe53eb15"
+    },
+    "risk.ap_warn_derive_sub_push": {
+      "rows": 5000,
+      "sha256": "13858800915eeef3d5b8f9025b1929af104fc51bccdd2f39d0d7a6a26f1a853c"
+    },
+    "risk.ap_warn_signal_concentration": {
+      "rows": 6000,
+      "sha256": "af57ee921230409c5849303f4ae64196f906bb776bc7121c3c0eb4a3436e84d9"
+    },
+    "risk.ap_warn_signal_derive": {
+      "rows": 8000,
+      "sha256": "2a1fc7305983ea6e9e4972236af7c9feecf3a3d09dfb2733421bdd0530d342a5"
+    },
+    "risk.ap_warn_signal_deviation": {
+      "rows": 6000,
+      "sha256": "a1f242aa1c04b15f76e4e9a007a181646412ba03af6b0285f377ff7ff5dea61a"
+    },
     "risk.ap_warning_disposal": {
       "rows": 20000,
       "sha256": "2b50773c453071efbdf0b0bb59e2a66b444dc5db7d63cba6fa136890a7ac9bc1"
+    },
+    "risk.ap_warning_push": {
+      "rows": 8000,
+      "sha256": "f526954407a6585e2e47e88df748ff59ec1866c6b8adb94781a4eeaae7d19fe2"
     },
     "risk.ap_warning_signal": {
       "rows": 80000,
