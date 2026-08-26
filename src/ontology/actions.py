@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src.ontology.risk_error_codes import RISK_ERROR_CODES
+
 # §4.3 错误码全集（MVP）——新增错误码必须先修技术方案
 CANONICAL_ERROR_CODES: tuple[str, ...] = (
     "INVALID_PARAMS",
@@ -33,6 +35,9 @@ CANONICAL_ERROR_CODES: tuple[str, ...] = (
     # 单一来源 = store.ERROR_CODE_PERMISSION_DENIED，已获 Jack 批准）
     "PERMISSION_DENIED",
 )
+# S3 金控风控新增错误码：并入全集供 Registry 动作门禁校验（仅追加，不改动既有码；
+# 单一来源 = src/ontology/risk_error_codes.RISK_ERROR_CODES）
+CANONICAL_ERROR_CODES = CANONICAL_ERROR_CODES + RISK_ERROR_CODES
 
 
 class Precondition(BaseModel):
