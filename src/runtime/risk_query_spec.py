@@ -227,19 +227,29 @@ ANALYTIC_PARAMS: dict[str, type[BaseModel]] = {
 # 受限多跳查询 SQL 模板（{params} 由执行器按 param_names 顺序绑定；值一律 ? 参数化）。
 # 仅注册表/本模块派生的常量表名与列名，无用户输入拼接面。
 ANALYTIC_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
+    # 性能注：审批单→信号经 remark 内嵌信号号（"对预警信号 SGN-..."）关联；先按集团
+    # 子查询窄化预警集，再以 substr 提取信号号等值关联审批单（LIKE 关联 80k×20k 太慢，
+    # 实测 ~140ms，P95 ≤500ms 达标）。
     "warning_approval_step": (
         (
-            "SELECT g.group_customer_name, w.signal_id, w.warning_id, w.warn_level, "
-            "o.approve_order_id, o.approve_order_status, t.approve_task_id, t.approve_task_status, "
+            "SELECT w.group_customer_name, w.signal_id, w.warning_id, w.warn_level, "
+            "o.approve_order_id, o.approve_order_status, "
+            "t.approve_task_id, t.approve_task_status, "
             "n.approve_node_name, n.approve_node_seq, t.post_id, t.approve_remark "
-            "FROM ap_warning_signal w "
-            "JOIN customer.ap_group_customer g ON w.group_customer_no = g.group_customer_no "
+            "FROM ("
+            "  SELECT w.warning_id, w.signal_id, w.warn_level, w.group_customer_no, "
+            "  g.group_customer_name "
+            "  FROM ap_warning_signal w "
+            "  JOIN customer.ap_group_customer g ON w.group_customer_no = g.group_customer_no "
+            "  WHERE g.group_customer_name = ?"
+            ") w "
             "JOIN ap_warning_disposal wd ON w.warning_id = wd.warning_id "
-            "JOIN approval.ap_approve_order o ON o.remark LIKE '%' || w.signal_id || '%' "
+            "JOIN approval.ap_approve_order o ON o.approve_order_status='PROCESS' "
+            "AND substr(o.remark, instr(o.remark, 'SGN-'), 17) = w.signal_id "
             "JOIN approval.ap_approve_task t ON t.approve_order_id = o.approve_order_id "
             "AND t.approve_task_status = 'PENDING' "
             "JOIN approval.ap_approve_node n ON t.approve_node_id = n.approve_node_id "
-            "WHERE g.group_customer_name = ? {signal_clause} "
+            "{signal_clause} "
             "ORDER BY n.approve_node_seq LIMIT ?"
         ),
         ("group_customer_name", "signal_id", "limit"),

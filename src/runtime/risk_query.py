@@ -521,7 +521,7 @@ class RiskQuery:
             getattr(p, f) for f in param_names if f not in ("limit", "signal_id")
         ]
         if "signal_id" in param_names and p.signal_id:
-            sql = sql.replace("{signal_clause}", "AND w.signal_id = ?")
+            sql = sql.replace("{signal_clause}", "WHERE w.signal_id = ?")
             values.append(p.signal_id)
         else:
             sql = sql.replace("{signal_clause}", "")
