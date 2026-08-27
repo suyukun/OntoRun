@@ -18,7 +18,9 @@ export const RISK_COLORS = {
   // 文本（冷灰深色系）
   text: '#101828',
   textDim: '#475467',
-  textFaint: '#98a2b3',
+  // textFaint 由 #98a2b3(白底 2.58:1) 加深为 #636d80 —— 11px~13px 小字在 #fff 5.21:1 / #f0f3f9 4.69:1，
+  // 满足 WCAG AA 4.5:1；仍是同族冷灰最浅一级，层级不变（axe jsdom 无法判定对比度，按实测值人工核验）。
+  textFaint: '#636d80',
   // 品牌强调色（唯一装饰性颜色）
   accent: RISK_ACCENT,
   accentText: '#ffffff',

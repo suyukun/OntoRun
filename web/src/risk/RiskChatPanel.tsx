@@ -262,6 +262,7 @@ export default function RiskChatPanel() {
             onChange={(e) => setInput(e.target.value)}
             onPressEnter={() => void handleSend()}
             placeholder="输入风险问题或指令（例：把某条黄色预警升为红色）…"
+            aria-label="风险问题输入框"
             disabled={loading}
           />
           <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={() => void handleSend()}>

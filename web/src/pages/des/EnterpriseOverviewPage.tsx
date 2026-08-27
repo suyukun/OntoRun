@@ -107,6 +107,8 @@ export default function EnterpriseOverviewPage() {
   return (
     <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>
       <div style={{ minHeight: '100vh', background: C.ink, padding: 24 }}>
+        {/* 页面级 h1（视觉隐藏）：屏幕阅读器页面定位 */}
+        <h1 className="risk-sr-only">DES 企业模拟总览</h1>
         {/* 入口说明 */}
         <Alert
           type="info"
@@ -136,6 +138,7 @@ export default function EnterpriseOverviewPage() {
                 value={selected || undefined}
                 onChange={setSelected}
                 style={{ minWidth: 220 }}
+                aria-label="选择企业"
                 options={items.map((i) => ({
                   value: i.name,
                   label: i.display_name ? i.display_name + ' (' + i.name + ')' : i.name,
@@ -204,6 +207,7 @@ export default function EnterpriseOverviewPage() {
               value={libraryFilter}
               onChange={setLibraryFilter}
               style={{ minWidth: 180 }}
+              aria-label="按库筛选"
               options={[
                 { value: '', label: '全部库' },
                 ...libraries.map((lib) => ({ value: lib, label: lib })),

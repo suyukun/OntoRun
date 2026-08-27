@@ -1,14 +1,18 @@
 /// <reference types="vitest/globals" />
 // LanguageSwitcher 测试：切换语言入口渲染 + 选择写入 localStorage
 import { afterEach, describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import LanguageSwitcher from './LanguageSwitcher';
 import i18n, { DEFAULT_LANGUAGE } from '../i18n';
 
 afterEach(async () => {
   localStorage.clear();
-  await i18n.changeLanguage(DEFAULT_LANGUAGE);
+  // 语言切换触发 react-i18next 重渲染时组件仍挂载（RTL cleanup 在 afterEach 之后跑），
+  // 包进 act 捕获该异步更新，消除 "not wrapped in act" 告警。
+  await act(async () => {
+    await i18n.changeLanguage(DEFAULT_LANGUAGE);
+  });
 });
 
 describe('LanguageSwitcher', () => {

@@ -54,14 +54,14 @@ export default function DataExplorer() {
                   key={o.api_name}
                   onClick={() => showList(o.api_name)}
                   style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', cursor: 'pointer',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', minWidth: 0, textAlign: 'left', cursor: 'pointer',
                     padding: '8px 10px', borderRadius: 6, marginBottom: 2, fontSize: 13, color: C.text,
                     background: selectedKey === o.api_name ? C.accent + '14' : 'transparent',
                     border: '1px solid ' + (selectedKey === o.api_name ? C.accent + '66' : 'transparent'),
                   }}
                 >
-                  <span>{shortName(o.description)}</span>
-                  <span className="risk-num" style={{ color: C.textFaint, fontSize: 11.5 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{shortName(o.description)}</span>
+                  <span className="risk-num" style={{ color: C.textFaint, fontSize: 11.5, flex: '0 0 auto', marginLeft: 6 }}>
                     {data ? formatCount(data.totals[o.api_name]) : '…'}
                   </span>
                 </button>
@@ -187,6 +187,7 @@ function ListPane({
           allowClear
           prefix={<SearchOutlined style={{ color: C.textFaint }} />}
           placeholder={'搜索（如 中科智造 / WS-2026…）'}
+          aria-label="搜索列表"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ width: 240 }}

@@ -2,6 +2,7 @@
 // LinkNav 组件测试 —— TD-14 修复：请求名必须与方向匹配（out=name / in=inverse_name）
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import LinkNav from './LinkNav';
 import type { LinkTypeMeta, ObjectTypeMeta } from '../types';
 
@@ -88,8 +89,9 @@ describe('LinkNav 链接遍历方向（TD-14）', () => {
       expect(mockFetch).toHaveBeenCalled();
     });
     mockFetch.mockResolvedValue(okBody('customer.orders', 'in', []));
-    const rev = screen.getByRole('button', { name: /反\s*向/ });
-    rev.click();
+    const user = userEvent.setup();
+    // userEvent 包裹 act 并等待异步落定，消除裸 DOM click 的 "not wrapped in act"
+    await user.click(screen.getByRole('button', { name: /反\s*向/ }));
     await waitFor(() => {
       expect(lastUrl()).toContain('/objects/order/ORD-1/links/customer.orders?direction=in');
     });
@@ -118,8 +120,9 @@ describe('LinkNav 链接遍历方向（TD-14）', () => {
       expect(mockFetch).toHaveBeenCalled();
     });
     mockFetch.mockResolvedValue(okBody('order.customer', 'in', []));
-    const rev = screen.getByRole('button', { name: /反\s*向/ });
-    rev.click();
+    const user = userEvent.setup();
+    // userEvent 包裹 act 并等待异步落定，消除裸 DOM click 的 "not wrapped in act"
+    await user.click(screen.getByRole('button', { name: /反\s*向/ }));
     await waitFor(() => {
       expect(lastUrl()).toContain('/objects/customer/CUS-1/links/order.customer?direction=in');
     });

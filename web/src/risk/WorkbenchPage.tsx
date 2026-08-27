@@ -6,6 +6,8 @@ import RiskChatPanel from './RiskChatPanel';
 export default function WorkbenchPage() {
   return (
     <div className="risk-workbench" data-testid="risk-workbench">
+      {/* 页面级 h1（视觉隐藏）：为屏幕阅读器提供页面定位；可见层级由左栏列表标题承担 */}
+      <h1 className="risk-sr-only">数据工作台 · 风险预警</h1>
       <div className="risk-workbench-pane" data-testid="workbench-explorer">
         <DataExplorer />
       </div>

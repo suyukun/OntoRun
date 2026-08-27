@@ -25,9 +25,14 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 
+// 异步快照加载的"安定点"：等待 useRiskSnapshot 的 fetch 完成后 setState 落在 act 内，
+// 消除"not wrapped in act"告警（快照总计 8 万条预警信号，见 miniSnapshot.totals）。
+const settle = () => screen.findByText('8万');
+
 describe('RiskLandingPage', () => {
-  it('渲染价值主张与品牌标识（hero 文案不动，单一 eyebrow 徽章）', () => {
+  it('渲染价值主张与品牌标识（hero 文案不动，单一 eyebrow 徽章）', async () => {
     const { container } = renderPage();
+    await settle();
     expect(screen.getByText(/用自然语言问风险问题、执行真实处置，全程本体驱动、可审计/)).toBeTruthy();
     expect(screen.getAllByText(/风险预警系统/).length).toBeGreaterThan(0);
     expect(screen.getByText(/安平金控集团 · 风险管理部/)).toBeTruthy();
@@ -35,8 +40,9 @@ describe('RiskLandingPage', () => {
     expect(screen.getAllByText(/安平金控集团 · 风险管理部 · 风险预警系统/).length).toBe(1);
   });
 
-  it('CTA 唯一意图：开始演示唯一且不再出现重复意图按钮；雷达 motif 已删除', () => {
+  it('CTA 唯一意图：开始演示唯一且不再出现重复意图按钮；雷达 motif 已删除', async () => {
     const { container } = renderPage();
+    await settle();
     expect(screen.getAllByRole('button', { name: /开始演示/ })).toHaveLength(1);
     // 四卡改三卡后的三张语义入口
     expect(screen.getByRole('button', { name: /数据工作台/ })).toBeTruthy();
@@ -58,8 +64,9 @@ describe('RiskLandingPage', () => {
     expect(document.getElementById('risk-stats')).toBeTruthy();
   });
 
-  it('展示语义接口价值锚定', () => {
+  it('展示语义接口价值锚定', async () => {
     renderPage();
+    await settle();
     expect(screen.getByText(/语义接口层：LLM 经业务本体理解与操作，不直接碰库/)).toBeTruthy();
     expect(screen.getByText(/一条可追溯的处置链路/)).toBeTruthy();
   });
