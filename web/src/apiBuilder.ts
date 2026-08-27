@@ -15,7 +15,7 @@ import type {
   PipelineRunItem,
   PipelineRunResult,
 } from './builderTypes';
-import type { Envelope } from './types';
+import type { Envelope, LinkTypeMeta, ObjectTypeMeta } from './types';
 
 const BASE = '/api/v1/builder';
 
@@ -82,6 +82,11 @@ export function reviewLinkType(id: string) {
 }
 export function publishLinkType(id: string) {
   return request<LinkTypeRow>('/link-types/' + encodeURIComponent(id) + '/publish', { method: 'POST', body: '{}' });
+}
+
+// ---------- ontology graph（图谱页聚合展示：内置零售段 + builder 已发布风险行） ----------
+export function fetchOntologyGraph() {
+  return request<{ objects: ObjectTypeMeta[]; links: LinkTypeMeta[] }>('/graph');
 }
 
 // ---------- datasets ----------

@@ -638,6 +638,93 @@ def _transition_link_type(
 
 
 # ======================================================================
+# /graph —— 聚合本体图谱（GraphPage 消费，不经 /meta/schema）
+# ======================================================================
+
+
+def _graph_object_meta(obj: Any) -> dict:
+    """对象 -> /meta/schema 同形元数据（Registry ObjectTypeDef 或 builder ObjectTypeRow 通用）。"""
+    if hasattr(obj, "model"):
+        props = obj.model.model_json_schema().get("properties", {})
+    else:
+        props = (obj.property_schema or {}).get("properties", {})
+    return {
+        "name": obj.name,
+        "api_name": obj.api_name,
+        "description": obj.description,
+        "pk_field": obj.pk_field,
+        "title_field": obj.title_field or obj.pk_field,
+        "source_table": obj.source_table,
+        "properties": props,
+    }
+
+
+def _graph_link_meta(lt: Any) -> dict:
+    """链接 -> /meta/schema 同形元数据（Registry LinkTypeDef 或 builder LinkTypeRow 通用）。"""
+    if hasattr(lt, "model_dump"):
+        return lt.model_dump()
+    return {
+        "name": lt.name,
+        "source_type": lt.source_type_id,
+        "target_type": lt.target_type_id,
+        "cardinality": lt.cardinality,
+        "fk_field": lt.fk_field,
+        "inverse_name": lt.semantic_name or lt.name,
+        "description": lt.semantic_name or lt.name,
+    }
+
+
+@builder_router.get("/graph")
+def builder_graph(request: Request) -> dict:
+    """聚合本体图谱：内置 Registry（零售）+ builder 存储已发布风险行（S3 金控）。
+
+    与 /meta/schema 解耦：/meta/schema 保持零售段纯净（loader 已过滤 S3 风险行，
+    见 registry_loader.S3_RISK_*_ID_PREFIX），S1 浏览页零影响；本端点从 builder
+    存储读已发布风险行，组装完整图谱供 GraphPage 渲染。
+    """
+    request_id = _new_request_id()
+    rt = request.app.state.runtime
+    store = rt.store
+    objects: dict[str, dict] = {}
+    links: dict[str, dict] = {}
+    # 1) 内置 Registry（零售段）：/meta/schema 同源，loader 已滤掉 S3 风险行
+    for o in rt.registry.object_types():
+        objects[o.name] = _graph_object_meta(o)
+    for l in rt.registry.link_types():
+        links[l.name] = _graph_link_meta(l)
+    # 2) builder 存储已发布行（S3 金控风险独立本体；行 id 前缀 ot_s3_/lt_s3_）
+    with store.ontology_conn() as conn:
+        published_ot = ot_repo.list_published(conn)
+        ot_id_to_name = {r.id: r.name for r in published_ot}
+        for r in published_ot:
+            if not r.id.startswith("ot_s3_"):
+                continue  # 非风险行已由 loader 并入内存 Registry（上面已含）
+            objects.setdefault(r.name, _graph_object_meta(r))
+        for r in lt_repo.list_published(conn):
+            if not r.id.startswith("lt_s3_"):
+                continue
+            links.setdefault(
+                r.name,
+                {
+                    "name": r.name,
+                    "source_type": ot_id_to_name.get(
+                        r.source_type_id, r.source_type_id
+                    ),
+                    "target_type": ot_id_to_name.get(
+                        r.target_type_id, r.target_type_id
+                    ),
+                    "cardinality": r.cardinality,
+                    "fk_field": r.fk_field,
+                    "inverse_name": r.semantic_name or r.name,
+                    "description": r.semantic_name or r.name,
+                },
+            )
+    return _ok(
+        request_id, {"objects": list(objects.values()), "links": list(links.values())}
+    )
+
+
+# ======================================================================
 # 工具
 # ======================================================================
 

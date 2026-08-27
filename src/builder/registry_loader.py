@@ -27,6 +27,13 @@ from src.ontology.links import LinkTypeDef
 from src.ontology.objects import ObjectTypeDef
 from src.ontology.registry import Registry
 
+# S3 金控风险行的确定性 id 前缀（scripts/seed_builder_from_risk_ontology.py 约定；
+# 行名存 api_name，id 存 ot_s3_<api_name> / lt_s3_<link 名点号转下划线>）。
+# 风险本体归属 S3 独立运行时（RiskStore + build_risk_source_registry + /risk-objects），
+# 不并入 S1 共享 Registry：防止 /meta/schema 被金控对象污染，零售浏览页出现空表项。
+S3_RISK_OBJECT_ID_PREFIX = "ot_s3_"
+S3_RISK_LINK_ID_PREFIX = "lt_s3_"
+
 
 @dataclass(frozen=True)
 class LoadIssue:
@@ -154,8 +161,28 @@ def load_published_into_registry(
     # P2 预扫 link_types：收集 ot 必含的 fk 字段集合（cardinality 决定方向）
     # 同时建立 id <-> name 双向索引（link_types.source_type_id/target_type_id 用 id，
     # 但 ot 端按 name 注册到 Registry，比对需同时支持 id 和 name）。
-    lt_rows = list(list_published_lt(conn))
-    published_ot_rows = list(list_published_ot(conn))
+    # S3 金控风险行（id 前缀 ot_s3_/lt_s3_）归属独立风险运行时，不入 S1 共享 Registry——
+    # 若并入，/meta/schema 会被金控对象污染、零售浏览页出现空表项（铁律②机器验证点）。
+    all_ot_rows = list(list_published_ot(conn))
+    all_lt_rows = list(list_published_lt(conn))
+    published_ot_rows = [
+        r for r in all_ot_rows if not r.id.startswith(S3_RISK_OBJECT_ID_PREFIX)
+    ]
+    lt_rows = [r for r in all_lt_rows if not r.id.startswith(S3_RISK_LINK_ID_PREFIX)]
+    s3_risk_skipped = (len(all_ot_rows) - len(published_ot_rows)) + (
+        len(all_lt_rows) - len(lt_rows)
+    )
+    if s3_risk_skipped:
+        issues.append(
+            LoadIssue(
+                code="BUILDER_S3_RISK_SKIPPED",
+                severity="info",
+                message=(
+                    f"S3 金控风险行 {s3_risk_skipped} 条（id 前缀 ot_s3_/lt_s3_）"
+                    "归属独立风险运行时，未并入 S1 共享 Registry"
+                ),
+            )
+        )
     # id -> name
     id_to_name: dict[str, str] = {r.id: r.name for r in published_ot_rows}
     # 端点 set（id 和 name 都收）
@@ -202,7 +229,7 @@ def load_published_into_registry(
         }
 
     try:
-        for row in list_published_ot(conn):
+        for row in published_ot_rows:
             extra = fk_by_ot.get(row.name) or None
             if row.name in ot_names:
                 if reload:
@@ -347,4 +374,5 @@ def load_published_into_registry(
         "loaded_lt": loaded_lt,
         "lt_scanned": lt_scanned,
         "skipped": skipped,
+        "s3_risk_skipped": s3_risk_skipped,
     }
