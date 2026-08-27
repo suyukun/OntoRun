@@ -13,6 +13,7 @@ import { ConfigProvider, Layout, Menu, Typography, theme } from 'antd';
 import {
   ApartmentOutlined,
   AppstoreOutlined,
+  ClusterOutlined,
   DatabaseOutlined,
   LinkOutlined,
   PartitionOutlined,
@@ -32,6 +33,7 @@ import GraphPage from './pages/GraphPage';
 import RiskLandingPage from './risk/RiskLandingPage';
 import RiskChatPanel from './risk/RiskChatPanel';
 import RiskBrowsePage from './risk/RiskBrowsePage';
+import EnterpriseOverviewPage from './pages/des/EnterpriseOverviewPage';
 import { RISK_COLORS, riskDarkTheme } from './risk/riskTheme';
 import './risk/risk.css';
 
@@ -159,6 +161,7 @@ function RiskShell() {
         { key: '/', icon: <SafetyCertificateOutlined />, label: '价值总览' },
         { key: '/risk/chat', icon: <RobotOutlined />, label: '风险对话 · 双签' },
         { key: '/risk/browse', icon: <DatabaseOutlined />, label: '风险数据浏览' },
+        { key: '/des', icon: <ClusterOutlined />, label: '企业模拟 (DES)' },
       ],
     },
     {
@@ -228,6 +231,7 @@ function RiskShell() {
               <Route path="/" element={<RiskLandingPage />} />
               <Route path="/risk/chat" element={<RiskChatPanel />} />
               <Route path="/risk/browse" element={<RiskBrowsePage />} />
+              <Route path="/des" element={<EnterpriseOverviewPage />} />
               <Route path="/risk/*" element={<Navigate to="/risk/chat" replace />} />
             </Routes>
           </Content>
@@ -239,7 +243,10 @@ function RiskShell() {
 
 function AppRoutes() {
   const location = useLocation();
-  const isRisk = location.pathname === '/' || location.pathname.startsWith('/risk');
+  const isRisk =
+    location.pathname === '/' ||
+    location.pathname.startsWith('/risk') ||
+    location.pathname.startsWith('/des');
   return isRisk ? <RiskShell /> : <S1Shell />;
 }
 

@@ -169,6 +169,7 @@ def create_app(
     在此基础上挂载 /agent 端点。
     """
     from src.api.main import create_app as create_api_app
+    from src.app.des_overview import register_des_routes
 
     app = create_api_app(
         source_db=source_db,
@@ -181,6 +182,9 @@ def create_app(
 
     # 注册风险 Agent 端点（S3 M3b：独立风险运行时而建，不触碰 S1 /agent）
     register_risk_agent_routes(app)
+
+    # 注册 DES 企业模拟概览端点（S3 M4：让 DES 升级可见的界面入口）
+    register_des_routes(app)
 
     # 注册错误处理
     _register_error_handlers(app)
@@ -691,9 +695,12 @@ def register_risk_agent_routes(app: FastAPI) -> None:
 
 
 def create_risk_agent_app() -> FastAPI:
-    """最小风险 Agent 应用（仅 /agent/risk/*，供冒烟/独立部署，不经 S1 API 层）。"""
+    """最小风险 Agent 应用（仅 /agent/risk/* + /des/*，供冒烟/独立部署，不经 S1 API 层）。"""
+    from src.app.des_overview import register_des_routes
+
     app = FastAPI(title="OntoRun 风险 Agent 对话", version="0.1.0")
     register_risk_agent_routes(app)
+    register_des_routes(app)
     _register_error_handlers(app)
     return app
 

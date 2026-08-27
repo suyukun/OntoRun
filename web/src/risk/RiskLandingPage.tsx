@@ -5,6 +5,7 @@ import { Button, Spin, Tag } from 'antd';
 import {
   ArrowRightOutlined,
   AuditOutlined,
+  ClusterOutlined,
   DatabaseOutlined,
   MessageOutlined,
   SafetyCertificateOutlined,
@@ -149,16 +150,16 @@ export default function RiskLandingPage() {
         </div>
       </section>
 
-      {/* ---------- 三大入口（非均匀：问问题为大卡，数据/操作并排） ---------- */}
+      {/* ---------- 演示入口（问问题为大卡，数据/操作/DES 地基并排） ---------- */}
       <section style={{ maxWidth: 1180, margin: '0 auto', padding: '52px 48px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 22 }}>
           <div>
-            <div style={{ fontSize: 13, color: RISK_COLORS.accent, letterSpacing: '0.12em', marginBottom: 6 }}>三大能力</div>
+            <div style={{ fontSize: 13, color: RISK_COLORS.accent, letterSpacing: '0.12em', marginBottom: 6 }}>演示入口</div>
             <h2 style={{ fontSize: 26, margin: 0, fontWeight: 700 }}>能问、能办、能追</h2>
           </div>
           <div style={{ color: RISK_COLORS.textFaint, fontSize: 13 }}>AI 只经业务本体理解与操作，不直接碰库</div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 1fr 1fr', gap: 18, gridAutoRows: 'minmax(150px, auto)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr 1fr 1fr', gap: 18, gridAutoRows: 'minmax(150px, auto)' }}>
           <button
             className="risk-entry-card"
             onClick={() => go('/risk/chat')}
@@ -209,6 +210,21 @@ export default function RiskLandingPage() {
             </div>
             <div style={{ marginTop: 14, color: RISK_COLORS.red, fontSize: 13 }}>
               试一次处置 <ArrowRightOutlined style={{ fontSize: 11 }} />
+            </div>
+          </button>
+          <button
+            className="risk-entry-card"
+            onClick={() => go('/des')}
+            style={{ ...panel(), textAlign: 'left', cursor: 'pointer', padding: 24, borderTop: '2px solid ' + RISK_COLORS.green }}
+            aria-label="看地基：DES 企业模拟总览"
+          >
+            <div style={{ fontSize: 30, marginBottom: 12 }}><ClusterOutlined style={{ color: RISK_COLORS.green }} /></div>
+            <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 8 }}>看地基 · 企业模拟</div>
+            <div style={{ color: RISK_COLORS.textDim, fontSize: 13.5, lineHeight: 1.7 }}>
+              整家企业的客户、风险、审批数据都由 DES 确定性流水线模拟生成——画像、业务域、流程、规则到数据。看清数据地基与生成锚点。
+            </div>
+            <div style={{ marginTop: 14, color: RISK_COLORS.green, fontSize: 13 }}>
+              进入企业模拟总览 <ArrowRightOutlined style={{ fontSize: 11 }} />
             </div>
           </button>
         </div>
