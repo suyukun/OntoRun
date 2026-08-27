@@ -80,6 +80,7 @@ DISPOSAL_STATUS_FROM_CN: dict[str, str] = {
 # ---- 对象类型 → ap_anping 实际表（含库别名限定；主库 risk.db 表不带别名） ----
 # M1a 未覆盖的四类对象（Collateral/CoDebtCustomer/Organization/User）无源表，不映射。
 SOURCE_TABLE_MAP: dict[str, str] = {
+    # 脊柱 13 对象
     "RiskCustomer": "customer.ap_customer",
     "GroupCustomer": "customer.ap_group_customer",
     "WarningSignal": "ap_warning_signal",
@@ -89,6 +90,31 @@ SOURCE_TABLE_MAP: dict[str, str] = {
     "ApproveTask": "approval.ap_approve_task",
     "ConcentrationLimit": "concentration.ap_concentration_limit",
     "RiskProject": "project.ap_risk_project",
+    "Collateral": "customer.ap_collateral",
+    "CoDebtCustomer": "concentration.ap_codebt_customer",
+    "Organization": "base.ap_org",
+    "User": "base.ap_user",
+    # 全量扩展对象（33 对象全量，真实表名 = 脱敏名 ap_*）
+    "CustomerRelation": "customer.ap_customer_relation",
+    "CustomerRelationTree": "customer.ap_customer_relation_tree",
+    "ImportantCustomerList": "customer.ap_important_customer_list",
+    "Top500CustomerRisk": "customer.ap_top500_customer_risk",
+    "CustomerAssets": "customer.ap_customer_assets",
+    "InvestDistribution": "customer.ap_customer_invest_dist",
+    "SubsidiaryCreditDetail": "customer.ap_subsidiary_credit_detail",
+    "BankPledgeDetail": "customer.ap_bank_pledge_detail",
+    "SecuritiesPledgeDetail": "customer.ap_securities_pledge_detail",
+    "SubsidiaryMortgage": "customer.ap_subsidiary_mortgage",
+    "WarningPush": "ap_warning_push",  # risk.db 主库无别名
+    "CoDebtScore": "concentration.ap_codebt_warn_score",
+    "ConcentrationLimitAdj": "concentration.ap_concentration_limit_adj",
+    "ConcentrationWarnAdj": "concentration.ap_concentration_warn_adj",
+    "WarningConcentration": "ap_warn_signal_concentration",
+    "WarningDerive": "ap_warn_signal_derive",
+    "WarningDeviation": "ap_warn_signal_deviation",
+    "DeviationScore": "ap_deviation_warn_score",
+    "ApproveTodo": "approval.ap_approve_todo",
+    "ApproveOperLog": "approval.ap_approve_oper_log",
 }
 
 
