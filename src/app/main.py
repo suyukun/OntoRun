@@ -295,7 +295,9 @@ def _register_agent_routes(app: FastAPI, store) -> None:
         5. 确认成功后才清 pending + 落历史（P1-3：失败不丢 pending）
         6. 返回回复 + outcome
         """
-        actor = request.headers.get("X-Actor", "human")  # demo 单用户控制台：缺省=人类操作者
+        actor = request.headers.get(
+            "X-Actor", "human"
+        )  # demo 单用户控制台：缺省=人类操作者
         if actor != "human":
             return JSONResponse(
                 status_code=403,
@@ -420,8 +422,6 @@ def _register_error_handlers(app: FastAPI) -> None:
         )
 
 
-
-
 # ======================================================================
 # S3 M3b 风险 Agent 会话端点（独立于 S1 /agent，数据源 ap_anping）
 # ----------------------------------------------------------------------
@@ -467,26 +467,42 @@ def register_risk_agent_routes(app: FastAPI) -> None:
     risk_sessions = SessionManager(risk_store, agent_factory=_get_agent)
 
     @app.get("/risk-objects/{type}")
-    def risk_object_list(type: str, request: Request, page: int = 1, page_size: int = 20):
+    def risk_object_list(
+        type: str, request: Request, page: int = 1, page_size: int = 20
+    ):
         """风险对象列表（实时查 ap_anping 真实数据，供风险演示数据浏览页）。
 
         风险对象在独立注册表（build_risk_source_registry），与 S1 共享注册表分离；
         非 page/page_size 的 query 参数视为等值过滤。
         """
-        obj = risk_registry.object_type(type)
+        # 名称归一化：同时接受注册名（CamelCase，如 RiskCustomer）与 api_name
+        # （snake_case，如 risk_customer；前端/快照/文档统一用此风格）。
+        if risk_registry.has_object_type(type):
+            obj = risk_registry.object_type(type)
+        else:
+            obj = next(
+                (o for o in risk_registry.object_types() if o.api_name == type),
+                None,
+            )
         if obj is None:
             return JSONResponse(
                 status_code=404,
                 content={
-                    "request_id": "", "outcome": "error",
-                    "error": {"code": "OBJECT_TYPE_NOT_FOUND", "message": f"风险对象类型不存在: {type}", "detail": None},
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "OBJECT_TYPE_NOT_FOUND",
+                        "message": f"风险对象类型不存在: {type}",
+                        "detail": None,
+                    },
                 },
             )
         table = obj.source_table
         conn = risk_store.source_conn()
         try:
             filters = {
-                k: v for k, v in request.query_params.items()
+                k: v
+                for k, v in request.query_params.items()
                 if k not in ("page", "page_size")
             }
             where = ""
@@ -497,7 +513,9 @@ def register_risk_agent_routes(app: FastAPI) -> None:
                     conds.append(f"{k} = ?")
                     args.append(v)
                 where = " WHERE " + " AND ".join(conds)
-            total = conn.execute(f"SELECT COUNT(*) FROM {table}{where}", args).fetchone()[0]
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM {table}{where}", args
+            ).fetchone()[0]
             limit = max(1, min(page_size, 100))
             offset = max(0, (page - 1) * limit)
             rows = conn.execute(
@@ -509,8 +527,15 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             conn.close()
         return JSONResponse(
             content={
-                "request_id": "", "outcome": "ok",
-                "data": {"type": type, "page": page, "page_size": limit, "total": total, "items": items},
+                "request_id": "",
+                "outcome": "ok",
+                "data": {
+                    "type": type,
+                    "page": page,
+                    "page_size": limit,
+                    "total": total,
+                    "items": items,
+                },
             },
         )
 
@@ -550,7 +575,11 @@ def register_risk_agent_routes(app: FastAPI) -> None:
         need_confirm_dict = None
         if turn.need_confirm:
             tc = turn.need_confirm
-            need_confirm_dict = {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+            need_confirm_dict = {
+                "id": tc.id,
+                "name": tc.name,
+                "arguments": tc.arguments,
+            }
 
         outcome = None
         if turn.tool_results:

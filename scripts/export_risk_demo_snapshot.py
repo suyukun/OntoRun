@@ -24,7 +24,11 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.runtime.risk_db import AP_ANPING_DIR, SOURCE_TABLE_MAP, build_risk_source_registry
+from src.runtime.risk_db import (
+    AP_ANPING_DIR,
+    SOURCE_TABLE_MAP,
+    build_risk_source_registry,
+)
 
 OUT = Path(__file__).resolve().parents[1] / "web" / "public" / "risk-demo" / "risk-snapshot.json"
 
@@ -339,7 +343,12 @@ def main() -> None:
         dbt, tbl = _to_arrow(real)
         cols = _columns(db, dbt, tbl)
         pk = o["pk_field"]
-        rows = sample_src.get(o["name"], [])
+        rows = sample_src.get(o["name"])
+        if rows is None:
+            # 兜底采样：主线外对象也从真实表取样例行，保证前端 33 对象
+            # 全部有点得开的数据（不空表）；属性仍按 cols 交集投影，
+            # edges 不覆盖这些行（详情页已有「暂无关联」文案兜底）。
+            rows = db.rows(dbt, f"SELECT * FROM {tbl} ORDER BY {pk} LIMIT 12")
         for r in rows:
             props = {}
             for f in o["properties"]:

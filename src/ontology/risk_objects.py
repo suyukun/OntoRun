@@ -49,7 +49,9 @@ SignalStatus = Literal[  # 信号状态机：生成→确认→定级→处置�
 DisposalStatus = Literal[  # 处置状态机：草稿→提交→审批中→通过/驳回→执行→完成
     "DRAFT", "SUBMITTED", "APPROVING", "APPROVED", "REJECTED", "EXECUTING", "DONE"
 ]
-ApproveOrderStatus = Literal["PROCESS", "APPROVED", "REJECTED"]  # 审批单状态（字典 P061）
+ApproveOrderStatus = Literal[
+    "PROCESS", "APPROVED", "REJECTED"
+]  # 审批单状态（字典 P061）
 FiveClassification = Literal[  # 五级分类
     "NORMAL", "ATTENTION", "SECONDARY", "DOUBTFUL", "LOSS"
 ]
@@ -81,9 +83,7 @@ class RiskCustomer(BaseModel):
     establish_time: date = own(OWN_SOURCE, "成立时间")
     registered_capital: float = own(OWN_SOURCE, "注册资本（脱敏）")
     chairman_name: str = own(OWN_SOURCE, "董事长（脱敏）")
-    legal_rep: str = own(
-        OWN_SOURCE, "法定代表人（脱敏）（M1a 未覆盖，按 M2 设计补全）"
-    )
+    legal_rep: str = own(OWN_SOURCE, "法定代表人（脱敏）（M1a 未覆盖，按 M2 设计补全）")
     address: str = own(OWN_SOURCE, "注册地址（脱敏）（M1a 未覆盖，按 M2 设计补全）")
     customer_status: str = own(OWN_SOURCE, "客户状态")
 
@@ -97,7 +97,9 @@ class GroupCustomer(BaseModel):
 
     group_customer_no: str = own(OWN_SOURCE, "集团编号（PK/Title，业务主键）（脱敏）")
     group_customer_name: str = own(OWN_SOURCE, "集团名称（脱敏）")
-    group_customer_type: str = own(OWN_SOURCE, "所属集团类型（源 ap_warning_signal.GRP_CUST_TYPE）")
+    group_customer_type: str = own(
+        OWN_SOURCE, "所属集团类型（源 ap_warning_signal.GRP_CUST_TYPE）"
+    )
     group_peer_flag: str = own(OWN_SOURCE, "集团同业标识")
     customer_status: str = own(OWN_SOURCE, "客户状态")
     asset_quality_level: str = own(OWN_SOURCE, "资产质量分类名称")
@@ -164,7 +166,9 @@ class Metric(BaseModel):
     org_id: str = own(OWN_SOURCE, "机构编码")
     dim_type_code: str = own(OWN_SOURCE, "维度类型代码")
     dim_type_name: str = own(OWN_SOURCE, "维度类型名称")
-    customer_no: str = own(OWN_SOURCE, "单一客户编号（FK→RiskCustomer.customer_no）（脱敏）")
+    customer_no: str = own(
+        OWN_SOURCE, "单一客户编号（FK→RiskCustomer.customer_no）（脱敏）"
+    )
     customer_name: str = own(OWN_SOURCE, "单一客户名称（脱敏）")
     group_customer_no: str | None = own(
         OWN_SOURCE, "所属集团编号（脱敏）", default=None
@@ -183,10 +187,13 @@ class Disposal(BaseModel):
 
     disposal_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
     warning_id: str = own(
-        OWN_SOURCE, "关联预警 ID（FK→WarningSignal.warning_id，源 p_erms_sgn_deal 无此列，"
-        "关联承载于 o_a_erms_cust_warn_sgn_disp.WARN_ID）"
+        OWN_SOURCE,
+        "关联预警 ID（FK→WarningSignal.warning_id，源 p_erms_sgn_deal 无此列，"
+        "关联承载于 o_a_erms_cust_warn_sgn_disp.WARN_ID）",
     )
-    business_type: str = own(OWN_SOURCE, "业务类型（字典项P060：SGN_DERIVE/SGN_DEVIATION/SGN_CONCENTRAT）")
+    business_type: str = own(
+        OWN_SOURCE, "业务类型（字典项P060：SGN_DERIVE/SGN_DEVIATION/SGN_CONCENTRAT）"
+    )
     deal_type: str = own(OWN_SOURCE, "处置类型（字典项P066）")
     disposal_status: DisposalStatus = own(
         OWN_SOURCE,
@@ -202,7 +209,9 @@ class Collateral(BaseModel):
     """押品。PK/Title = collateral_id（源 ap_collateral，M1a 未覆盖，按 M2 设计补全）。"""
 
     collateral_id: str = own(OWN_SOURCE, "押品记录号（PK/Title）")
-    customer_id: str = own(OWN_SOURCE, "所属客户（FK→RiskCustomer.customer_id）（脱敏）")
+    customer_id: str = own(
+        OWN_SOURCE, "所属客户（FK→RiskCustomer.customer_id）（脱敏）"
+    )
     collateral_type: str = own(OWN_SOURCE, "押品类型（如 银行存单/证券/房产/其他）")
     estimated_value: float = own(OWN_SOURCE, "评估价值（万元）（脱敏）")
     appraisal_date: date = own(OWN_SOURCE, "评估日期")
@@ -215,7 +224,9 @@ class ApproveOrder(BaseModel):
     """审批单。PK/Title = approve_order_id（源 p_erms_approve_order）。"""
 
     approve_order_id: str = own(OWN_SOURCE, "审批单ID（PK/Title）")
-    approve_order_type: str = own(OWN_SOURCE, "审批类型（字典项P062：WARN_SGN 预警审批）")
+    approve_order_type: str = own(
+        OWN_SOURCE, "审批类型（字典项P062：WARN_SGN 预警审批）"
+    )
     approve_order_title: str = own(OWN_SOURCE, "审批单标题（字典项P060）")
     apply_user_id: str = own(OWN_SOURCE, "申请人ID（脱敏）")
     approved_user_id: str = own(OWN_SOURCE, "审批人ID（脱敏）")
@@ -252,9 +263,7 @@ class ApproveTask(BaseModel):
     node_name: str = own(
         OWN_SOURCE, "节点名称（M1a 未覆盖，按 M2 设计补全，节点表承载）"
     )
-    node_seq: int = own(
-        OWN_SOURCE, "节点序号（M1a 未覆盖，按 M2 设计补全）"
-    )
+    node_seq: int = own(OWN_SOURCE, "节点序号（M1a 未覆盖，按 M2 设计补全）")
     post_id: str = own(OWN_SOURCE, "岗位ID")
     approve_task_status: Literal["PENDING", "COMPLETED"] = own(
         OWN_SOURCE, "任务状态（字典项P063：PENDING待处理/COMPLETED已处理）"
@@ -264,9 +273,7 @@ class ApproveTask(BaseModel):
     )
     approve_remark: str = own(OWN_SOURCE, "审核意见（脱敏）")
     approve_time: datetime | None = own(OWN_SOURCE, "审批时间", default=None)
-    assignee: str = own(
-        OWN_SOURCE, "处理人（M1a 未覆盖，按 M2 设计补全）（脱敏）"
-    )
+    assignee: str = own(OWN_SOURCE, "处理人（M1a 未覆盖，按 M2 设计补全）（脱敏）")
 
 
 class ConcentrationLimit(BaseModel):
@@ -279,9 +286,7 @@ class ConcentrationLimit(BaseModel):
     customer_name: str = own(OWN_SOURCE, "客户名称（脱敏）")
     warning_value: float = own(OWN_SOURCE, "预警阈值（脱敏）")
     concentration_limit: float = own(OWN_SOURCE, "集中度限额（脱敏）")
-    concentration_limit_old: float = own(
-        OWN_SOURCE, "集中度限额-更新前的值（脱敏）"
-    )
+    concentration_limit_old: float = own(OWN_SOURCE, "集中度限额-更新前的值（脱敏）")
     current_status: str = own(OWN_SOURCE, "当前状态")
     approve_status: str | None = own(
         OWN_ONTOLOGY,
@@ -296,13 +301,23 @@ class ConcentrationLimit(BaseModel):
 
 
 class CoDebtCustomer(BaseModel):
-    """共债客户。PK/Title = codebt_id（源 ap_codebt_customer，M1a 未覆盖，按 M2 设计补全）。"""
+    """共债客户。PK/Title = codebt_customer_id（源 concentration.ap_codebt_customer）。
 
-    codebt_id: str = own(OWN_SOURCE, "共债记录号（PK/Title）")
-    customer_id: str = own(OWN_SOURCE, "客户（FK→RiskCustomer.customer_id）（脱敏）")
-    codebt_count: int = own(OWN_SOURCE, "共债客户数")
-    total_debt: float = own(OWN_SOURCE, "共债总额（万元）（脱敏）")
-    risk_score: float = own(OWN_SOURCE, "共债风险评分")
+    字段对齐 DDL 真相源（risk_ddl_ext2.AP_CODEBT_CUSTOMER_DDL，12 列取业务列，
+    不含 is_deleted/create_time/update_time 系统列）。2026-08-27 修正：
+    原按 M2 设计稿写的 codebt_id/codebt_count/total_debt/risk_score 与生成表
+    实际列不符（正确名 codebt_customer_id/group_member_count/subsidiary_count/
+    invest_balance/risk_exposure），致 /risk-objects 与查询链路断。
+    """
+
+    codebt_customer_id: str = own(OWN_SOURCE, "共债记录号（PK/Title）")
+    customer_name: str = own(OWN_SOURCE, "共债客户名称（脱敏）")
+    customer_type: str = own(OWN_SOURCE, "客户类型（01 单一对公客户）")
+    group_member_count: int = own(OWN_SOURCE, "集团成员数")
+    subsidiary_count: int = own(OWN_SOURCE, "跨子公司数")
+    org_id: str = own(OWN_SOURCE, "子公司机构编码（FK→Organization.org_id）")
+    invest_balance: float = own(OWN_SOURCE, "投融资余额（脱敏）")
+    risk_exposure: float = own(OWN_SOURCE, "风险暴露金额")
     data_date: date = own(OWN_SOURCE, "数据日期")
 
 
@@ -445,8 +460,8 @@ RISK_OBJECT_TYPES: list[ObjectTypeDef] = [
         api_name="codebt_customer",
         description="共债客户（金控风险预警，源 ap_codebt_customer）",
         model=CoDebtCustomer,
-        pk_field="codebt_id",
-        title_field="codebt_id",
+        pk_field="codebt_customer_id",
+        title_field="codebt_customer_id",
         source_table="ap_codebt_customer",
     ),
     ObjectTypeDef(

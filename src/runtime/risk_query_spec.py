@@ -191,13 +191,10 @@ RISK_QUERY_DERIVED: dict[str, dict[str, str]] = {
     },
 }
 
-# 不可查询对象（无源表/未物化）：命中即 fail-closed 拒答
-NOT_QUERYABLE_OBJECTS: dict[str, str] = {
-    "collateral": "押品（ap_collateral 未在源系统映射，暂不可查）",
-    "codebt_customer": "共债客户（ap_codebt_customer 未在源系统映射，暂不可查）",
-    "organization": "机构（ap_org 未在源系统映射，暂不可查）",
-    "user": "用户/岗位（ap_user 未在源系统映射，暂不可查）",
-}
+# 不可查询对象（无源表/未物化）：命中即 fail-closed 拒答。
+# 2026-08-27：33 对象已全部映射真实源表（见 risk_db.SOURCE_TABLE_MAP），清单清空；
+# 机制保留——日后新增未物化对象在此登记，防止 fail-open。
+NOT_QUERYABLE_OBJECTS: dict[str, str] = {}
 
 # ---- Analytics 参数模型（LLM 输出不可信：类型/长度经 Pydantic 校验） ----
 

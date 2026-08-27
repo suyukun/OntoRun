@@ -78,7 +78,8 @@ DISPOSAL_STATUS_FROM_CN: dict[str, str] = {
 }
 
 # ---- 对象类型 → ap_anping 实际表（含库别名限定；主库 risk.db 表不带别名） ----
-# M1a 未覆盖的四类对象（Collateral/CoDebtCustomer/Organization/User）无源表，不映射。
+# 全量 33 对象均已映射真实表（M2 起补全脊柱四表 ap_collateral/ap_codebt_customer/
+# ap_org/ap_user；新增无源对象时须同步登记 NOT_QUERYABLE_OBJECTS 拒答）。
 SOURCE_TABLE_MAP: dict[str, str] = {
     # 脊柱 13 对象
     "RiskCustomer": "customer.ap_customer",
