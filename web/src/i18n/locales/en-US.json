@@ -12,7 +12,13 @@
     "objectTypes": "Object Types",
     "linkTypes": "Link Types",
     "pipelines": "Pipeline Canvas",
-    "graph": "Ontology Graph"
+    "graph": "Ontology Graph",
+    "riskDemo": "Risk Warning Demo",
+    "valueOverview": "Value Overview",
+    "riskWorkbench": "Data Workbench · Chat",
+    "desEnterprise": "Enterprise Simulation (DES)",
+    "retailDemo": "Retail Demo (S1)",
+    "retailChain": "Retail Supply Chain Demo"
   },
   "common": {
     "loading": "Loading...",

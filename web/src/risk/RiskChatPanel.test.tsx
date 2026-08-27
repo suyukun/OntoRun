@@ -40,7 +40,7 @@ let confirmResponse: unknown = { reply: '', outcome: 'applied' };
 describe('RiskChatPanel', () => {
   it('渲染初始空态与示例问题引导', () => {
     render(<RiskChatPanel />);
-    expect(screen.getByText('风险对话窗口')).toBeTruthy();
+    expect(screen.getByText('风险对话 · 人机双签')).toBeTruthy();
     expect(screen.getByText('本月红色预警')).toBeTruthy();
     expect(screen.getByPlaceholderText(/输入风险问题或指令/)).toBeTruthy();
   });

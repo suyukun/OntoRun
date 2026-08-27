@@ -12,7 +12,13 @@
     "objectTypes": "对象类型",
     "linkTypes": "链接类型",
     "pipelines": "管道画布",
-    "graph": "本体图谱"
+    "graph": "本体图谱",
+    "riskDemo": "风险预警演示",
+    "valueOverview": "价值总览",
+    "riskWorkbench": "数据工作台 · 对话",
+    "desEnterprise": "企业模拟 (DES)",
+    "retailDemo": "零售演示（S1）",
+    "retailChain": "零售供应链演示"
   },
   "common": {
     "loading": "加载中...",

@@ -4,6 +4,7 @@
 // 阶段④统一重做视觉，此处不做装饰性设计。
 import { Alert, Card, Col, ConfigProvider, Empty, Row, Select, Statistic, Table, Tag, Typography, theme } from 'antd';
 import { ApartmentOutlined, ClusterOutlined } from '@ant-design/icons';
+import { RISK_COLORS as C } from '../../risk/riskTheme';
 import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -50,7 +51,7 @@ function DomainCard({ domain }: { domain: DesDomain }) {
         </Typography.Paragraph>
       )}
       {extras.map(([k, v]) => (
-        <div key={k} style={{ fontSize: 12.5, color: 'rgba(0,0,0,0.55)' }}>
+        <div key={k} style={{ fontSize: 12.5, color: C.textDim }}>
           {k}: {String(v)}
         </div>
       ))}
@@ -105,7 +106,7 @@ export default function EnterpriseOverviewPage() {
 
   return (
     <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>
-      <div style={{ minHeight: '100vh', background: '#f5f5f5', padding: 24 }}>
+      <div style={{ minHeight: '100vh', background: C.ink, padding: 24 }}>
         {/* 入口说明 */}
         <Alert
           type="info"

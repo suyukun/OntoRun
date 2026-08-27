@@ -5,6 +5,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import RiskBrowsePage from './RiskBrowsePage';
 import { miniSnapshot } from './testFixtures';
+// 确定性加固：异步快照用例在高负载机器上会超过默认 5s（CI 稳定性），放宽到 20s
+vi.setConfig({ testTimeout: 20_000 });
 
 const mockFetch = vi.fn();
 (globalThis as typeof globalThis & { fetch: typeof mockFetch }).fetch = mockFetch;

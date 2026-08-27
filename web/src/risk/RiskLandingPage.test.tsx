@@ -1,5 +1,5 @@
 /// <reference types="vitest/globals" />
-// RiskLandingPage 冒烟测试 —— 价值主张 + 三大入口 + 真实数据统计
+// RiskLandingPage 冒烟测试 —— 价值主张 + 三张入口卡 + 单一 CTA + 真实数据统计（不写假数字）
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -26,28 +26,36 @@ const renderPage = () =>
   );
 
 describe('RiskLandingPage', () => {
-  it('渲染价值主张与品牌标识', () => {
-    renderPage();
+  it('渲染价值主张与品牌标识（hero 文案不动，单一 eyebrow 徽章）', () => {
+    const { container } = renderPage();
     expect(screen.getByText(/用自然语言问风险问题、执行真实处置，全程本体驱动、可审计/)).toBeTruthy();
     expect(screen.getAllByText(/风险预警系统/).length).toBeGreaterThan(0);
     expect(screen.getByText(/安平金控集团 · 风险管理部/)).toBeTruthy();
+    // eyebrow 徽章 ≤1：仅 hero 一枚胶囊徽章
+    expect(screen.getAllByText(/安平金控集团 · 风险管理部 · 风险预警系统/).length).toBe(1);
   });
 
-  it('展示三大入口（看数据/问问题/执行操作）与演示 CTA', () => {
-    renderPage();
-    expect(screen.getByRole('button', { name: /问问题/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /看数据/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /执行操作/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /开始演示/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /浏览风险数据/ })).toBeTruthy();
+  it('CTA 唯一意图：开始演示唯一且不再出现重复意图按钮；雷达 motif 已删除', () => {
+    const { container } = renderPage();
+    expect(screen.getAllByRole('button', { name: /开始演示/ })).toHaveLength(1);
+    // 四卡改三卡后的三张语义入口
+    expect(screen.getByRole('button', { name: /数据工作台/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /价值统计锚点/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /企业模拟总览/ })).toBeTruthy();
+    // 无重复意图 CTA（旧「浏览风险数据」二级 CTA 已删）
+    expect(screen.queryByRole('button', { name: /浏览风险数据/ })).toBeNull();
+    // 深色雷达扫描 motif 已移除
+    expect(container.querySelector('.risk-radar')).toBeNull();
   });
 
-  it('渲染真实数据统计（来自快照 totals，不写假数字）', async () => {
+  it('渲染真实数据统计带（大数字来自快照 totals，格子数=真实内容数）', async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText('8万')).toBeTruthy());
     expect(screen.getByText('8,000')).toBeTruthy();
     expect(screen.getAllByText('预警信号').length).toBeGreaterThan(0);
     expect(screen.getAllByText('集团客户').length).toBeGreaterThan(0);
+    // 统计带锚点存在（价值锚点卡回跳目标）
+    expect(document.getElementById('risk-stats')).toBeTruthy();
   });
 
   it('展示语义接口价值锚定', () => {

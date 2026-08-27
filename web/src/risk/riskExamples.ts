@@ -1,5 +1,6 @@
 // 演示示例问题（真实可答：数据来自 ap_anping 真实企业）
 // kind: read=精准问答 / action=真实动作 / decline=域外拒答
+// 色值 = riskTheme.RISK_COLORS 浅底语义色（blue/yellow/red），亮度适配浅底
 export interface RiskExamplePrompt {
   label: string;
   text: string;
@@ -16,7 +17,7 @@ export const EXAMPLE_PROMPTS: RiskExamplePrompt[] = [
 ];
 
 export const KIND_TAG: Record<string, { color: string; label: string }> = {
-  read: { color: '#4C8DFF', label: '精准问答' },
-  action: { color: '#F2B04C', label: '真实动作' },
-  decline: { color: '#F0524D', label: '域外拒答' },
+  read: { color: '#175cd3', label: '精准问答' },
+  action: { color: '#b54708', label: '真实动作' },
+  decline: { color: '#b42318', label: '域外拒答' },
 };

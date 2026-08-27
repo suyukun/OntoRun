@@ -13,6 +13,7 @@
 
 运行：/opt/anaconda3/bin/python scripts/export_risk_demo_snapshot.py
 """
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,13 @@ from src.runtime.risk_db import (
     build_risk_source_registry,
 )
 
-OUT = Path(__file__).resolve().parents[1] / "web" / "public" / "risk-demo" / "risk-snapshot.json"
+OUT = (
+    Path(__file__).resolve().parents[1]
+    / "web"
+    / "public"
+    / "risk-demo"
+    / "risk-snapshot.json"
+)
 
 # ---- 演示锚点集团（中科智造 + 各业态代表，跨银行/证券/租赁/制造等） ----
 ANCHOR_GROUPS = [
@@ -79,7 +86,9 @@ class _DB:
 
 
 def _columns(db: _DB, dbname: str, table: str) -> set[str]:
-    return {c[1] for c in db.conn(dbname).execute(f"PRAGMA table_info({table})").fetchall()}
+    return {
+        c[1] for c in db.conn(dbname).execute(f"PRAGMA table_info({table})").fetchall()
+    }
 
 
 def _to_arrow(table: str) -> tuple[str, str]:
@@ -96,7 +105,10 @@ def build_meta() -> dict:
         props = o.model.model_json_schema()["properties"]
         properties: dict[str, Any] = {}
         for name, p in props.items():
-            entry: dict[str, Any] = {"title": p.get("description", name), "type": p.get("type", "string")}
+            entry: dict[str, Any] = {
+                "title": p.get("description", name),
+                "type": p.get("type", "string"),
+            }
             if "enum" in p:
                 entry["enum"] = p["enum"]
             properties[name] = entry
@@ -145,7 +157,11 @@ def main() -> None:
     # ---- 锚点集团 ----
     groups = []
     for g in ANCHOR_GROUPS:
-        rows = db.rows("customer", "SELECT * FROM ap_group_customer WHERE group_customer_no=?", (g,))
+        rows = db.rows(
+            "customer",
+            "SELECT * FROM ap_group_customer WHERE group_customer_no=?",
+            (g,),
+        )
         if rows:
             groups.append(rows[0])
     groups.sort(key=lambda r: r["group_customer_no"])
@@ -180,8 +196,7 @@ def main() -> None:
     if customer_ids:
         for r in db.rows(
             "risk",
-            "SELECT * FROM ap_warning_signal WHERE customer_id IN (%s) ORDER BY warning_id LIMIT %d"
-            % (",".join("?" * len(customer_ids)), 3 * len(customer_ids)),
+            f"SELECT * FROM ap_warning_signal WHERE customer_id IN ({','.join('?' * len(customer_ids))}) ORDER BY warning_id LIMIT {3 * len(customer_ids)}",
             tuple(customer_ids),
         ):
             add_warning(r)
@@ -200,17 +215,21 @@ def main() -> None:
         add_warning(r)
 
     # 链路种子：有处置 + 被审批单引用 的预警（打通 处置→审批 边）
-    disp_warn_ids = {r["warning_id"] for r in db.rows("risk", "SELECT warning_id FROM ap_warning_disposal")}
+    disp_warn_ids = {
+        r["warning_id"]
+        for r in db.rows("risk", "SELECT warning_id FROM ap_warning_disposal")
+    }
     order_signal_ids = set()
-    for r in db.rows("approval", "SELECT remark FROM ap_approve_order WHERE remark LIKE '%SGN-%'"):
+    for r in db.rows(
+        "approval", "SELECT remark FROM ap_approve_order WHERE remark LIKE '%SGN-%'"
+    ):
         m = _SIGNAL_ID_RE.search(r.get("remark") or "")
         if m:
             order_signal_ids.add(m.group(0))
     if disp_warn_ids:
         for r in db.rows(
             "risk",
-            "SELECT * FROM ap_warning_signal WHERE warning_id IN (%s) ORDER BY warning_id"
-            % ",".join("?" * len(disp_warn_ids)),
+            f"SELECT * FROM ap_warning_signal WHERE warning_id IN ({','.join('?' * len(disp_warn_ids))}) ORDER BY warning_id",
             tuple(disp_warn_ids),
         ):
             if r.get("signal_id") in order_signal_ids:
@@ -223,11 +242,9 @@ def main() -> None:
     if warning_ids:
         disposals = db.rows(
             "risk",
-            "SELECT * FROM ap_warning_disposal WHERE warning_id IN (%s) ORDER BY disposal_id"
-            % ",".join("?" * len(warning_ids)),
+            f"SELECT * FROM ap_warning_disposal WHERE warning_id IN ({','.join('?' * len(warning_ids))}) ORDER BY disposal_id",
             tuple(warning_ids),
         )
-    disposal_ids = {r["disposal_id"] for r in disposals}
 
     # ---- 审批单：优先「remark 关联到样本预警」 ----
     orders: list[dict] = []
@@ -239,7 +256,8 @@ def main() -> None:
     linked_first = [
         r
         for r in all_orders
-        if (m := _SIGNAL_ID_RE.search(r.get("remark") or "")) and m.group(0) in signal_ids
+        if (m := _SIGNAL_ID_RE.search(r.get("remark") or ""))
+        and m.group(0) in signal_ids
     ]
     for r in linked_first:
         if r["approve_order_id"] not in seen_o and len(orders) < MAX_ORDERS:
@@ -258,8 +276,7 @@ def main() -> None:
     if order_ids:
         tasks = db.rows(
             "approval",
-            "SELECT * FROM ap_approve_task WHERE approve_order_id IN (%s) ORDER BY approve_task_id"
-            % ",".join("?" * len(order_ids)),
+            f"SELECT * FROM ap_approve_task WHERE approve_order_id IN ({','.join('?' * len(order_ids))}) ORDER BY approve_task_id",
             tuple(order_ids),
         )
         if len(tasks) > MAX_TASKS:
@@ -270,8 +287,7 @@ def main() -> None:
     if customer_nos:
         concentration = db.rows(
             "concentration",
-            "SELECT * FROM ap_concentration_limit WHERE customer_no IN (%s) ORDER BY concentration_limit_id LIMIT %d"
-            % (",".join("?" * len(customer_nos)), MAX_CONCENTRATION),
+            f"SELECT * FROM ap_concentration_limit WHERE customer_no IN ({','.join('?' * len(customer_nos))}) ORDER BY concentration_limit_id LIMIT {MAX_CONCENTRATION}",
             tuple(customer_nos),
         )
     projects = []
@@ -279,8 +295,7 @@ def main() -> None:
     marks = ",".join("?" * len(group_names))
     for r in db.rows(
         "project",
-        "SELECT * FROM ap_risk_project WHERE group_customer_name IN (%s) ORDER BY risk_project_id LIMIT %d"
-        % (marks, MAX_PROJECTS),
+        f"SELECT * FROM ap_risk_project WHERE group_customer_name IN ({marks}) ORDER BY risk_project_id LIMIT {MAX_PROJECTS}",
         tuple(sorted(group_names)),
     ):
         if r["risk_project_id"] not in seen_p:
@@ -303,8 +318,7 @@ def main() -> None:
     if customer_nos:
         for r in db.rows(
             "base",
-            "SELECT * FROM ap_dim_metric WHERE customer_no IN (%s) AND index_name IN ('风险暴露额','集中度敞口占比') ORDER BY dim_metric_id LIMIT 20"
-            % ",".join("?" * len(customer_nos)),
+            f"SELECT * FROM ap_dim_metric WHERE customer_no IN ({','.join('?' * len(customer_nos))}) AND index_name IN ('风险暴露额','集中度敞口占比') ORDER BY dim_metric_id LIMIT 20",
             tuple(customer_nos),
         ):
             if r["dim_metric_id"] not in seen_m and len(metrics) < MAX_METRICS:
@@ -356,41 +370,93 @@ def main() -> None:
                     props[f] = r[f]
             if o["name"] == "GroupCustomer":
                 props["member_count"] = db.rows(
-                    "customer", "SELECT COUNT(*) c FROM ap_customer WHERE group_customer_no=?", (r[pk],)
+                    "customer",
+                    "SELECT COUNT(*) c FROM ap_customer WHERE group_customer_no=?",
+                    (r[pk],),
                 )[0]["c"]
             items[o["api_name"]].append({"pk": str(r[pk]), "properties": props})
         items[o["api_name"]].sort(key=lambda x: x["pk"])
 
     # ---- edges ----
     def add(link: str, s: str, spk: str, t: str, tpk: str) -> None:
-        edges.append({"source": s, "source_pk": spk, "link": link, "target": t, "target_pk": tpk})
+        edges.append(
+            {"source": s, "source_pk": spk, "link": link, "target": t, "target_pk": tpk}
+        )
 
     for c in customers:
         if c.get("group_customer_no") in group_ids:
-            add("risk_customer.belongs_to_group", "risk_customer", c["customer_id"], "group_customer", c["group_customer_no"])
+            add(
+                "risk_customer.belongs_to_group",
+                "risk_customer",
+                c["customer_id"],
+                "group_customer",
+                c["group_customer_no"],
+            )
     for w in warnings:
         if w.get("customer_id") in customer_ids:
-            add("warning.for_customer", "warning_signal", w["warning_id"], "risk_customer", w["customer_id"])
+            add(
+                "warning.for_customer",
+                "warning_signal",
+                w["warning_id"],
+                "risk_customer",
+                w["customer_id"],
+            )
         if w.get("group_customer_no") in group_ids:
-            add("warning.for_group", "warning_signal", w["warning_id"], "group_customer", w["group_customer_no"])
+            add(
+                "warning.for_group",
+                "warning_signal",
+                w["warning_id"],
+                "group_customer",
+                w["group_customer_no"],
+            )
     for d in disposals:
         if d.get("warning_id") in warning_ids:
-            add("disposal.for_warning", "disposal", d["disposal_id"], "warning_signal", d["warning_id"])
+            add(
+                "disposal.for_warning",
+                "disposal",
+                d["disposal_id"],
+                "warning_signal",
+                d["warning_id"],
+            )
     for t in tasks:
         if t.get("approve_order_id") in order_ids:
-            add("approve.has_tasks", "approve_order", t["approve_order_id"], "approve_task", t["approve_task_id"])
+            add(
+                "approve.has_tasks",
+                "approve_order",
+                t["approve_order_id"],
+                "approve_task",
+                t["approve_task_id"],
+            )
     for cc in concentration:
         cid = cust_by_no.get(cc.get("customer_no"))
         if cid:
-            add("concentration.for_customer", "concentration_limit", cc["concentration_limit_id"], "risk_customer", cid)
+            add(
+                "concentration.for_customer",
+                "concentration_limit",
+                cc["concentration_limit_id"],
+                "risk_customer",
+                cid,
+            )
     for m in metrics:
         cid = cust_by_no.get(m.get("customer_no"))
         if cid:
-            add("metric.for_customer", "metric", m["dim_metric_id"], "risk_customer", cid)
+            add(
+                "metric.for_customer",
+                "metric",
+                m["dim_metric_id"],
+                "risk_customer",
+                cid,
+            )
     for p in projects:
         for g in groups:
             if g["group_customer_name"] == p.get("group_customer_name"):
-                add("risk_project.for_group", "risk_project", p["risk_project_id"], "group_customer", g["group_customer_no"])
+                add(
+                    "risk_project.for_group",
+                    "risk_project",
+                    p["risk_project_id"],
+                    "group_customer",
+                    g["group_customer_no"],
+                )
                 break
     sig2warning = {w["signal_id"]: w["warning_id"] for w in warnings}
     for o in orders:
@@ -402,7 +468,13 @@ def main() -> None:
             continue
         for d in disposals:
             if d.get("warning_id") == wid:
-                add("disposal.has_approval", "disposal", d["disposal_id"], "approve_order", o["approve_order_id"])
+                add(
+                    "disposal.has_approval",
+                    "disposal",
+                    d["disposal_id"],
+                    "approve_order",
+                    o["approve_order_id"],
+                )
                 break
 
     # ---- 序列化 ----
@@ -410,7 +482,10 @@ def main() -> None:
 
     payload = {
         "schema_version": 1,
-        "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # UTC 取值转本地时区：满足 DTZ005（now 必须显式时区）且展示本地生成时刻
+        "generated_at": datetime.datetime.now(datetime.timezone.utc)
+        .astimezone()
+        .strftime("%Y-%m-%d %H:%M:%S"),
         "note": "风险演示物化快照：从 ap_anping 真实数据同源生成（scripts/export_risk_demo_snapshot.py），"
         "非手写数字；对应演示剧本「预热/物化缓存」设计。",
         "meta": meta,
@@ -424,7 +499,10 @@ def main() -> None:
     db.close()
 
     print("totals:", json.dumps(totals, ensure_ascii=False))
-    print("sample counts:", json.dumps({k: len(v) for k, v in items.items()}, ensure_ascii=False))
+    print(
+        "sample counts:",
+        json.dumps({k: len(v) for k, v in items.items()}, ensure_ascii=False),
+    )
     print("edges:", len(edges))
     print("group_metrics groups:", len(group_metrics))
     print("written:", OUT)
@@ -432,4 +510,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

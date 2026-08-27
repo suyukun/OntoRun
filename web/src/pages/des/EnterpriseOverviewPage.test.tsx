@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import EnterpriseOverviewPage from './EnterpriseOverviewPage';
+// 确定性加固：异步快照用例在高负载机器上会超过默认 5s（CI 稳定性），放宽到 20s
+vi.setConfig({ testTimeout: 20_000 });
 
 const overviewFixture = {
   enterprise: {

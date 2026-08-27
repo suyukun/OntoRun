@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "generated_at": "2026-08-27 11:03:01",
+ "generated_at": "2026-08-27 13:02:46",
  "note": "风险演示物化快照：从 ap_anping 真实数据同源生成（scripts/export_risk_demo_snapshot.py），非手写数字；对应演示剧本「预热/物化缓存」设计。",
  "meta": {
   "objects": [

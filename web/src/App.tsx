@@ -1,5 +1,6 @@
 // 本体驱动 UI 主壳 —— MetaProvider 加载 /meta/schema，react-router 路由 + AntD Layout
-// S3 M4 扩展：风险预警演示（深色金融风控壳，/ + /risk/*），S1 零售演示（浅色壳）保持不破坏。
+// S3 风险预警演示：浅色专业金融风（方向 A），/ 与 /risk/* 全浅色；对话并入数据工作台双栏；
+// S1 零售演示（浅色壳）保持不破坏。
 import { useTranslation } from 'react-i18next';
 import {
   BrowserRouter,
@@ -31,10 +32,9 @@ import LinkTypesPage from './pages/builder/LinkTypesPage';
 import PipelineCanvas from './components/PipelineCanvas';
 import GraphPage from './pages/GraphPage';
 import RiskLandingPage from './risk/RiskLandingPage';
-import RiskChatPanel from './risk/RiskChatPanel';
 import RiskBrowsePage from './risk/RiskBrowsePage';
 import EnterpriseOverviewPage from './pages/des/EnterpriseOverviewPage';
-import { RISK_COLORS, riskDarkTheme } from './risk/riskTheme';
+import { RISK_COLORS, riskLightTheme } from './risk/riskTheme';
 import './risk/risk.css';
 
 const { Sider, Header, Content } = Layout;
@@ -146,29 +146,30 @@ function S1Shell() {
 }
 
 // ======================================================================
-// 风险预警演示壳（深色金融风控：/ + /risk/*）
+// 风险预警演示壳（浅色金融风：/ 与 /risk/*）；主题单一来源 = riskLightTheme
 // ======================================================================
 function RiskShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
 
   const menuGroups: MenuGroup[] = [
     {
       key: 'risk-demo',
       type: 'group',
-      label: '风险预警演示',
+      label: t('nav.riskDemo'),
       children: [
-        { key: '/', icon: <SafetyCertificateOutlined />, label: '价值总览' },
-        { key: '/risk/chat', icon: <RobotOutlined />, label: '风险对话 · 双签' },
-        { key: '/risk/browse', icon: <DatabaseOutlined />, label: '风险数据浏览' },
-        { key: '/des', icon: <ClusterOutlined />, label: '企业模拟 (DES)' },
+        { key: '/', icon: <SafetyCertificateOutlined />, label: t('nav.valueOverview') },
+        // 「风险对话·双签」并入工作台入口（工作台右栏即对话面板）
+        { key: '/risk/browse', icon: <DatabaseOutlined />, label: t('nav.riskWorkbench') },
+        { key: '/des', icon: <ClusterOutlined />, label: t('nav.desEnterprise') },
       ],
     },
     {
       key: 'other',
       type: 'group',
-      label: '零售演示（S1）',
-      children: [{ key: '/browse', icon: <AppstoreOutlined />, label: '零售供应链演示' }],
+      label: t('nav.retailDemo'),
+      children: [{ key: '/browse', icon: <AppstoreOutlined />, label: t('nav.retailChain') }],
     },
   ];
 
@@ -176,11 +177,10 @@ function RiskShell() {
   const selectedKey = flatKeys.includes(location.pathname) ? location.pathname : '/';
 
   return (
-    <ConfigProvider theme={{ ...riskDarkTheme, algorithm: theme.darkAlgorithm }}>
+    <ConfigProvider theme={riskLightTheme}>
       <Layout style={{ minHeight: '100vh', background: RISK_COLORS.ink }}>
         <Sider
           width={232}
-          theme="dark"
           style={{ background: RISK_COLORS.surface, borderRight: '1px solid ' + RISK_COLORS.border }}
         >
           <div style={{ padding: '18px 16px', borderBottom: '1px solid ' + RISK_COLORS.border }}>
@@ -188,21 +188,19 @@ function RiskShell() {
               <span
                 style={{
                   width: 26, height: 26, borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  background: RISK_COLORS.accent, color: RISK_COLORS.accentText, fontWeight: 800, fontSize: 14,
+                  background: RISK_COLORS.accent, color: '#ffffff', fontWeight: 600, fontSize: 14,
                 }}
               >
                 安
               </span>
               <div>
-                <div style={{ color: RISK_COLORS.text, fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>安平金控</div>
+                <div style={{ color: RISK_COLORS.text, fontWeight: 600, fontSize: 14, lineHeight: 1.2 }}>安平金控</div>
                 <div style={{ color: RISK_COLORS.textFaint, fontSize: 11 }}>风险管理部 · 风险预警系统</div>
               </div>
             </div>
           </div>
           <Menu
-            className="risk-menu"
             mode="inline"
-            theme="dark"
             style={{ background: 'transparent', borderRight: 0, paddingTop: 8 }}
             selectedKeys={[selectedKey]}
             items={menuGroups}
@@ -212,6 +210,7 @@ function RiskShell() {
         <Layout>
           <Header
             style={{
+              height: 64,
               background: RISK_COLORS.surface,
               borderBottom: '1px solid ' + RISK_COLORS.border,
               display: 'flex',
@@ -229,10 +228,12 @@ function RiskShell() {
           <Content style={{ background: 'transparent', padding: 0 }}>
             <Routes>
               <Route path="/" element={<RiskLandingPage />} />
-              <Route path="/risk/chat" element={<RiskChatPanel />} />
+              {/* 数据工作台：左数据浏览 + 右风险对话·双签（原 /risk/chat 已并入） */}
               <Route path="/risk/browse" element={<RiskBrowsePage />} />
               <Route path="/des" element={<EnterpriseOverviewPage />} />
-              <Route path="/risk/*" element={<Navigate to="/risk/chat" replace />} />
+              {/* 旧链接兜底：/risk/chat 与任意 /risk/* 一律进入工作台 */}
+              <Route path="/risk/chat" element={<Navigate to="/risk/browse" replace />} />
+              <Route path="/risk/*" element={<Navigate to="/risk/browse" replace />} />
             </Routes>
           </Content>
         </Layout>
