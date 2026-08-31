@@ -3,8 +3,10 @@
 对照 docs/S3-M1b-DES金融化设计-v1.md（§三 行分布 / §五 确定性 / §六 质量门禁）
 + docs/S3-安平金控-业务规则建模-v1.md（DMN 规则 1-7）+ docs/S3-M1a-字段脱敏映射-全量42表.json（字段）：
 - 配置层：54 表注册表继承 risk 模板，Σ row_count == total_target（约 43.6 万）；
-- 生成层（小规模 scale=0.001，~445 行，秒级）：54 表行数 == 配置 row_count、编码唯一且格式正确、
-  预警等级分布（BLUE 主 / RED 少）、五级分类分布（NORMAL 主）、外键无孤儿（D 门禁同口径，49 条）、
+- 生成层（小规模 scale=0.001，~380 行，秒级）：54 表行数 == 配置 row_count、编码唯一且格式正确、
+  预警等级中文枚举（黄55/橙34/红11，口径包§五）、事件类型偏态（信用45/市场20/流动性15/合规12/操作8）、
+  生命周期七态（待确认30/确认中20/已确认20/处置中15/已关闭10/已撤销3/已排除2）+ 流程/审批字段连贯、
+  名称纯净化（无「·编号尾巴」）、五级分类分布（NORMAL 主）、外键无孤儿（D 门禁同口径，49 条）、
   DDL 列 == 生成行键（无漂移）、脱敏门禁（表名/字段名对原型 o_a_erms/p_erms 零命中）、
   确定性（同 seed 两次生成 → table_sha256 逐一相同）；
 - DMN 规则函数纯函数断言（规则 1/2/3 决策表命中）。
@@ -21,6 +23,8 @@ import pytest
 from src.des.config import load_config
 from src.des.generate import TABLE_SPECS, build_enterprise
 from src.des.generators.risk_generators import (
+    LEVEL1_TOPICS,
+    LEVEL2_BY_L1,
     concentration_calc,
     five_category_assign,
     warn_level_decide,
@@ -125,7 +129,7 @@ def test_config_total_matches_sum() -> None:
         for sys_cfg in _CONFIG["enterprise"]["systems"].values()
         for spec in sys_cfg["tables"].values()
     )
-    assert total == _CONFIG["total_target"] == 436265
+    assert total == _CONFIG["total_target"] == 371301
 
 
 def test_config_inherits_risk_template() -> None:
@@ -185,15 +189,15 @@ def test_encodings_unique_and_formatted(ap_dir: Path) -> None:
 
 
 def test_warning_level_distribution(ap_dir: Path) -> None:
-    """规则 1 预警等级分布：BLUE 为主（~70%）、RED 少数（~5%），且等级合法。"""
+    """口径包§五 预警等级分布：中文「黄/橙/红」（黄 55 / 橙 34 / 红 11），等级合法且黄为主、红最少。"""
     rows = _query(ap_dir, "risk", "SELECT warn_level FROM ap_warning_signal")
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["warn_level"]] = counts.get(r["warn_level"], 0) + 1
     n = len(rows)
-    assert set(counts) <= {"RED", "YELLOW", "BLUE"}
-    assert counts.get("BLUE", 0) / n >= 0.6
-    assert counts.get("RED", 0) / n <= 0.15
+    assert set(counts) <= {"黄", "橙", "红"}
+    assert counts.get("黄", 0) / n >= 0.2  # 关注级为主（55% 权重下小样本稳健）
+    assert counts.get("红", 0) / n <= 0.5  # 红为少数（11% 权重）
 
 
 def test_five_classification_distribution(ap_dir: Path) -> None:
@@ -212,6 +216,61 @@ def test_concentration_status_follows_rule(ap_dir: Path) -> None:
     )
     statuses = {r["current_status"] for r in rows}
     assert statuses <= {"NORMAL", "YELLOW_ALERT", "ORANGE_ALERT", "RED_ALERT"}
+
+
+def test_event_type_distribution(ap_dir: Path) -> None:
+    """口径包§五 事件类型偏态：信用 45 / 市场 20 / 流动性 15 / 合规 12 / 操作 8；
+    小样本下断言信用类最多且覆盖合法类型集合（level2 与 level1 同源，理由模板对齐）。"""
+    rows = _query(
+        ap_dir, "risk",
+        "SELECT event_type, signal_level1_topic, signal_level2_topic, warn_reason FROM ap_warning_signal",
+    )
+    # 仅属于「其他事件类型」的二级主题（排除跨类型共有的，如 集中度超限∈信用/流动性）
+    exclusive = {
+        t: set().union(*(set(v) for k, v in LEVEL2_BY_L1.items() if k != t))
+        - set(LEVEL2_BY_L1[t])
+        for t in LEVEL2_BY_L1
+    }
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["event_type"]] = counts.get(r["event_type"], 0) + 1
+        # 理由模板与事件类型严格对齐（口径包§五）：
+        #  1) level2 必须属于 event_type 的二级主题集（结构保证，杜绝「价格波动」挂「信用风险」）；
+        #  2) warn_reason 不得出现仅属其他事件类型的二级主题措辞。
+        assert r["signal_level1_topic"] == r["event_type"], "level1 与 event_type 不一致"
+        assert r["signal_level2_topic"] in LEVEL2_BY_L1[r["event_type"]], (
+            f"事件类型 {r['event_type']} 挂错二级主题 {r['signal_level2_topic']}"
+        )
+        assert not any(x in r["warn_reason"] for x in exclusive[r["event_type"]]), (
+            f"warn_reason 出现其他事件类型主题: {r['warn_reason']}"
+        )
+    assert set(counts) <= set(LEVEL1_TOPICS)
+    # 信用风险权重 45% 最高：小样本下信用>=操作（8% 权重）稳健成立
+    assert counts.get("信用风险", 0) >= counts.get("操作风险", 0)
+
+
+def test_lifecycle_seven_states_and_coherence(ap_dir: Path) -> None:
+    """口径包§五 生命周期七态 + 流程/审批字段连贯：处置中必有 process_status、已审批必有 audit_comment。"""
+    rows = _query(
+        ap_dir, "risk",
+        "SELECT signal_status, process_status, audit_status, audit_comment FROM ap_warning_signal",
+    )
+    statuses = {r["signal_status"] for r in rows}
+    assert statuses <= {"待确认", "确认中", "已确认", "处置中", "已关闭", "已撤销", "已排除"}
+    assert "待确认" in statuses  # 主状态必现
+    for r in rows:
+        if r["signal_status"] == "处置中":
+            assert r["process_status"], f"处置中缺 process_status: {r}"
+        if r["audit_status"] == "已审批":
+            assert r["audit_comment"], f"已审批缺 audit_comment: {r}"
+
+
+def test_customer_name_purified(ap_dir: Path) -> None:
+    """口径包§五 名称纯净化：客户/集团名称无「·编号尾巴」（编号独立字段）。"""
+    rows = _query(ap_dir, "customer", "SELECT customer_name FROM ap_customer")
+    grow = _query(ap_dir, "customer", "SELECT group_customer_name FROM ap_group_customer")
+    assert all("·" not in r["customer_name"] for r in rows)
+    assert all("·" not in r["group_customer_name"] for r in grow)
 
 
 def test_fk_no_orphans(ap_dir: Path) -> None:
@@ -253,16 +312,17 @@ def test_determinism_same_seed_all_tables(tmp_path) -> None:
 # DMN 规则函数（纯函数决策表命中，§六 规则命中率）
 # ---------------------------------------------------------------------------
 def test_warn_level_decide_rule_table() -> None:
-    """规则 1 决策表：押品贬值 ≥30% / 集中度超限 ≥20% / 评分 ≥80 → RED。"""
-    assert warn_level_decide(85) == "RED"
-    assert warn_level_decide(50, collateral_depreciation=0.30) == "RED"
-    assert warn_level_decide(50, concentration_overrun=0.20) == "RED"
-    assert warn_level_decide(70) == "YELLOW"
-    assert warn_level_decide(50, collateral_depreciation=0.20) == "YELLOW"
-    assert warn_level_decide(50, concentration_overrun=0.15) == "YELLOW"
-    assert warn_level_decide(50, related_change=0.30) == "YELLOW"
-    assert warn_level_decide(30) == "BLUE"
-    assert warn_level_decide(30, collateral_depreciation=0.10) == "BLUE"
+    """规则 1 决策表（口径包§四/§三）：红=内部限额突破>12% 或押品贬值≥30% 或评分≥80；
+    橙=预警线命中 10-12% 或押品贬值 15-30% 或关联异动 20-50% 或评分 60-80；黄=关注线 9-10%。"""
+    assert warn_level_decide(85) == "红"
+    assert warn_level_decide(50, collateral_depreciation=0.30) == "红"
+    assert warn_level_decide(50, concentration_overrun=0.20) == "红"  # >12% 内部限额突破
+    assert warn_level_decide(70) == "橙"
+    assert warn_level_decide(50, collateral_depreciation=0.20) == "橙"
+    assert warn_level_decide(50, concentration_overrun=0.11) == "橙"  # 预警线 10-12%
+    assert warn_level_decide(50, related_change=0.30) == "橙"
+    assert warn_level_decide(30) == "黄"
+    assert warn_level_decide(30, concentration_overrun=0.095) == "黄"  # 关注线 9-10%
 
 
 def test_five_category_assign_rule_table() -> None:
@@ -284,4 +344,4 @@ def test_concentration_calc_rule_table() -> None:
     assert concentration_calc(0.18, 1)["status"] == "ORANGE_ALERT"
     assert concentration_calc(0.18, 1)["need_approval"] is True
     assert concentration_calc(0.30, 1)["status"] == "RED_ALERT"
-    assert concentration_calc(0.30, 1)["warn_level"] == "RED"
+    assert concentration_calc(0.30, 1)["warn_level"] == "红"
