@@ -210,7 +210,7 @@ def main() -> None:
     # 近期红色预警（让「本月红色预警」有样本可看）
     for r in db.rows(
         "risk",
-        "SELECT * FROM ap_warning_signal WHERE warn_level='RED' AND signal_generate_date >= '2026-12-01' ORDER BY warning_id LIMIT 8",
+        "SELECT * FROM ap_warning_signal WHERE warn_level='红' AND signal_generate_date >= '2026-12-01' ORDER BY warning_id LIMIT 8",
     ):
         add_warning(r)
 

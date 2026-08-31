@@ -107,14 +107,14 @@ def test_read_engine(rq: RiskQuery, store: RiskStore) -> None:
     res = _run(rq, {
         "object_type": "warning_signal",
         "filters": [
-            {"field": "warn_level", "op": "eq", "value": "RED"},
+            {"field": "warn_level", "op": "eq", "value": "红"},
             {"field": "signal_generate_date", "op": "ge", "value": _MONTH[0]},
             {"field": "signal_generate_date", "op": "le", "value": _MONTH[1]},
         ],
         "aggregations": [{"function": "count", "field": "*"}],
     })
     n = res["aggregations"][0]["value"] if not _is_declined(res) else None
-    n_gt = _q1(store, "SELECT COUNT(*) n FROM ap_warning_signal WHERE warn_level='RED' "
+    n_gt = _q1(store, "SELECT COUNT(*) n FROM ap_warning_signal WHERE warn_level='红' "
                       "AND signal_generate_date BETWEEN ? AND ?", _MONTH)["n"]
     check(n == n_gt, f"R05 红色预警 {n} 条（GT={n_gt}）")
 
@@ -250,7 +250,7 @@ def test_write_via_agent(store: RiskStore, engine, rq: RiskQuery) -> None:
     check(w is not None, "找到确认中(CONFIRMED)预警供调级")
     if not w:
         return
-    new_level = "RED" if w["warn_level"] != "RED" else "YELLOW"
+    new_level = "红" if w["warn_level"] != "红" else "橙"
 
     prov = MockProvider(responses=[
         ChatResponse(tool_calls=[ToolCall(
@@ -291,7 +291,7 @@ def test_write_via_agent(store: RiskStore, engine, rq: RiskQuery) -> None:
     prov3 = MockProvider(responses=[
         ChatResponse(tool_calls=[ToolCall(
             id="t3", name="adjust_warning_level",
-            arguments={"warning_id": w["warning_id"], "new_level": "BLUE", "reason": "x"},
+            arguments={"warning_id": w["warning_id"], "new_level": "紫", "reason": "x"},
         )]),
     ])
     agent3 = RiskAgent(registry=build_risk_source_registry(), provider=prov3,

@@ -129,7 +129,7 @@ def main() -> int:
     )
     check(w is not None, "找到确认中(CONFIRMED)信号")
     if w:
-        new_level = "RED" if w["warn_level"] != "RED" else "YELLOW"
+        new_level = "红" if w["warn_level"] != "红" else "橙"
         res = engine.execute(
             "adjust_warning_level",
             {
@@ -166,7 +166,7 @@ def main() -> int:
     # 非法枚举 → INVALID_PARAMS
     res2 = engine.execute(
         "adjust_warning_level",
-        {"warning_id": "WS-2026-00000001", "new_level": "PURPLE", "reason": "x"},
+        {"warning_id": "WS-2026-00000001", "new_level": "紫", "reason": "x"},
         actor="human",
     )
     check(
@@ -181,7 +181,7 @@ def main() -> int:
     if wc:
         res3 = engine.execute(
             "adjust_warning_level",
-            {"warning_id": wc["warning_id"], "new_level": "RED", "reason": "x"},
+            {"warning_id": wc["warning_id"], "new_level": "红", "reason": "x"},
             actor="human",
         )
         check(

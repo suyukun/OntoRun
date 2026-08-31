@@ -42,9 +42,10 @@ from src.ontology.risk_actions import RISK_ACTIONS
 from src.ontology.risk_links import RISK_LINK_TYPES
 
 # ---- 脊柱共享枚举（M2 设计 §1） ----
-WarnLevel = Literal["RED", "YELLOW", "BLUE"]  # 预警等级
-SignalStatus = Literal[  # 信号状态机：生成→确认→定级→处置中→关闭
-    "GENERATED", "CONFIRMED", "GRADED", "IN_DISPOSAL", "CLOSED"
+WarnLevel = Literal["黄", "橙", "红"]  # 预警等级（口径包§四：黄=关注/橙=紧急/红=危急）
+SignalStatus = Literal[  # 信号状态机：生成→确认→定级→处置中→关闭 + 终态（口径包§四 七态）
+    "GENERATED", "CONFIRMED", "GRADED", "IN_DISPOSAL", "CLOSED",
+    "REJECTED_AS_FALSE", "EXCLUDED",
 ]
 DisposalStatus = Literal[  # 处置状态机：草稿→提交→审批中→通过/驳回→执行→完成
     "DRAFT", "SUBMITTED", "APPROVING", "APPROVED", "REJECTED", "EXECUTING", "DONE"
@@ -131,14 +132,15 @@ class WarningSignal(BaseModel):
     )
     org_id: str = own(OWN_SOURCE, "机构编码")
     org_name: str = own(OWN_SOURCE, "机构名称（脱敏）")
-    warn_level: WarnLevel = own(OWN_SOURCE, "预警等级（RED/YELLOW/BLUE）")
+    warn_level: WarnLevel = own(OWN_SOURCE, "预警等级（黄/橙/红，口径包§四）")
     event_type: str = own(OWN_SOURCE, "信号类型")
     warn_source: str = own(OWN_SOURCE, "预警信息来源")
     warn_reason: str = own(OWN_SOURCE, "预警事由（脱敏）")
     signal_id: str = own(OWN_SOURCE, "信号编号")
     signal_name: str = own(OWN_SOURCE, "信号名称")
     signal_status: SignalStatus = own(
-        OWN_SOURCE, "信号状态（GENERATED/CONFIRMED/GRADED/IN_DISPOSAL/CLOSED）"
+        OWN_SOURCE,
+        "信号状态（GENERATED/CONFIRMED/GRADED/IN_DISPOSAL/CLOSED/REJECTED_AS_FALSE/EXCLUDED）",
     )
     signal_level1_topic: str = own(OWN_SOURCE, "信号一级主题")
     signal_level2_topic: str = own(OWN_SOURCE, "信号二级主题")

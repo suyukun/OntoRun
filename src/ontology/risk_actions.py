@@ -27,7 +27,7 @@ class ConfirmWarningParams(BaseModel):
 
 class AdjustWarningLevelParams(BaseModel):
     warning_id: str = Field(max_length=_STR_MAX, description="预警信号 ID")
-    new_level: Literal["RED", "YELLOW", "BLUE"] = Field(description="调整后的预警等级")
+    new_level: Literal["黄", "橙", "红"] = Field(description="调整后的预警等级（黄/橙/红）")
     reason: str = Field(min_length=1, max_length=_TEXT_MAX, description="调整原因")
 
 
@@ -97,12 +97,12 @@ RISK_ACTIONS: list[ActionDef] = [
         state_effects=StateEffects(source_backed=["WarningSignal.signal_status"]),
         error_codes=["INVALID_PARAMS", "WARNING_NOT_FOUND", "WARNING_NOT_CONFIRMABLE"],
     ),
-    # ---- 核心动作 2：预警等级调整（CONFIRMED 下 RED/YELLOW/BLUE 调整） ----
+    # ---- 核心动作 2：预警等级调整（CONFIRMED 下 黄/橙/红 调整） ----
     ActionDef(
         name="adjust_warning_level",
         description=(
             "调整预警等级：仅 CONFIRMED 状态可调；等级调整必须给出 reason；"
-            "升级至更高预警等级（如 YELLOW→RED）为高风险调整，需人机双签/审批。"
+            "升级至更高预警等级（如 橙→红）为高风险调整，需人机双签/审批。"
         ),
         params_model=AdjustWarningLevelParams,
         preconditions=[
@@ -113,7 +113,7 @@ RISK_ACTIONS: list[ActionDef] = [
             ),
             Precondition(
                 error_code="WARNING_LEVEL_INVALID",
-                summary="new_level ∈ {RED,YELLOW,BLUE} 且升级需审批（风险动作）",
+                summary="new_level ∈ {黄,橙,红} 且升级需审批（风险动作）",
             ),
         ],
         state_effects=StateEffects(

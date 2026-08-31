@@ -118,8 +118,8 @@ def main() -> int:
         "WarningSignal.signal_status 枚举 = GENERATED/CONFIRMED/GRADED/IN_DISPOSAL/CLOSED",
     )
     check(
-        ws["warn_level"]["enum"] == ["RED", "YELLOW", "BLUE"],
-        "WarningSignal.warn_level 枚举 = RED/YELLOW/BLUE",
+        ws["warn_level"]["enum"] == ["黄", "橙", "红"],
+        "WarningSignal.warn_level 枚举 = 黄/橙/红",
     )
     rp = payload["objects"]["RiskProject"]["schema"]["properties"]
     check(
@@ -138,8 +138,8 @@ def main() -> int:
     check("（脱敏）" in cr["internal_customer_no"].get("description", ""), "CustomerRelation.internal_customer_no 注释标注（脱敏）")
     wc = payload["objects"]["WarningConcentration"]["schema"]["properties"]
     check(
-        wc["warn_level"]["enum"] == ["RED", "YELLOW"],
-        "WarningConcentration.warn_level 枚举 = RED/YELLOW",
+        wc["warn_level"]["enum"] == ["红", "橙", "黄"],
+        "WarningConcentration.warn_level 枚举 = 红/橙/黄",
     )
     at = payload["objects"]["ApproveTodo"]["schema"]["properties"]
     check(

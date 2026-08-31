@@ -155,7 +155,7 @@ class AdjustWarningLevelHandler(ActionHandler):
             )
             return ok, {"signal_status": warning["signal_status"]} if warning else None
         if code == "WARNING_LEVEL_INVALID":
-            # new_level ∈ {RED,YELLOW,BLUE} 由参数模型 Literal 强校验；升级审批走双签
+            # new_level ∈ {黄,橙,红} 由参数模型 Literal 强校验；升级审批走双签
             return True, {"note": "枚举由参数模型校验，升级审批由双签承担"}
         return True, None
 

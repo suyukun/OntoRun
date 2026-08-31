@@ -15,11 +15,12 @@
    （含库别名限定），供 ObjectIndex / 读引擎（ContractExecutor 走同一数据源）消费。
 
 信号状态映射说明（适配决策，见 docs/S3-M1a-字段脱敏映射-脊柱12表.json 值域）：
-源 ap_warning_signal.signal_status 5 值 ↔ 本体 5+1 态，取单调递进：
+源 ap_warning_signal.signal_status 7 值 ↔ 本体 7 态，取单调递进：
   待确认=GENERATED（生成待确认）→ 确认中=CONFIRMED（人工认领/进入确认流程）
   → 已确认=GRADED（定级完成）→ 处置中=IN_DISPOSAL（处置流转）→ 已关闭=CLOSED；
-  已撤销=REJECTED_AS_FALSE（误报撤销）。处置方案提交把 signal_status 置「处置中」，
-  销号再由「处置中」→「已关闭」，与业务流程建模的状态机一致。
+  已撤销=REJECTED_AS_FALSE（误报撤销）、已排除=EXCLUDED（非实质风险排除）。
+  处置方案提交把 signal_status 置「处置中」，销号再由「处置中」→「已关闭」，
+  与业务流程建模的状态机一致。
 
 处置身份适配：本体 Disposal.disposal_id 在源系统落 ap_warning_disposal（WD- 前缀，
 处置状态载体表，1 处置↔1 预警，含 disposal_status）；ap_disposal（DSP- 前缀）是处置
@@ -48,7 +49,7 @@ DEFAULT_RISK_ONTOLOGY_DB = (
 # 演示业务年度（ap_anping 编码规则：{PREFIX}-{YYYY}-{8位流水}，data 均按 2026）
 RISK_DEMO_YEAR = 2026
 
-# ---- 信号状态：本体规范态 ↔ 源系统中文值（适配层，1:1） ----
+# ---- 信号状态：本体规范态 ↔ 源系统中文值（适配层，1:1；口径包§四 七态） ----
 SIGNAL_STATUS_TO_CN: dict[str, str] = {
     "GENERATED": "待确认",
     "CONFIRMED": "确认中",
@@ -56,6 +57,7 @@ SIGNAL_STATUS_TO_CN: dict[str, str] = {
     "IN_DISPOSAL": "处置中",
     "CLOSED": "已关闭",
     "REJECTED_AS_FALSE": "已撤销",
+    "EXCLUDED": "已排除",
 }
 SIGNAL_STATUS_FROM_CN: dict[str, str] = {v: k for k, v in SIGNAL_STATUS_TO_CN.items()}
 

@@ -83,8 +83,8 @@ class WarningConcentration(BaseModel):
     comp_lead_push_status: str = own(OWN_SOURCE, "金控领导预警推送状态 字典项P057")
     sub_company_push_status: str = own(OWN_SOURCE, "子公司推送状态 字典项P059")
     sub_company_push_time: datetime = own(OWN_SOURCE, "子公司推送时间")
-    warn_level: Literal["RED", "YELLOW"] = own(
-        OWN_SOURCE, "集中度预警等级 字典项P081 红色预警RED、黄色预警YELLOW"
+    warn_level: Literal["红", "橙", "黄"] = own(
+        OWN_SOURCE, "集中度预警等级 字典项P081（口径包§四：红/橙/黄）"
     )
     is_deleted: int = own(OWN_SOURCE, "0:未删除,1:删除")
     create_user: str = own(OWN_SOURCE, "创建人")
@@ -105,7 +105,7 @@ class WarningDerive(BaseModel):
     org_id: str = own(OWN_SOURCE, "机构编码")
     org_name: str = own(OWN_SOURCE, "机构名称（脱敏）")
     belong_group: str = own(OWN_SOURCE, "所属集团（脱敏）")
-    warn_level: Literal["RED", "YELLOW", "BLUE"] = own(OWN_SOURCE, "预警等级")
+    warn_level: Literal["黄", "橙", "红"] = own(OWN_SOURCE, "预警等级（口径包§四）")
     event_type: str = own(OWN_SOURCE, "信号类型")
     warn_source: str = own(OWN_SOURCE, "预警信息来源")
     warn_reason: str = own(OWN_SOURCE, "预警事由（脱敏）")
@@ -114,7 +114,8 @@ class WarningDerive(BaseModel):
     signal_id: str = own(OWN_SOURCE, "信号编号")
     signal_name: str = own(OWN_SOURCE, "信号名称")
     signal_status: Literal[
-        "GENERATED", "CONFIRMED", "GRADED", "IN_DISPOSAL", "CLOSED"
+        "GENERATED", "CONFIRMED", "GRADED", "IN_DISPOSAL", "CLOSED",
+        "REJECTED_AS_FALSE", "EXCLUDED",
     ] = own(OWN_SOURCE, "信号状态")
     signal_level1_topic: str = own(OWN_SOURCE, "信号一级主题")
     signal_level2_topic: str = own(OWN_SOURCE, "信号二级主题")
