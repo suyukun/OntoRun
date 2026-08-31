@@ -5,11 +5,11 @@
 # 表名/字段名一律用脱敏名（ap_*，与脊柱一致）；原型表名（o_a_erms_*/p_erms_*/o_base_*/o_sys_*/erms_*）
 # 只作溯源注释（source_table），不出现在库表名/字段名（S3-M1a 选表脱敏清单 待办 3 门禁）。
 # 行数口径：核心业务表（客户关系/押品/共债/集中度预警/衍生/背离/资产/投资/审批待办等）每表 1k-8k 行；
-# 支撑表（日志/参数/流水号/字典/机构/用户等）每表 50-500 行；Σ 12+42 = 436265 ≈ 43.6 万行。
+# 支撑表（日志/参数/流水号/字典/机构/用户等）每表 50-500 行；Σ 12+42 = 376301（口径包§五：预警信号~2 万、客户~5 万）。
 industry: financial_risk_control
 template_version: "0.1"
-data_version: "M1b-2"           # 数据版本（M1b-2 = 全量 54 表；参与 config_sha256）
-total_target: 436265            # Σ 54 表 row_count（约 43.6 万，§三 总门禁）
+data_version: "S4-1"            # 数据版本（S4-1 = 口径包 v0.3 再生成：中文枚举/偏态分布/剧本道具；参与 config_sha256）
+total_target: 371301            # Σ 54 表 row_count（口径包§五：信号~2 万/客户~5 万 + 剧本道具，§三 总门禁）
 
 coding: &coding
   # 机验占位符（validate 要求 {YYYY}/{NNNN}/{CCC} 齐全）；金融实际编码见 DMN 规则 4：
@@ -30,15 +30,15 @@ enterprise:
     customer:
       db: customer.db
       tables:
-        ap_group_customer:            # 脊柱 12（保留，不改）
+        ap_group_customer:            # 脊柱 12（row_count 含 3 剧本道具集团：天晟/恒昌/瑞华）
           kind: master
-          row_count: 8000
+          row_count: 8003
           pk: [group_customer_no]
           depends_on: []
           fk: {}
-        ap_customer:                  # 脊柱 12（保留，不改）
+        ap_customer:                  # 脊柱 12（row_count 含 3 剧本道具客户：天晟实业/恒昌贸易/瑞华实业）
           kind: master
-          row_count: 50000
+          row_count: 50003
           pk: [customer_id]
           depends_on: [customer.ap_group_customer]
           fk: {group_customer_no: customer.ap_group_customer}
@@ -46,13 +46,13 @@ enterprise:
         # 客户关系域（o_a_erms_cust_relation / cust_relation_opt / cust_list / top500_cust_info）
         ap_customer_relation:
           kind: master
-          row_count: 4000
+          row_count: 4003  # +3 恒昌↔天晟 隐性一致行动人线索切片（股权代持/交叉担保/资金往来）
           pk: [customer_relation_id]
           depends_on: [customer.ap_customer]
           fk: {internal_customer_no: customer.ap_customer}
         ap_customer_relation_tree:
           kind: master
-          row_count: 3000
+          row_count: 3003  # +3 恒昌三条识别线索（股权代持线索/交叉担保链/资金往来异动）
           pk: [customer_relation_tree_id]
           depends_on: [customer.ap_customer]
           fk: {internal_customer_no: customer.ap_customer}
@@ -83,7 +83,7 @@ enterprise:
           fk: {customer_no: customer.ap_customer}
         ap_subsidiary_credit_detail:
           kind: transaction
-          row_count: 8000
+          row_count: 8005  # +5 剧本道具：天晟(银行48/证券22/资管16.4) + 恒昌16 + 瑞华75.2（亿元）
           pk: [project_id]
           depends_on: [customer.ap_group_customer, customer.ap_customer]
           fk: {group_customer_name: customer.ap_group_customer}
@@ -115,21 +115,21 @@ enterprise:
     risk:
       db: risk.db
       tables:
-        ap_warning_signal:            # 脊柱 12（保留，不改）
+        ap_warning_signal:            # 脊柱 12（口径包§五：信号 ~2 万，含 3 剧本预警：天晟橙/天晟红/瑞华黄）
           kind: transaction
-          row_count: 80000
+          row_count: 20003
           pk: [warning_id]
           depends_on: [customer.ap_customer, customer.ap_group_customer]
           fk: {customer_id: customer.ap_customer, group_customer_no: customer.ap_group_customer}
-        ap_warning_disposal:          # 脊柱 12（保留，不改）
+        ap_warning_disposal:          # 脊柱 12（+3 剧本处置：天晟橙/天晟红处置中、瑞华黄已处置闭环）
           kind: transaction
-          row_count: 20000
+          row_count: 20003
           pk: [disposal_id]
           depends_on: [risk.ap_warning_signal]
           fk: {warning_id: risk.ap_warning_signal}
-        ap_disposal:                  # 脊柱 12（保留，不改）
+        ap_disposal:                  # 脊柱 12（处置批次主单按信号数上限对齐：信号 2 万）
           kind: transaction
-          row_count: 25000
+          row_count: 20000
           pk: [disposal_id]
           depends_on: [risk.ap_warning_signal]
           fk: {}
@@ -212,9 +212,9 @@ enterprise:
     concentration:
       db: concentration.db
       tables:
-        ap_concentration_limit:       # 脊柱 12（保留，不改）
+        ap_concentration_limit:       # 脊柱 12（+2 剧本集中度：天晟 10.8% 橙 / 瑞华 9.4% 黄）
           kind: master
-          row_count: 8000
+          row_count: 8002
           pk: [concentration_limit_id]
           depends_on: [customer.ap_customer]
           fk: {customer_no: customer.ap_customer}
@@ -366,7 +366,7 @@ enterprise:
           fk: {}
         ap_sys_param:
           kind: master
-          row_count: 300
+          row_count: 311  # +11 资本常量（口径包§一：并表 800 亿/银行 600/480/60/证券 5.5%/资管 8.2%/R1a 三线）
           pk: [sys_param_id]
           depends_on: []
           fk: {}

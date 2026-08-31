@@ -562,7 +562,7 @@ CREATE TABLE ap_warn_signal_concentration (
   comp_lead_push_status TEXT NOT NULL,  -- 金控领导预警推送状态 字典项P057
   sub_company_push_status TEXT NOT NULL,  -- 子公司推送状态 字典项P059
   sub_company_push_time TEXT NOT NULL,  -- 子公司推送时间
-  warn_level TEXT NOT NULL,  -- 集中度预警等级 字典项P081 红色预警RED、黄色预警YELLOW
+  warn_level TEXT NOT NULL,  -- 集中度预警等级 字典项P081 红/橙/黄（口径包§四）
   is_deleted INTEGER NOT NULL,  -- 0:未删除,1:删除
   create_user TEXT NOT NULL,  -- 创建人
   create_time TEXT NOT NULL,  -- 创建时间

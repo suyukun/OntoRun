@@ -17,10 +17,12 @@ import random
 from datetime import date, timedelta
 from typing import Any
 
+from .risk_script_props import SCRIPT_PROP_COUNTS
+
 # ---------------------------------------------------------------------------
 # 确定性锚点
 # ---------------------------------------------------------------------------
-ANCHOR_START = date(2023, 1, 1)  # 业务数据窗口（信号/处置/审批）
+ANCHOR_START = date(2025, 1, 1)  # 业务数据窗口（信号/处置/审批；跨 2 年 2025-2026，口径包§五）
 ANCHOR_END = date(2026, 12, 31)
 ESTAB_START, ESTAB_END = 1990, 2020  # 企业成立年份窗口
 
@@ -63,6 +65,21 @@ CUST_NAME_POOL = (
 )
 CUST_NAME_SUFFIX = ("有限公司", "集团", "股份公司", "有限责任公司", "控股集团")
 GROUP_SUFFIX = ("集团有限公司", "控股集团有限公司", "产业发展集团", "实业集团")
+# 名称中缀（名称纯净化：去掉「·编号尾巴」后，用自然中缀增加名称多样性，避免千篇一律）
+CUST_NAME_MID = (
+    "华东",
+    "华南",
+    "华北",
+    "西部",
+    "东北",
+    "长三角",
+    "珠三角",
+    "环渤海",
+    "沿海",
+    "中原",
+    "西南",
+    "西北",
+)
 FAMILY_NAMES = (
     "王",
     "李",
@@ -139,8 +156,10 @@ CUST_QUALITY_DIST = (
     ("4", "可疑", 0.015),
     ("5", "损失", 0.005),
 )
-# 预警等级分布（事实表整体：蓝为主）
-WARN_LEVEL_DIST = (("BLUE", 0.70), ("YELLOW", 0.25), ("RED", 0.05))
+# 预警等级（口径包§四/§八：存储即所见，中文「黄/橙/红」，Jack 拍板，不用英文码）
+WARN_LEVELS = ("黄", "橙", "红")
+# 预警等级分布（口径包§五：黄 55 / 橙 34 / 红 11）
+WARN_LEVEL_DIST = (("黄", 0.55), ("橙", 0.34), ("红", 0.11))
 # 五级分类分布（风险项目：明显偏险）
 FIVE_CLASS_DIST = (
     ("NORMAL", 0.55),
@@ -151,8 +170,17 @@ FIVE_CLASS_DIST = (
 )
 # 预警一级/二级主题（规则 5）
 LEVEL1_TOPICS = ("信用风险", "市场风险", "操作风险", "流动性风险", "合规风险")
+# 事件类型分布（口径包§五：信用 45 / 市场 20 / 流动性 15 / 合规 12 / 操作 8，偏态）
+EVENT_TYPE_DIST = (
+    ("信用风险", 0.45),
+    ("市场风险", 0.20),
+    ("流动性风险", 0.15),
+    ("合规风险", 0.12),
+    ("操作风险", 0.08),
+)
 LEVEL2_BY_L1 = {
-    "信用风险": ("逾期", "欠息", "押品贬值", "关联交易", "涉诉", "评级下调"),
+    # 集中度超限 = R1a 集团层归集集中度（口径包§三，信用风险主规则；_warn_reason 特例事由）
+    "信用风险": ("逾期", "欠息", "押品贬值", "关联交易", "集中度超限", "涉诉", "评级下调"),
     "市场风险": ("价格波动", "汇率波动", "利率上升", "估值下跌"),
     "操作风险": ("内控缺陷", "人员舞弊", "系统故障", "数据异常"),
     "流动性风险": ("现金流缺口", "融资受阻", "集中度超限", "期限错配"),
@@ -169,7 +197,17 @@ WARN_SOURCE_POOL = (
 )
 SIGNAL_WAY_POOL = ("系统自动", "人工录入", "批量导入")
 DATA_SOURCE_POOL = ("内部系统", "外部数据", "监管报送")
-SIGNAL_STATUS_POOL = ("待确认", "确认中", "已确认", "已关闭", "已撤销")
+# 生命周期七态（口径包§四状态全集；§五分布：待确认30/确认中20/已确认20/处置中15/已关闭10/已撤销3/已排除2）
+SIGNAL_STATUS_POOL = ("待确认", "确认中", "已确认", "处置中", "已关闭", "已撤销", "已排除")
+SIGNAL_STATUS_DIST = (
+    ("待确认", 0.30),
+    ("确认中", 0.20),
+    ("已确认", 0.20),
+    ("处置中", 0.15),
+    ("已关闭", 0.10),
+    ("已撤销", 0.03),
+    ("已排除", 0.02),
+)
 DISPOSAL_STATUS_POOL = ("未处置", "处置中", "已处置", "暂缓处置")
 CERT_TYPE_CODE = "统一社会信用代码"
 # 处置业务类型（字典项 P060）
@@ -262,22 +300,24 @@ def warn_level_decide(
     concentration_overrun: float = 0.0,
     related_change: float = 0.0,
 ) -> str:
-    """规则 1 预警等级判定：押品贬值 ≥30% 或 集中度超限 ≥20% 或 风险评分 ≥80 → RED；
-    押品贬值 15-30% 或 集中度超限 10-20% 或 关联异动 20-50% 或 风险评分 60-80 → YELLOW；否则 BLUE。"""
+    """规则 1 预警等级判定（口径包§四分级，存储即所见中文「黄/橙/红」）：
+    红 = 集中度突破内部限额 >12% 或 押品贬值 ≥30% 或 评分 ≥80（R5/R6 硬规则命中，风险基本确定）；
+    橙 = 命中预警线 10%≤集中度≤12% 或 押品贬值 15-30% 或 关联异动 20-50% 或 评分 60-80（预计实质风险）；
+    黄 = 其余（关注线以上苗头，关注）。"""
     if (
-        collateral_depreciation >= 0.30
-        or concentration_overrun >= 0.20
+        concentration_overrun > 0.12
+        or collateral_depreciation >= 0.30
         or risk_score >= 80
     ):
-        return "RED"
+        return "红"
     if (
-        0.15 <= collateral_depreciation < 0.30
-        or 0.10 <= concentration_overrun < 0.20
+        0.10 <= concentration_overrun <= 0.12
+        or 0.15 <= collateral_depreciation < 0.30
         or 0.20 <= related_change < 0.50
         or 60 <= risk_score < 80
     ):
-        return "YELLOW"
-    return "BLUE"
+        return "橙"
+    return "黄"
 
 
 def five_category_assign(
@@ -306,27 +346,27 @@ def concentration_calc(exposure: float, net_capital: float) -> dict[str, Any]:
         return {
             "ratio": ratio,
             "status": "RED_ALERT",
-            "warn_level": "RED",
+            "warn_level": "红",
             "need_approval": True,
         }
     if ratio > CONCENTRATION_WARN:
         return {
             "ratio": ratio,
             "status": "ORANGE_ALERT",
-            "warn_level": "ORANGE",
+            "warn_level": "橙",
             "need_approval": True,
         }
     if ratio > CONCENTRATION_NORMAL:
         return {
             "ratio": ratio,
             "status": "YELLOW_ALERT",
-            "warn_level": "YELLOW",
+            "warn_level": "黄",
             "need_approval": False,
         }
     return {
         "ratio": ratio,
         "status": "NORMAL",
-        "warn_level": "NONE",
+        "warn_level": "无",
         "need_approval": False,
     }
 
@@ -379,9 +419,17 @@ def codebt_link(rng: random.Random, group_members: list[dict[str, Any]]) -> list
 # 生成上下文工具（与 generate.py 对齐的本地副本，避免循环导入）
 # ---------------------------------------------------------------------------
 def _row_count(ctx: dict[str, Any], table_id: str) -> int:
-    """从配置表注册表读某表 row_count（配置为单一事实来源）。"""
+    """从配置表注册表读某表 row_count（配置为单一事实来源）。
+
+    全量（scale=None）时扣除剧本道具行数（道具由 generate.build_enterprise 生成后
+    注入，行数不变量：RNG 行数 + 道具行数 = 配置 row_count）；小 scale（配置含 scale
+    键）不注入道具，直接返回配置 row_count。
+    """
     code, name = table_id.split(".", 1)
-    return ctx["config"]["enterprise"]["systems"][code]["tables"][name]["row_count"]
+    base = ctx["config"]["enterprise"]["systems"][code]["tables"][name]["row_count"]
+    if "scale" in ctx["config"]:
+        return base
+    return base - SCRIPT_PROP_COUNTS.get(table_id, 0)
 
 
 def random_date(rng: random.Random) -> str:
@@ -467,7 +515,38 @@ def _invest_block(rng: random.Random, i: int) -> dict[str, Any]:
     }
 
 
-_LEVEL_CN = {"RED": "红色", "YELLOW": "黄色", "BLUE": "蓝色"}
+# 中文等级显示名（存储单字「黄/橙/红」，正文用双字「黄色/橙色/红色」，口径包§四）
+_LEVEL_CN = {"红": "红色", "橙": "橙色", "黄": "黄色"}
+
+# 生命周期 → 流程/审批字段连贯（口径包§五：处置中必有 process_status、已审批必有 audit_comment）
+_PROCESS_STATUS_BY_STATUS: dict[str, str | None] = {
+    "待确认": None,
+    "确认中": None,
+    "已确认": "待制定处置方案",
+    "处置中": "方案执行中",
+    "已关闭": "已解除",
+    "已撤销": "已撤销（误报）",
+    "已排除": "已排除（非实质风险）",
+}
+_AUDIT_BY_STATUS: dict[str, tuple[str, str | None]] = {
+    "待确认": ("未审批", None),
+    "确认中": ("未审批", None),
+    "已确认": ("已审批", "预警已人工确认定级，审批通过"),
+    "处置中": ("已审批", "预警已人工确认定级，审批通过，进入处置流程"),
+    "已关闭": ("已审批", "处置完成，审批通过，已解除关闭"),
+    "已撤销": ("已审批", "经核实为误报，审批通过撤销"),
+    "已排除": ("已审批", "经评估非实质风险，审批通过排除"),
+}
+
+
+def _lifecycle_fields(status: str) -> dict[str, str | None]:
+    """生命周期 → 流程/审批字段连贯（处置中必有 process_status、已审批必有 audit_comment）。"""
+    audit, comment = _AUDIT_BY_STATUS[status]
+    return {
+        "process_status": _PROCESS_STATUS_BY_STATUS[status],
+        "audit_status": audit,
+        "audit_comment": comment,
+    }
 
 
 def _driver_for_topic(level2: str) -> str:
@@ -484,27 +563,34 @@ def _driver_for_topic(level2: str) -> str:
 def _warn_inputs_for_level(
     rng: random.Random, level: str, driver: str
 ) -> dict[str, float]:
-    """为指定预警等级 + 主驱动维度生成输入，保证 warn_level_decide 命中 level（分布可机验）。"""
+    """为指定预警等级 + 主驱动维度生成输入，保证 warn_level_decide 命中 level（分布可机验）。
+
+    阈值对齐口径包§三 R1a（9% 黄 / 10% 橙 / 12% 红）与§四 分级（红=硬规则命中）。
+    """
     score = rng.randint(20, 59)
-    coll = round(rng.uniform(0.0, 0.14), 4)
-    conc = round(rng.uniform(0.0, 0.09), 4)
+    coll = round(rng.uniform(0.0, 0.08), 4)
+    conc = round(rng.uniform(0.0, 0.08), 4)
     rel = round(rng.uniform(0.0, 0.19), 4)
-    if level == "RED":
+    if level == "红":
         if driver == "collateral":
             coll = round(rng.uniform(0.30, 0.50), 4)
         elif driver == "concentration":
-            conc = round(rng.uniform(0.20, 0.35), 4)
+            conc = round(rng.uniform(0.13, 0.25), 4)  # >12% 内部限额突破
         else:
             score = rng.randint(80, 100)
-    elif level == "YELLOW":
+    elif level == "橙":
         if driver == "collateral":
             coll = round(rng.uniform(0.15, 0.29), 4)
         elif driver == "concentration":
-            conc = round(rng.uniform(0.10, 0.19), 4)
+            conc = round(rng.uniform(0.10, 0.12), 4)  # 命中预警线 10-12%
         elif driver == "related":
             rel = round(rng.uniform(0.20, 0.49), 4)
         else:
             score = rng.randint(60, 79)
+    elif level == "黄":
+        if driver == "concentration":
+            conc = round(rng.uniform(0.09, 0.099), 4)  # 关注线 9-10%
+        # 其余驱动保持低位（评分 20-59 / 轻微贬值）→ 关注级
     return {
         "risk_score": score,
         "collateral_depreciation": coll,
@@ -514,7 +600,7 @@ def _warn_inputs_for_level(
 
 
 def _warn_reason(level: str, level2: str, inputs: dict[str, float]) -> str:
-    """按主题生成预警事由文本（真实感来源）。"""
+    """按主题生成预警事由文本（真实感来源；level 中文「黄/橙/红」，与事件类型严格对齐）。"""
     cn = _LEVEL_CN[level]
     if level2 == "押品贬值":
         return f"押品估值较上期下降 {inputs['collateral_depreciation'] * 100:.0f}%，触发{cn}预警"
@@ -718,9 +804,8 @@ def _idcard(rng: random.Random) -> str:
 
 
 def _warn_text(rng: random.Random, level: str, topic: str) -> str:
-    """预警文本模板（等级 + 主题 → 事由/描述/推送事由等真实感文本）。"""
-    cn = {"RED": "红色", "YELLOW": "黄色", "BLUE": "蓝色"}[level]
-    return f"{topic}监测异常，触发{cn}预警，请相关条线关注并及时处置"
+    """预警文本模板（等级 + 主题 → 事由/描述/推送事由等真实感文本；level 中文「黄/橙/红」）。"""
+    return f"{topic}监测异常，触发{_LEVEL_CN[level]}预警，请相关条线关注并及时处置"
 
 
 # ---------------------------------------------------------------------------

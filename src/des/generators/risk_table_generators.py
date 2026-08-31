@@ -16,12 +16,14 @@ from .risk_generators import (
     CERT_TYPE_CODE,
     CONCENTRATION_NORMAL,
     CONCENTRATION_WARN,
+    CUST_NAME_MID,
     CUST_NAME_POOL,
     CUST_NAME_SUFFIX,
     DATA_SOURCE_POOL,
     DEAL_TYPE_POOL,
     DISPOSAL_STATUS_POOL,
     DIVISION_POOL,
+    EVENT_TYPE_DIST,
     ENTERPRISE_NATURE_POOL,
     ENTERPRISE_SCALE_POOL,
     ESTAB_END,
@@ -39,6 +41,7 @@ from .risk_generators import (
     ORDER_STATUS_DIST,
     ORG_POOL,
     SCORE_LEVEL_POOL,
+    SIGNAL_STATUS_DIST,
     SIGNAL_STATUS_POOL,
     SIGNAL_WAY_POOL,
     WARN_LEVEL_DIST,
@@ -51,6 +54,7 @@ from .risk_generators import (
     _five_class_inputs,
     _industry,
     _invest_block,
+    _lifecycle_fields,
     _person_name,
     _row_count,
     _shareholder_block,
@@ -87,7 +91,7 @@ def generate_ap_group_customer_rows(
             {
                 "group_customer_no": anping_grp_no(year, seq),
                 "data_date": random_date(rng),
-                "group_customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(GROUP_SUFFIX)}·{seq:06d}",
+                "group_customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(CUST_NAME_MID)}{rng.choice(GROUP_SUFFIX)}",
                 "customer_status": rng.choice(("正常", "关注", "注销", "吊销")),
                 "group_peer_flag": rng.randint(0, 1),
                 "asset_quality_level_code": code,
@@ -126,7 +130,7 @@ def generate_ap_customer_rows(
             "org_id": f"ORG{rng.randint(1, 99):03d}",
             "org_name": rng.choice(ORG_POOL),
             "customer_no": anping_cust_no(year, seq),
-            "customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(CUST_NAME_SUFFIX)}·{seq:06d}",
+            "customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(CUST_NAME_MID)}{rng.choice(CUST_NAME_SUFFIX)}",
             "group_customer_no": grp,
             "group_customer_name": group_names[grp],
             "cert_type": CERT_TYPE_CODE,
@@ -195,14 +199,16 @@ def generate_ap_customer_rows(
 def generate_ap_warning_signal_rows(
     rng: random.Random, ctx: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """risk.ap_warning_signal 预警信号事实表：等级按规则 1（BLUE70/YELLOW25/RED5）、编码 SGN 唯一、暴露额随主题。"""
+    """risk.ap_warning_signal 预警信号事实表（口径包§五）：等级中文「黄55/橙34/红11」、
+    事件类型偏态（信用45/市场20/流动性15/合规12/操作8）、生命周期七态分布；
+    warn_reason 与事件类型（level1/level2 同源）严格对齐；流程/审批字段按状态连贯。"""
     year = ctx["year"]
     customers = ctx["customer.ap_customer"]
     rows: list[dict[str, Any]] = []
     for seq in range(1, _row_count(ctx, "risk.ap_warning_signal") + 1):
         cust = rng.choice(customers)
-        level1 = rng.choice(LEVEL1_TOPICS)
-        level2 = rng.choice(LEVEL2_BY_L1[level1])
+        event_type = _weighted(rng, EVENT_TYPE_DIST)
+        level2 = rng.choice(LEVEL2_BY_L1[event_type])
         driver = _driver_for_topic(level2)
         level = _weighted(rng, WARN_LEVEL_DIST)
         inputs = _warn_inputs_for_level(rng, level, driver)
@@ -212,6 +218,8 @@ def generate_ap_warning_signal_rows(
             )
         else:
             risk_exp = round(rng.uniform(100, 50000) * rng.uniform(0.95, 1.20), 2)
+        sig_status = _weighted(rng, SIGNAL_STATUS_DIST)
+        lc = _lifecycle_fields(sig_status)
         rows.append(
             {
                 "warning_id": f"WS-{year:04d}-{seq:08d}",
@@ -222,17 +230,17 @@ def generate_ap_warning_signal_rows(
                 "org_name": cust["org_name"],
                 "belong_group": cust["group_customer_name"],
                 "warn_level": level,
-                "event_type": level1,
+                "event_type": event_type,
                 "warn_source": rng.choice(WARN_SOURCE_POOL),
                 "warn_reason": _warn_reason(level, level2, inputs),
                 "signal_way": rng.choice(SIGNAL_WAY_POOL),
                 "sys_proposal_signal_grade": level,
                 "signal_id": anping_sgn_no(year, seq),
-                "signal_name": f"{level1}-{level2}预警信号",
-                "signal_status": rng.choice(SIGNAL_STATUS_POOL),
-                "signal_level1_topic": level1,
+                "signal_name": f"{event_type}-{level2}预警信号",
+                "signal_status": sig_status,
+                "signal_level1_topic": event_type,
                 "signal_level2_topic": level2,
-                "signal_description": f"{cust['customer_name']} {level1}（{level2}）监测异常，建议关注",
+                "signal_description": f"{cust['customer_name']} {event_type}（{level2}）监测异常，建议关注",
                 "signal_generate_date": random_date(rng),
                 "signal_establish_date": random_date(rng),
                 "signal_establish_operator": _person_name(rng),
@@ -258,15 +266,19 @@ def generate_ap_warning_signal_rows(
                     ("单一集团", "关联集团", "一致行动人")
                 ),
                 "risk_exposure": risk_exp,
-                "disposal_status": rng.choice(DISPOSAL_STATUS_POOL),
+                "disposal_status": (
+                    "处置中"
+                    if sig_status == "处置中"
+                    else ("已处置" if sig_status == "已关闭" else rng.choice(DISPOSAL_STATUS_POOL))
+                ),
                 "disposal_demand": rng.choice(
                     ("3 个工作日内反馈", "10 个工作日内处置完毕", "立即处置")
                 ),
                 "apply_no": None,
                 "apply_comment": None,
-                "process_status": None,
-                "audit_status": None,
-                "audit_comment": None,
+                "process_status": lc["process_status"],
+                "audit_status": lc["audit_status"],
+                "audit_comment": lc["audit_comment"],
                 "is_shared": rng.randint(0, 1),
             }
         )
@@ -453,9 +465,9 @@ def generate_ap_approve_order_rows(
                 "is_deleted": 0,
                 "create_time": random_date(rng),
                 "update_time": random_date(rng),
-                "derive_warn_level_red": 1 if sig["warn_level"] == "RED" else 0,
-                "derive_warn_level_yellow": 1 if sig["warn_level"] == "YELLOW" else 0,
-                "derive_warn_level_blue": 1 if sig["warn_level"] == "BLUE" else 0,
+                "derive_warn_level_red": 1 if sig["warn_level"] == "红" else 0,
+                "derive_warn_level_yellow": 1 if sig["warn_level"] in ("黄", "橙") else 0,
+                "derive_warn_level_blue": 0,  # 口径包三级制（黄/橙/红）无蓝档
                 "opinion_description": (
                     rng.choice(
                         (

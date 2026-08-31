@@ -17,6 +17,7 @@ from .risk_generators import (
     CASE_TYPE_POOL,
     DATA_SOURCE_POOL,
     DEAL_SUGGESTION_POOL,
+    EVENT_TYPE_DIST,
     LEVEL1_TOPICS,
     LEVEL2_BY_L1,
     PENALTY_FORM_POOL,
@@ -330,9 +331,9 @@ def generate_ap_warn_signal_concentration_rows(
             t5["risk_exposure"], round(rng.uniform(50000, 200000), 2)
         )
         warn_level = (
-            "RED"
-            if result["warn_level"] == "RED"
-            else ("YELLOW" if result["warn_level"] in ("ORANGE", "YELLOW") else "BLUE")
+            "红"
+            if result["warn_level"] == "红"
+            else ("橙" if result["warn_level"] == "橙" else "黄")
         )
         rows.append(
             {
@@ -381,8 +382,8 @@ def generate_ap_warn_signal_derive_rows(
     rows: list[dict[str, Any]] = []
     for seq in range(1, _row_count(ctx, "risk.ap_warn_signal_derive") + 1):
         cust = rng.choice(customers)
-        level1 = rng.choice(LEVEL1_TOPICS)
-        level2 = rng.choice(LEVEL2_BY_L1[level1])
+        event_type = _weighted(rng, EVENT_TYPE_DIST)
+        level2 = rng.choice(LEVEL2_BY_L1[event_type])
         level = _weighted(rng, WARN_LEVEL_DIST)
         inputs = _warn_inputs_for_level(rng, level, _driver_for_topic(level2))
         order = rng.choice(orders)
@@ -396,23 +397,23 @@ def generate_ap_warn_signal_derive_rows(
                 "org_name": cust["org_name"],
                 "belong_group": cust["group_customer_name"],
                 "warn_level": level,
-                "event_type": level1,
+                "event_type": event_type,
                 "warn_source": rng.choice(WARN_SOURCE_POOL),
                 "warn_reason": _warn_reason(level, level2, inputs),
                 "signal_way": rng.choice(SIGNAL_WAY_POOL),
                 "sys_proposal_signal_grade": level,
                 "signal_id": f"SD-{year:04d}-{seq:08d}",
-                "signal_name": f"{level1}-{level2}衍生预警",
+                "signal_name": f"{event_type}-{level2}衍生预警",
                 "signal_status": rng.choice(SIGNAL_STATUS_POOL),
-                "signal_level1_topic": level1,
+                "signal_level1_topic": event_type,
                 "signal_level2_topic": level2,
-                "signal_description": _warn_text(rng, level, f"{level1}-{level2}"),
+                "signal_description": _warn_text(rng, level, f"{event_type}-{level2}"),
                 "signal_generate_date": random_date(rng),
                 "signal_establish_date": random_date(rng),
                 "signal_establish_operator": _person_name(rng),
                 "signal_update_date": random_date(rng),
                 "data_source": rng.choice(DATA_SOURCE_POOL),
-                "derive_signal_level1_topic": level1,
+                "derive_signal_level1_topic": event_type,
                 "derive_signal_level2_topic": level2,
                 "derive_warn_level": level,
                 "derive_establish_date": random_date(rng),
@@ -521,11 +522,8 @@ def generate_ap_warn_signal_deviation_rows(
         ytd = round(rng.uniform(0.05, 2.0), 4)
         mgr = round(rng.uniform(0.05, 1.8), 4)
         warn_rule = rng.choice(("A", "B", "C"))
-        level = (
-            "RED"
-            if max(mom, ytd, mgr) > 1.0
-            else ("YELLOW" if max(mom, ytd, mgr) > 0.5 else "BLUE")
-        )
+        peak = max(mom, ytd, mgr)
+        level = "红" if peak > 1.0 else ("橙" if peak > 0.6 else "黄")
         rows.append(
             {
                 "deviation_signal_id": f"DV-{year:04d}-{seq:08d}",
@@ -579,7 +577,7 @@ def generate_ap_deviation_warn_score_rows(
         mgr = round(rng.uniform(0.05, 1.8), 4)
         variation = round(mgr * round(rng.uniform(1000, 500000), 2), 2)
         score = round(min(100, max(0, 40 + variation / 5000)), 1)
-        warn_level = "RED" if score >= 80 else ("YELLOW" if score >= 60 else "BLUE")
+        warn_level = "红" if score >= 80 else ("橙" if score >= 60 else "黄")
         rows.append(
             {
                 "deviation_warn_score_id": f"DWS-{year:04d}-{seq:08d}",
@@ -596,9 +594,7 @@ def generate_ap_deviation_warn_score_rows(
                 "customer_level": grp["asset_quality_level"],
                 "score": score,
                 "warn_level_code": warn_level,
-                "warn_level": {"RED": "红色", "YELLOW": "黄色", "BLUE": "蓝色"}[
-                    warn_level
-                ],
+                "warn_level": {"红": "红色", "橙": "橙色", "黄": "黄色"}[warn_level],
                 "exposure_change": round(rng.uniform(-0.3, 1.0), 4),
                 "signal_strength": rng.choice(("强", "中", "弱")),
                 "disposal_priority": rng.choice(("高", "中", "低")),

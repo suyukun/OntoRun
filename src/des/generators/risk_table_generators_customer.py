@@ -257,7 +257,7 @@ def generate_ap_top500_customer_risk_rows(
                 "concentration_degree": round(result["ratio"], 4),
                 "risk_exposure_rank_no": seq,
                 "asset_quality_level": cust["asset_quality_level"],
-                "warn_flag": 1 if result["warn_level"] in ("RED", "ORANGE") else 0,
+                "warn_flag": 1 if result["warn_level"] in ("红", "橙") else 0,
                 "create_user": "SYSTEM",
                 "create_time": random_date(rng),
                 "update_user": "SYSTEM",

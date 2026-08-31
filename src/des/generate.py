@@ -1286,4 +1286,17 @@ def build_enterprise(
         _check_spec_vs_config(config, table_id, spec)
         rng = random.Random(f"{seed}:{table_id}")
         ctx[table_id] = _sort_rows(spec["gen"](rng, ctx), spec["pk"])
+
+    # S4 剧本道具注入（口径包§七，全量时）：确定性道具行并入 ctx（RNG 行数已在
+    # risk_generators._row_count 扣除对应 prop 数，行数不变量：RNG + 道具 = 配置 row_count）。
+    # 小 scale（scale≠None）不注入（RNG 表行数 = 配置缩放行数）。
+    if scale is None:
+        from .generators.risk_script_props import build_script_props
+
+        for table_id, prop_rows in build_script_props(ctx).items():
+            if not prop_rows:
+                continue
+            ctx[table_id] = _sort_rows(
+                [*ctx[table_id], *prop_rows], TABLE_SPECS[table_id]["pk"]
+            )
     return _persist_enterprise(out, config, seed, order, ctx, enterprise_code)
