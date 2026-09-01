@@ -118,9 +118,10 @@ class _ReportService:
     # ---- 归集余额（亿）：联合授信台账 × 真实集团身份（ap_customer 关联） ----
 
     def group_balance_yi(self, conn: sqlite3.Connection, group_no: str) -> float:
+        # 按唯一 cert_no 关联真实集团身份（group_customer_no），杜绝同名客户跨集团串号
         row = conn.execute(
             "SELECT SUM(s.business_balance) t FROM ap_subsidiary_credit_detail s "
-            "JOIN ap_customer c ON s.customer_name = c.customer_name "
+            "JOIN ap_customer c ON s.cert_no = c.cert_no "
             "WHERE c.group_customer_no = ?",
             (group_no,),
         ).fetchone()
@@ -169,10 +170,11 @@ class _ReportService:
     def group_credit_breakdown(
         self, conn: sqlite3.Connection, group_no: str, denoms: dict[str, float]
     ) -> list[dict[str, Any]]:
+        # 按唯一 cert_no 关联真实集团身份（group_customer_no），杜绝同名客户跨集团串号
         rows = conn.execute(
             "SELECT s.org_name, SUM(s.business_balance) t "
             "FROM ap_subsidiary_credit_detail s "
-            "JOIN ap_customer c ON s.customer_name = c.customer_name "
+            "JOIN ap_customer c ON s.cert_no = c.cert_no "
             "WHERE c.group_customer_no = ? GROUP BY s.org_name ORDER BY t DESC",
             (group_no,),
         ).fetchall()

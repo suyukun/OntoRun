@@ -5,9 +5,10 @@
 增量测试断言 10.8% / 12.8% 端到端验算。
 
 端点（口径包 v0.3 §六/§七）：
-- GET /risk/evidence/group-reveal?group_customer_name=…     第 1 幕揭示：逐家 → 归集 10.8% 橙
-- GET /risk/evidence/related-upgrade?group_customer_name=…  第 2 幕升级识别：三线索 + R2 重算 12.8% 红
-- GET /risk/evidence/approval-chain?…                       第 4 幕双签驳回：处置审批链 + 2023 办法第二十三条
+- GET /risk/evidence/group-reveal?group_customer_no=…     第 1 幕揭示：逐家 → 归集 10.8% 橙
+- GET /risk/evidence/related-upgrade?group_customer_no=…  第 2 幕升级识别：三线索 + R2 重算 12.8% 红
+- GET /risk/evidence/approval-chain?…                     第 4 幕双签驳回：处置审批链 + 2023 办法第二十三条
+- 定位集团一律以 group_customer_no 为主键（名称仅展示，根因一串号修复）；group_customer_name 仅作展示/唯一名回退。
 """
 
 from __future__ import annotations
@@ -43,17 +44,25 @@ def register_risk_evidence_routes(app: FastAPI) -> None:
 
     @app.get("/risk/evidence/group-reveal")
     def risk_evidence_group_reveal(request: Request):
-        group = request.query_params.get("group_customer_name") or ""
         try:
-            return _envelope(service.group_reveal(group))
+            return _envelope(
+                service.group_reveal(
+                    group_customer_no=request.query_params.get("group_customer_no"),
+                    group_customer_name=request.query_params.get("group_customer_name"),
+                )
+            )
         except EvidenceError as exc:
             return _envelope_error("GROUP_NOT_FOUND", str(exc))
 
     @app.get("/risk/evidence/related-upgrade")
     def risk_evidence_related_upgrade(request: Request):
-        group = request.query_params.get("group_customer_name") or ""
         try:
-            return _envelope(service.related_upgrade(group))
+            return _envelope(
+                service.related_upgrade(
+                    group_customer_no=request.query_params.get("group_customer_no"),
+                    group_customer_name=request.query_params.get("group_customer_name"),
+                )
+            )
         except EvidenceError as exc:
             return _envelope_error("GROUP_NOT_FOUND", str(exc))
 
@@ -64,10 +73,14 @@ def register_risk_evidence_routes(app: FastAPI) -> None:
 
     @app.get("/risk/evidence/verify-reason")
     def risk_evidence_verify_reason(request: Request):
-        """质疑/复核实查（R2-P0-A）：按集团实查标红/橙行的真实原因维度（集中度/非集中度）+ R1a computed 比对。"""
-        group = request.query_params.get("group_customer_name") or ""
+        """质疑/复核实查：按集团编号实查标红/橙行的真实原因维度（集中度/非集中度）+ R1a computed 比对。"""
         try:
-            return _envelope(service.verify_red_reason(group))
+            return _envelope(
+                service.verify_red_reason(
+                    group_customer_no=request.query_params.get("group_customer_no"),
+                    group_customer_name=request.query_params.get("group_customer_name"),
+                )
+            )
         except EvidenceError as exc:
             return _envelope_error("GROUP_NOT_FOUND", str(exc))
 
@@ -76,6 +89,7 @@ def register_risk_evidence_routes(app: FastAPI) -> None:
         try:
             return _envelope(
                 service.approval_chain(
+                    group_customer_no=request.query_params.get("group_customer_no"),
                     group_customer_name=request.query_params.get("group_customer_name"),
                     signal_id=request.query_params.get("signal_id"),
                     warning_id=request.query_params.get("warning_id"),

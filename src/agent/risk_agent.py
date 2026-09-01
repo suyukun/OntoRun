@@ -211,18 +211,18 @@ def build_risk_query_tool(query: RiskQuery) -> dict:
 
 
 class ScriptGroupParams(BaseModel):
-    """剧本工具参数：按集团名查询（第 1/2 幕）。"""
+    """剧本工具参数：按集团编号定位集团（第 1/2 幕；名称仅展示，根因一串号修复）。"""
 
-    group_customer_name: str = Field(
-        min_length=1, max_length=100, description="集团客户名称"
+    group_customer_no: str = Field(
+        min_length=1, max_length=64, description="集团客户编号（group_customer_no）"
     )
 
 
 class ScriptApprovalParams(BaseModel):
-    """剧本工具参数：第 4 幕审批链（集团名 / 信号号 / 预警 ID 三选一）。"""
+    """剧本工具参数：第 4 幕审批链（集团编号 / 信号号 / 预警 ID 三选一）。"""
 
-    group_customer_name: str | None = Field(
-        default=None, max_length=100, description="集团客户名称（与 signal_id 二选一）"
+    group_customer_no: str | None = Field(
+        default=None, max_length=64, description="集团客户编号（与 signal_id 二选一）"
     )
     signal_id: str | None = Field(
         default=None, max_length=64, description="预警信号号（SGN-...）"
@@ -253,12 +253,12 @@ def build_script_tools() -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "group_customer_name": {
+                        "group_customer_no": {
                             "type": "string",
-                            "description": "集团客户名称，如 天晟集团有限公司",
+                            "description": "集团客户编号（group_customer_no，如 GRP-2026-900001）",
                         }
                     },
-                    "required": ["group_customer_name"],
+                    "required": ["group_customer_no"],
                 },
             },
         },
@@ -274,12 +274,12 @@ def build_script_tools() -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "group_customer_name": {
+                        "group_customer_no": {
                             "type": "string",
-                            "description": "集团客户名称，如 天晟集团有限公司",
+                            "description": "集团客户编号（group_customer_no，如 GRP-2026-900001）",
                         }
                     },
-                    "required": ["group_customer_name"],
+                    "required": ["group_customer_no"],
                 },
             },
         },
@@ -294,13 +294,13 @@ def build_script_tools() -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "group_customer_name": {
+                        "group_customer_no": {
                             "type": "string",
-                            "description": "集团客户名称（与 signal_id 二选一）",
+                            "description": "集团客户编号（与 signal_id 二选一）",
                         },
                         "signal_id": {
                             "type": "string",
-                            "description": "预警信号号（SGN-...，与集团名二选一）",
+                            "description": "预警信号号（SGN-...，与集团编号二选一）",
                         },
                         "warning_id": {
                             "type": "string",
@@ -325,12 +325,12 @@ def build_script_tools() -> list[dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "group_customer_name": {
+                        "group_customer_no": {
                             "type": "string",
-                            "description": "被质疑标红/橙行的集团客户名称",
+                            "description": "被质疑标红/橙行的集团客户编号（group_customer_no）",
                         }
                     },
-                    "required": ["group_customer_name"],
+                    "required": ["group_customer_no"],
                 },
             },
         },
@@ -356,9 +356,12 @@ def build_risk_system_prompt(registry: Registry, query: RiskQuery) -> str:
         "必须明确拒答（DECLINE）并引导可查项，绝不编造数字；查询结果为空要如实说明。\n"
         "3. 动作执行结果中的错误码是权威规则结论：被拒绝时向用户说明原因并给出合规替代方案。\n"
         f"4. 高风险动作（{', '.join(high_risk) or '无'}）：只能先提议，必须用户明确确认后才执行。\n"
-        "演示剧本设定（口径包 v0.3 §七，对话为演示一级入口）：\n"
-        "5. 问「X集团风险/集中度有多大」→ 优先用 risk_group_reveal（第 1 幕：逐家附属机构单看都安全 → R1a 归集实算）；"
-        "问「隐性关联/一致行动人」→ risk_related_reveal（第 2 幕：三线索 + R2 纳入重算）。"
+        "演示设定（对话为演示一级入口）：\n"
+        "5. 问「X集团风险/集中度有多大」→ 先用 risk_query 查 group_customer（object_type=group_customer，"
+        "filters=[{field: group_customer_name, op: eq, value: X}]，limit=1）取该集团的 group_customer_no"
+        "（证据链/看板一律以 group_customer_no 定位集团，名称仅展示），再调 risk_group_reveal"
+        "（group_customer_no=...，第 1 幕：逐家附属机构单看都安全 → R1a 归集实算）；"
+        "问「隐性关联/一致行动人」→ 同上定位 group_customer_no 后调 risk_related_reveal（第 2 幕：三线索 + R2 纳入重算）。"
         "两工具返回带证据链载荷（结论/依据表名/命中规则+条款/分母/明细行），答案必须引用，绝不凭印象编数字。\n"
         "6. 问「预警线/关注线/内部限额 谁定的、怎么改」→ 用 risk_query 查 sys_param 对象"
         "（param_id ∈ CAP_CONCERN_LINE/CAP_WARN_LINE/CAP_INTERNAL_LIMIT_RATIO/CAP_GROUP_CONSOLIDATED），"
@@ -378,7 +381,7 @@ def build_risk_system_prompt(registry: Registry, query: RiskQuery) -> str:
         "不得凭印象推理或为辩护合成明细——必须先调 risk_verify_reason 实查该集团的 warning_dimension"
         "（集中度 concentration / 非集中度 non_concentration）并与 R1a computed 比对，按实回答；"
         "查无实据时明确说「该行标红原因是[维度X]，见证据链」。若用户以看板排名引用某行（如 rank3）"
-        "且对话中无集团名，先用 risk_query 定位该排名的集团名再实查。\n"
+        "且对话中无集团编号，先用 risk_query 定位该排名的集团编号再实查。\n"
         "11. 禁止虚构任何表名/明细行/数字；所有引用必须来自工具返回的证据链载荷"
         "（结论/依据表名/命中规则+条款/分母/明细行），查无实据时如实说明并给证据链入口，绝不编造。"
     )
@@ -543,17 +546,23 @@ class RiskAgent(Agent):
         try:
             if call.name == RISK_REVEAL_TOOL_NAME:
                 params = ScriptGroupParams.model_validate(call.arguments)
-                payload = self._evidence.group_reveal(params.group_customer_name)
+                payload = self._evidence.group_reveal(
+                    group_customer_no=params.group_customer_no
+                )
             elif call.name == RISK_RELATED_TOOL_NAME:
                 params = ScriptGroupParams.model_validate(call.arguments)
-                payload = self._evidence.related_upgrade(params.group_customer_name)
+                payload = self._evidence.related_upgrade(
+                    group_customer_no=params.group_customer_no
+                )
             elif call.name == RISK_VERIFY_TOOL_NAME:
                 params = ScriptGroupParams.model_validate(call.arguments)
-                payload = self._evidence.verify_red_reason(params.group_customer_name)
+                payload = self._evidence.verify_red_reason(
+                    group_customer_no=params.group_customer_no
+                )
             else:
                 params = ScriptApprovalParams.model_validate(call.arguments)
                 payload = self._evidence.approval_chain(
-                    group_customer_name=params.group_customer_name,
+                    group_customer_no=params.group_customer_no,
                     signal_id=params.signal_id,
                     warning_id=params.warning_id,
                 )

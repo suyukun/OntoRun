@@ -612,7 +612,9 @@ def _warn_reason(level: str, level2: str, inputs: dict[str, float]) -> str:
         return f"集团集中度敞口超限 {inputs['concentration_overrun'] * 100:.0f}%，触发{cn}预警"
     if level2 == "关联交易":
         return f"关联交易异动幅度 {inputs['related_change'] * 100:.0f}%，触发{cn}预警"
-    return f"{level2}异常，模型评分 {inputs['risk_score']}，触发{cn}预警"
+    # 根因二：level2 以「异常」结尾（如 数据异常）不再重复拼接「异常」（防「数据异常异常」）
+    suffix = "" if level2.endswith("异常") else "异常"
+    return f"{level2}{suffix}，模型评分 {inputs['risk_score']}，触发{cn}预警"
 
 
 def _five_class_inputs(rng: random.Random, category: str) -> dict[str, Any]:

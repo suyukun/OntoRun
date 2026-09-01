@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 from src.runtime.risk_db import AP_ANPING_DIR, RiskStore
 
 TIANSHENG = "天晟集团有限公司"
+TIANSHENG_NO = "GRP-2026-900001"  # 根因一串号修复：证据链一律按 group_customer_no 定位
+HUAXIN_SW_NO = "GRP-2026-000098"  # 华信建设西南集团（首组，同名唯一化后保留原名）
 GROUP_CAPITAL_YI = 800.0
 
 # 证据链载荷统一键（口径包§六：结论/依据表名/命中规则+条款/分母说明/明细行引用）
@@ -53,7 +55,7 @@ def client():
 
 def _reveal(client: TestClient) -> dict:
     res = client.get(
-        "/risk/evidence/group-reveal", params={"group_customer_name": TIANSHENG}
+        "/risk/evidence/group-reveal", params={"group_customer_no": TIANSHENG_NO}
     )
     assert res.status_code == 200, res.text
     body = res.json()
@@ -63,7 +65,7 @@ def _reveal(client: TestClient) -> dict:
 
 def _upgrade(client: TestClient) -> dict:
     res = client.get(
-        "/risk/evidence/related-upgrade", params={"group_customer_name": TIANSHENG}
+        "/risk/evidence/related-upgrade", params={"group_customer_no": TIANSHENG_NO}
     )
     assert res.status_code == 200, res.text
     return res.json()["data"]
@@ -98,14 +100,14 @@ def test_evidence_denominator_has_source(client: TestClient) -> None:
 
 
 def test_evidence_fail_closed_unknown_group(client: TestClient) -> None:
-    """不存在的集团 → 400 GROUP_NOT_FOUND（fail-closed，绝不回显 0% 玩具结果）。"""
+    """不存在的集团编号 → 400 GROUP_NOT_FOUND（fail-closed，绝不回显 0% 玩具结果）。"""
     res = client.get(
-        "/risk/evidence/group-reveal", params={"group_customer_name": "不存在集团"}
+        "/risk/evidence/group-reveal", params={"group_customer_no": "GRP-2026-999999"}
     )
     assert res.status_code == 400
     assert res.json()["error"]["code"] == "GROUP_NOT_FOUND"
     res2 = client.get(
-        "/risk/evidence/related-upgrade", params={"group_customer_name": "不存在集团"}
+        "/risk/evidence/related-upgrade", params={"group_customer_no": "GRP-2026-999999"}
     )
     assert res2.status_code == 400
     assert res2.json()["error"]["code"] == "GROUP_NOT_FOUND"
@@ -334,7 +336,7 @@ def test_agent_chat_evidence_attached(tmp_path, monkeypatch) -> None:
                     ToolCall(
                         id="t1",
                         name="risk_group_reveal",
-                        arguments={"group_customer_name": TIANSHENG},
+                        arguments={"group_customer_no": TIANSHENG_NO},
                     )
                 ]
             ),
@@ -412,7 +414,7 @@ def test_verify_reason_non_concentration_dimension(client: TestClient) -> None:
     """
     data = client.get(
         "/risk/evidence/verify-reason",
-        params={"group_customer_name": "华信建设西南集团"},
+        params={"group_customer_no": HUAXIN_SW_NO},
     ).json()["data"]
     assert data["intent"] == "risk_verify_reason"
     assert data["warning_dimension"] == "non_concentration"
@@ -430,7 +432,7 @@ def test_verify_reason_non_concentration_dimension(client: TestClient) -> None:
 def test_verify_reason_concentration_dimension(client: TestClient) -> None:
     """质疑实查：天晟 → warning_dimension=concentration，R1a computed 12.8% 红（口径包§七 第 2 幕）。"""
     data = client.get(
-        "/risk/evidence/verify-reason", params={"group_customer_name": TIANSHENG}
+        "/risk/evidence/verify-reason", params={"group_customer_no": TIANSHENG_NO}
     ).json()["data"]
     assert data["warning_dimension"] == "concentration"
     comp = data["rules_hits"][0]["computed"]
@@ -454,7 +456,7 @@ def test_agent_challenge_routes_to_verify_reason(tmp_path, monkeypatch) -> None:
                     ToolCall(
                         id="t3",
                         name="risk_verify_reason",
-                        arguments={"group_customer_name": "华信建设西南集团"},
+                        arguments={"group_customer_no": HUAXIN_SW_NO},
                     )
                 ]
             ),

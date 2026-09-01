@@ -11,7 +11,10 @@
 - P0-3 处置对齐：ap_warning_disposal.disposal_progress 按 disposal_status 收敛；信号 disposal_status 按生命周期对齐；
 - P1-2 枚举残留清理：concentration.ap_concentration_limit.current_status 英文告警码 → 中文（红/橙/黄/正常）；
 - P1-3 名称池再洗：>8 字合成集团名收敛到自然长度，并级联到所有携带 group_customer_name 的表
-  （customer/project/base/risk 六库）。
+  （customer/project/base/risk 六库）；
+- P0-串号（M4 第三轮终审根因一）：同名集团加编号后缀（如 翔宇电子华北集团（07）），保证
+  group_customer_name 全局唯一，并级联到所有携带 group_customer_name / belong_group 的表；
+- P0-文案（根因二）：「数据异常异常」拼接 bug；ap_sys_param 内部记号 → in-universe 文案。
 
 用法（工作目录 = OntoRun 根目录）：
     /opt/anaconda3/bin/python3 scripts/patch_risk_live_data.py
@@ -315,24 +318,162 @@ def patch_group_names(conn: sqlite3.Connection) -> None:
         raise
 
 
+def patch_group_name_uniqueness(conn: sqlite3.Connection) -> None:
+    """P0-串号（根因一）：同名集团加编号后缀，保证 group_customer_name 全局唯一。
+
+    策略：
+    - 主表 customer.ap_group_customer：按 group_customer_no 序，同名集团首个保留原名、
+      后续加（NN）后缀（如 翔宇电子华北集团（07））；剧本道具集团（GRP-2026-900%）不动；
+    - 级联（按各自键定位到具体集团后逐组改名）：
+      ① 有 group_customer_no 列的表 → 按 group_customer_no；
+      ② ap_warning_signal → belong_group 按 group_customer_no；
+      ③ 有 cert_no 列的表（customer_relation/tree、subsidiary_credit_detail）→
+         cert_no（ap_customer 唯一，杜绝同名客户跨集团串号）→ 集团编号；
+    - 仅存 customer_name 的无键表（ap_bank_pledge_detail / ap_collateral /
+      ap_warn_signal_derive / ap_important_customer_list / ap_risk_project /
+      ap_deviation_warn_score）：行级无法逐组定位（同名客户跨集团），保留原名
+      （首组名称仍为合法集团名），不参与证据链/看板/报送口径，不影响串号修复。
+    """
+    rows = conn.execute(
+        "SELECT group_customer_no, group_customer_name FROM customer.ap_group_customer "
+        "ORDER BY group_customer_no"
+    ).fetchall()
+    seen: dict[str, int] = {}
+    renames: dict[str, str] = {}
+    for r in rows:
+        gno = r["group_customer_no"]
+        if gno.startswith("GRP-2026-900"):
+            continue  # 剧本道具集团（天晟/恒昌/瑞华）唯一，不动
+        name = r["group_customer_name"]
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            renames[gno] = f"{name}（{seen[name]:02d}）"
+    if not renames:
+        print("  [P0-串号] 无同名集团，跳过")
+        return
+    print(
+        f"  [P0-串号] 同名集团去重 {len(renames)} 个（例: {list(renames.items())[:3]}）"
+    )
+    conn.execute("BEGIN")
+    try:
+        for gno, new in renames.items():
+            conn.execute(
+                "UPDATE customer.ap_group_customer SET group_customer_name=? "
+                "WHERE group_customer_no=?",
+                (new, gno),
+            )
+        # ① 有 group_customer_no 键的表
+        for tbl in (
+            "customer.ap_customer",
+            "customer.ap_top500_customer_risk",
+            "base.ap_dim_metric",
+            "base.ap_dim_rank",
+            "ap_warn_signal_concentration",
+            "ap_warn_signal_deviation",
+        ):
+            for gno, new in renames.items():
+                conn.execute(
+                    f"UPDATE {tbl} SET group_customer_name=? WHERE group_customer_no=?",
+                    (new, gno),
+                )
+        # ② ap_warning_signal.belong_group（risk.db 主表）
+        for gno, new in renames.items():
+            conn.execute(
+                "UPDATE ap_warning_signal SET belong_group=? WHERE group_customer_no=?",
+                (new, gno),
+            )
+        # ③ cert_no 键的表：cert_no（唯一）→ ap_customer.group_customer_no
+        cert_to_gno = {
+            c["cert_no"]: c["group_customer_no"]
+            for c in conn.execute(
+                "SELECT cert_no, group_customer_no FROM customer.ap_customer"
+            )
+        }
+        gno_to_certs: dict[str, list[str]] = {}
+        for cert, g in cert_to_gno.items():
+            gno_to_certs.setdefault(g, []).append(cert)
+        for tbl, namecol in (
+            ("customer.ap_customer_relation", "group_customer_name"),
+            ("customer.ap_customer_relation_tree", "group_customer_name"),
+        ):
+            for gno, new in renames.items():
+                for cert in gno_to_certs.get(gno, []):
+                    conn.execute(
+                        f"UPDATE {tbl} SET {namecol}=? WHERE cert_no=?",
+                        (new, cert),
+                    )
+        # ap_subsidiary_credit_detail：group_customer_name + group_customer_name_processed 双列
+        for gno, new in renames.items():
+            for cert in gno_to_certs.get(gno, []):
+                conn.execute(
+                    "UPDATE customer.ap_subsidiary_credit_detail SET "
+                    "group_customer_name=?, group_customer_name_processed=? "
+                    "WHERE cert_no=?",
+                    (new, new, cert),
+                )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def patch_data_anomaly_concat(conn: sqlite3.Connection) -> None:
+    """P0-文案（根因二）：「数据异常异常」拼接 bug → 「数据异常」。（生成器 _warn_reason 已修）"""
+    cur = conn.execute(
+        "UPDATE ap_warning_signal SET warn_reason=REPLACE(warn_reason, '数据异常异常', '数据异常') "
+        "WHERE warn_reason LIKE '%数据异常异常%'"
+    )
+    if cur.rowcount:
+        print(f"  [P0-文案] 数据异常异常 → 数据异常（{cur.rowcount} 行）")
+
+
+def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
+    """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
+
+    口径包 v0.3 复评审：param_source/param_approver/param_description/version/update_user
+    不得出现「口径包」「演示设定」「拍板」等内部记号直达用户屏；审批人/版本/更新人改业务口径。
+    文案单一来源 = risk_script_props.CAPITAL_PARAMS / PARAM_META（生成器同源，已改 in-universe）。
+    """
+    from src.des.generators.risk_script_props import CAPITAL_PARAMS, PARAM_META
+
+    for pid, ptype, value, desc in CAPITAL_PARAMS:
+        meta = PARAM_META.get(pid, {})
+        conn.execute(
+            "UPDATE base.ap_sys_param SET param_description=?, param_source=?, "
+            "param_approver=?, version='v3' WHERE param_id=?",
+            (desc, meta.get("param_source"), meta.get("param_approver"), pid),
+        )
+    # update_user=SYSTEM → 中性文案（系统初始化；元数据含版本即可）
+    cur = conn.execute(
+        "UPDATE base.ap_sys_param SET update_user='系统初始化' WHERE update_user='SYSTEM'"
+    )
+    if cur.rowcount:
+        print(f"  [P0-文案] ap_sys_param.update_user SYSTEM → 系统初始化（{cur.rowcount} 行）")
+
+
 def main() -> int:
     print("===== S4 修复轮 · 活系统数据补丁 =====")
     conn = _main_conn()
     try:
-        print("[1/5] P0-1 阈值元数据（base.ap_sys_param）")
+        print("[1/6] P0-1 阈值元数据（base.ap_sys_param）")
         patch_sys_param_metadata(conn)
         conn.commit()
-        print("[2/5] P1-2 枚举残留清理（current_status → 中文）")
+        print("[2/6] P1-2 枚举残留清理（current_status → 中文）")
         patch_enum_chinese(conn)
         conn.commit()
-        print("[3/5] P0-3 时间字段单调")
+        print("[3/6] P0-3 时间字段单调")
         patch_time_monotonic(conn)
         conn.commit()
-        print("[4/5] P0-3 处置状态/进展对齐")
+        print("[4/6] P0-3 处置状态/进展对齐")
         patch_disposal_alignment(conn)
         conn.commit()
-        print("[5/5] P1-3 集团名再洗（级联）")
+        print("[5/6] P1-3 集团名再洗（级联）")
         patch_group_names(conn)
+        conn.commit()
+        print("[6/6] P0-串号 + P0-文案（重名去重/异常拼接/参数 in-universe）")
+        patch_group_name_uniqueness(conn)
+        patch_data_anomaly_concat(conn)
+        patch_sys_param_in_universe(conn)
         conn.commit()
     finally:
         conn.close()

@@ -91,7 +91,14 @@ def _group_name(rng: random.Random) -> str:
 def generate_ap_group_customer_rows(
     rng: random.Random, ctx: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """customer.ap_group_customer 集团客户主数据：资产质量按规则 2 分布，编码 GRP-YYYY-XXXXXX。"""
+    """customer.ap_group_customer 集团客户主数据：资产质量按规则 2 分布，编码 GRP-YYYY-XXXXXX。
+
+    名池去重（根因一串号修复）：同名集团按 group_customer_no 序加编号后缀
+    （如 翔宇电子华北集团（07）），保证 group_customer_name 全局唯一——风险系统里
+    同名集团必须带唯一编号区分展示，杜绝看板/证据链/信号跨同名集团 SUM 串号。
+    下游 customer/credit/relation/signal 均以 group_customer_no 取名（见各生成器），
+    名称唯一化后 name-keyed 归集与 no-keyed 归集一致。
+    """
     year = ctx["year"]
     rows: list[dict[str, Any]] = []
     for seq in range(1, _row_count(ctx, "customer.ap_group_customer") + 1):
@@ -115,6 +122,13 @@ def generate_ap_group_customer_rows(
                 "tenant_id": "AP001",
             }
         )
+    # 名池去重：同名集团加编号后缀（首个保留原名，后续按序（02）（03）…）
+    seen: dict[str, int] = {}
+    for row in rows:
+        name = row["group_customer_name"]
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            row["group_customer_name"] = f"{name}（{seen[name]:02d}）"
     return rows
 
 

@@ -102,49 +102,49 @@ PARAM_META: dict[str, dict[str, str]] = {
     PARAM_GROUP_CONSOLIDATED: {
         "param_type_code": "CAPITAL",
         "param_value": "800",
-        "param_description": "集团并表资本（亿元，集团层归集集中度分母，口径包§一）",
-        "param_source": "口径包§一 资本常量（安平金控演示设定，并表口径）",
-        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "param_description": "集团并表资本（亿元，集团层归集集中度分母）",
+        "param_source": "安平金控集团并表资本核算口径（2025 年度经审计并表）",
+        "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元，集团层分母）",
-        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（演示明细注明）",
-        "version": "v1.0",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（明细注明）",
+        "version": "v3",
         "update_time": "2026-11-30",
     },
     PARAM_CONCERN_LINE: {
         "param_type_code": "R1A_LINE",
         "param_value": "0.09",
-        "param_description": "集团层关注线（9%，黄，口径包§三）",
+        "param_description": "集团层关注线（9%，黄）",
         "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
-        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元）",
         "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
-        "version": "v1.0",
+        "version": "v3",
         "update_time": "2026-11-30",
     },
     PARAM_WARN_LINE: {
         "param_type_code": "R1A_LINE",
         "param_value": "0.10",
-        "param_description": "集团层预警线（10%，橙，口径包§三）",
+        "param_description": "集团层预警线（10%，橙）",
         "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
-        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元）",
         "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
-        "version": "v1.0",
+        "version": "v3",
         "update_time": "2026-11-30",
     },
     PARAM_INTERNAL_LIMIT_RATIO: {
         "param_type_code": "R1A_LINE",
         "param_value": "0.12",
-        "param_description": "集团层内部限额（12%，红，口径包§三）",
+        "param_description": "集团层内部限额（12%，红）",
         "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
-        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元）",
         "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
-        "version": "v1.0",
+        "version": "v3",
         "update_time": "2026-11-30",
     },
 }
@@ -230,16 +230,49 @@ class EvidenceService:
             )
 
     @staticmethod
-    def _require_group(conn: sqlite3.Connection, group: str) -> None:
-        """fail-closed：集团须存在且有授信台账（防对不存在集团回显 0% 玩具结果）。"""
-        row = conn.execute(
-            "SELECT 1 FROM customer.ap_group_customer WHERE group_customer_name=? "
-            "UNION SELECT 1 FROM customer.ap_subsidiary_credit_detail "
-            "WHERE group_customer_name=? LIMIT 1",
-            (group, group),
-        ).fetchone()
-        if row is None:
-            raise EvidenceError(f"集团不存在或无授信台账: {group}")
+    def _resolve_group(
+        conn: sqlite3.Connection,
+        *,
+        group_customer_no: str | None = None,
+        group_customer_name: str | None = None,
+    ) -> tuple[str, str]:
+        """按 group_customer_no 定位集团（名称仅展示，根因一串号修复）：no → 唯一名称。
+
+        兼容按名回退（展示层/旧调用）：名称必须唯一——同名集团须带编号后缀区分
+        （如 翔宇电子华北集团（07））；重名时 fail-closed 拒答并要求用 group_customer_no
+        精确定位，杜绝跨同名集团 SUM 串号。同时核验集团有授信台账（防 0% 玩具结果）。
+        返回 (group_customer_no, group_customer_name)。
+        """
+        if group_customer_no:
+            gno = (group_customer_no or "").strip()
+            row = conn.execute(
+                "SELECT group_customer_name FROM customer.ap_group_customer "
+                "WHERE group_customer_no=?",
+                (gno,),
+            ).fetchone()
+            if row is None or not row["group_customer_name"]:
+                raise EvidenceError(f"集团不存在: {gno}")
+            name = row["group_customer_name"]
+        elif group_customer_name:
+            name = (group_customer_name or "").strip()
+            if not name:
+                raise EvidenceError("group_customer_no 不能为空")
+            rows = conn.execute(
+                "SELECT group_customer_no FROM customer.ap_group_customer "
+                "WHERE group_customer_name=?",
+                (name,),
+            ).fetchall()
+            if not rows:
+                raise EvidenceError(f"集团不存在或无授信台账: {name}")
+            if len(rows) > 1:
+                raise EvidenceError(
+                    f"集团名「{name}」不唯一（{len(rows)} 个同名集团），"
+                    "请用 group_customer_no 精确定位（同名集团须带编号后缀区分）"
+                )
+            gno = rows[0]["group_customer_no"]
+        else:
+            raise EvidenceError("必须提供 group_customer_no")
+        return gno, name
 
     # ---- P0-1：R1a 阈值可查询（谁定的/怎么改；sys_param 可查询对象 + 元数据列）----
 
@@ -310,42 +343,63 @@ class EvidenceService:
             "detail_rows": params,
         }
 
+    @staticmethod
     def _group_signals(
-        self, conn: sqlite3.Connection, group_name: str
+        conn: sqlite3.Connection, group_customer_no: str
     ) -> list[dict[str, Any]]:
-        """集团当前预警信号（证据链「明细行引用」：ap_warning_signal 行）。"""
+        """集团当前预警信号（证据链「明细行引用」：按 group_customer_no 定位，串号防护）。"""
         rows = conn.execute(
             "SELECT warning_id, signal_id, warn_level, signal_status, warn_reason "
-            "FROM ap_warning_signal WHERE group_customer_no = "
-            "(SELECT group_customer_no FROM customer.ap_group_customer "
-            " WHERE group_customer_name=?) "
+            "FROM ap_warning_signal WHERE group_customer_no=? "
             "ORDER BY CASE warn_level WHEN '红' THEN 0 WHEN '橙' THEN 1 "
             "WHEN '黄' THEN 2 ELSE 3 END",
-            (group_name,),
+            (group_customer_no,),
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @staticmethod
+    def _has_credit(conn: sqlite3.Connection, group_name: str) -> bool:
+        """集团是否含授信台账（第 1/2 幕 fail-closed：无台账不回显 0% 玩具结果）。"""
+        row = conn.execute(
+            "SELECT 1 FROM customer.ap_subsidiary_credit_detail "
+            "WHERE group_customer_name=? LIMIT 1",
+            (group_name,),
+        ).fetchone()
+        return row is not None
+
     # ---- 第 1 幕：揭示（逐家单看都安全 → 归集 10.8% 橙）----
 
-    def group_reveal(self, group_customer_name: str) -> dict[str, Any]:
+    def group_reveal(
+        self,
+        *,
+        group_customer_no: str | None = None,
+        group_customer_name: str | None = None,
+    ) -> dict[str, Any]:
         """第 1 幕揭示查询：逐家附属机构融资（真分母单看都安全）+ M2 引擎归集实算。
 
-        分子逐家 = ap_subsidiary_credit_detail 按 org 汇总（与 verify_demo_numbers 同口径）；
+        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）；逐家分子按
+        客户真实集团身份（ap_customer.group_customer_no）归集，与看板/报送同源；
         归集 = M2 引擎 risk_rules.evaluate(include_related=False) 实算（非查表回显）。
         """
-        group = (group_customer_name or "").strip()
-        if not group:
-            raise EvidenceError("group_customer_name 不能为空")
+        if not group_customer_no and not group_customer_name:
+            raise EvidenceError("必须提供 group_customer_no")
         with self._conn() as conn:
-            self._require_group(conn, group)
+            gno, group = self._resolve_group(
+                conn,
+                group_customer_no=group_customer_no,
+                group_customer_name=group_customer_name,
+            )
+            if not self._has_credit(conn, group):
+                raise EvidenceError(f"集团无授信台账: {group}")
             cap = self._capital_params(conn)
             r1a = evaluate(conn, group, include_related=False)  # M2 引擎实算
             cfg = r1a.config
             org_rows = conn.execute(
-                "SELECT org_name, SUM(business_balance) AS t "
-                "FROM customer.ap_subsidiary_credit_detail "
-                "WHERE group_customer_name=? GROUP BY org_name ORDER BY t DESC",
-                (group,),
+                "SELECT s.org_name, SUM(s.business_balance) AS t "
+                "FROM customer.ap_subsidiary_credit_detail s "
+                "JOIN customer.ap_customer c ON s.cert_no = c.cert_no "
+                "WHERE c.group_customer_no=? GROUP BY s.org_name ORDER BY t DESC",
+                (gno,),
             ).fetchall()
             detail: list[dict[str, Any]] = []
             for r in org_rows:
@@ -353,7 +407,7 @@ class EvidenceService:
                 item: dict[str, Any] = {
                     "row_ref": (
                         f"customer.ap_subsidiary_credit_detail"
-                        f"#group={group}&org={r['org_name']}"
+                        f"#group={gno}&org={r['org_name']}"
                     ),
                     "org_name": r["org_name"],
                     "balance_yi": yi,
@@ -365,7 +419,7 @@ class EvidenceService:
                     item["org_reference_ratio"] = round(yi / denom_yi, 4)
                     item["ratio_display"] = self._ratio_display(yi / denom_yi)
                 detail.append(item)
-            signals = self._group_signals(conn, group)
+            signals = self._group_signals(conn, gno)
         group_cap = cfg.group_capital_yi
         # P0-2 结论自检：比较短语由 computed ratio 实算生成，且与定级严格一致（不一致即抛错）
         compare = self._r1a_comparison_text(r1a.ratio, cfg)
@@ -419,17 +473,28 @@ class EvidenceService:
 
     # ---- 第 2 幕：升级识别（恒昌三线索 + R2 纳入重算 12.8% 红）----
 
-    def related_upgrade(self, group_customer_name: str) -> dict[str, Any]:
+    def related_upgrade(
+        self,
+        *,
+        group_customer_no: str | None = None,
+        group_customer_name: str | None = None,
+    ) -> dict[str, Any]:
         """第 2 幕升级识别：客户关系树三线索 + R2 纳入归集重算（M2 引擎实算）。
 
+        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）；
         线索明细 = customer.ap_customer_relation_tree（clear_remark_1/2/3）；
         重算 = risk_rules.evaluate(include_related=True) → 天晟 102.4/800 = 12.8% 红。
         """
-        group = (group_customer_name or "").strip()
-        if not group:
-            raise EvidenceError("group_customer_name 不能为空")
+        if not group_customer_no and not group_customer_name:
+            raise EvidenceError("必须提供 group_customer_no")
         with self._conn() as conn:
-            self._require_group(conn, group)
+            gno, group = self._resolve_group(
+                conn,
+                group_customer_no=group_customer_no,
+                group_customer_name=group_customer_name,
+            )
+            if not self._has_credit(conn, group):
+                raise EvidenceError(f"集团无授信台账: {group}")
             r2 = evaluate(conn, group, include_related=True)  # R1a+R2 实算
             cfg = r2.config
             group_cap = cfg.group_capital_yi
@@ -470,7 +535,7 @@ class EvidenceService:
                         "relation_clues": clue_rows,
                     }
                 )
-            signals = self._group_signals(conn, group)
+            signals = self._group_signals(conn, gno)
         base = round(r2.base_aggregation_yi, 2)
         rel = round(r2.related_balance_yi, 2)
         # P0-2 结论自检：R2 纳入后比较短语由 computed ratio 实算生成（杜绝「>12% 却定级非红」）
@@ -539,21 +604,29 @@ class EvidenceService:
 
     # ---- 质疑/复核实查（R2-P0-A）：标红/橙行的真实原因维度（集中度 vs 非集中度）----
 
-    def verify_red_reason(self, group_customer_name: str) -> dict[str, Any]:
+    def verify_red_reason(
+        self,
+        *,
+        group_customer_no: str | None = None,
+        group_customer_name: str | None = None,
+    ) -> dict[str, Any]:
         """质疑/复核实查：被质疑「rank3 才 1% 凭什么挂红」时，先查库实算再开口。
 
-        不为辩护合成明细/表名（R2-P0-A 防线）：集中度口径与看板
-        _concentration_ranking 完全一致——concentration.ap_concentration_limit
-        按集团聚合 + R2 隐性关联方（ap_customer_relation_tree 三线索）纳入，
+        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）。集中度口径与
+        看板 _concentration_ranking 完全一致——concentration.ap_concentration_limit
+        按集团编号聚合 + R2 隐性关联方（ap_customer_relation_tree 三线索）纳入，
         ÷ 集团并表资本，R1a 三线定级；warning_dimension = non_concentration
-        当且仅当信号红/橙但集中度实算无警（杜绝「低比例却挂红」套集中度逻辑错答，
-        R2-P1-A）。查无实据 → fail-closed 拒答。
+        当且仅当信号红/橙但集中度实算无警（杜绝「低比例却挂红」套集中度逻辑错答）。
+        查无实据 → fail-closed 拒答。
         """
-        group = (group_customer_name or "").strip()
-        if not group:
-            raise EvidenceError("group_customer_name 不能为空")
+        if not group_customer_no and not group_customer_name:
+            raise EvidenceError("必须提供 group_customer_no")
         with self._conn() as conn:
-            self._require_group(conn, group)
+            gno, group = self._resolve_group(
+                conn,
+                group_customer_no=group_customer_no,
+                group_customer_name=group_customer_name,
+            )
             cap = self._capital_params(conn)
             group_cap = cap[PARAM_GROUP_CONSOLIDATED]
             cfg = R1aConfig.load(conn)
@@ -561,8 +634,8 @@ class EvidenceService:
                 "SELECT SUM(cl.concentration_limit) AS bal_wan "
                 "FROM concentration.ap_concentration_limit cl "
                 "JOIN customer.ap_customer c ON c.customer_no = cl.customer_no "
-                "WHERE c.group_customer_name = ?",
-                (group,),
+                "WHERE c.group_customer_no = ?",
+                (gno,),
             ).fetchone()
             own_yi = (row["bal_wan"] or 0.0) / _WAN_TO_YI if row else 0.0
             hidden = related_parties(conn, group)
@@ -570,7 +643,7 @@ class EvidenceService:
             total_yi = round(own_yi + hidden_yi, 4)
             ratio = round(total_yi / group_cap, 4) if group_cap else 0.0
             conc_level = level_for_ratio(ratio, cfg)
-            signals = self._group_signals(conn, group)
+            signals = self._group_signals(conn, gno)
             sig = signals[0] if signals else None
         sig_level = sig["warn_level"] if sig else None
         is_r1a = sig is not None and (R1A_RULE_MARKER in (sig["warn_reason"] or ""))
@@ -584,15 +657,14 @@ class EvidenceService:
         compare = self._r1a_comparison_text(ratio, cfg)
         if is_non_conc:
             conclusion = (
-                f"该行标红原因是非集中度维度（{dimension}）：{group} 集中度实算 "
+                f"该行标红原因是非集中度维度：{group} 集中度实算 "
                 f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
                 f"与红/橙预警无关；真实触发 = 「{sig['warn_reason']}」"
-                "（行为/内控/模型评分类硬规则命中）。不得套用集中度逻辑为低比例红辩护，"
-                "也不得合成集中度明细/表名。"
+                "（行为/内控/模型评分类硬规则命中）。"
             )
         elif sig_level in ("红", "橙"):
             conclusion = (
-                f"该行标红原因是集中度维度（{dimension}）：{group} 集中度实算 "
+                f"该行标红原因是集中度维度：{group} 集中度实算 "
                 f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
                 f"预警信号 = 「{sig['warn_reason']}」。"
             )
@@ -600,7 +672,7 @@ class EvidenceService:
             conclusion = (
                 f"{group} 当前无红/橙预警信号（最新信号等级 = {sig_level or '无'}）；"
                 f"集中度实算 {self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」）。"
-                "用户所指标红行若无对应信号，请核对对象/看板列，勿凭空认定。"
+                "用户所指标红行若无对应信号，请核对集团编号与看板列。"
             )
         rules_hits = [
             {
@@ -622,9 +694,9 @@ class EvidenceService:
                 {
                     "rule": "N1",
                     "name": "非集中度预警维度（标红真实原因）",
-                    "clause": "看板 warning_dimension=non_concentration（行为/内控/模型评分硬规则，R2-P1-A）",
+                    "clause": "非集中度预警维度（行为/内控/模型评分硬规则命中）",
                     "text": sig["warn_reason"],
-                    "note": "集中度实算无警却标红/橙 = 非集中度维度；引用此维度作答，禁套集中度逻辑",
+                    "note": "该集团集中度实算无警却标红/橙，真实触发见 warn_reason",
                 }
             )
         return {
@@ -667,21 +739,24 @@ class EvidenceService:
     def approval_chain(
         self,
         *,
+        group_customer_no: str | None = None,
         group_customer_name: str | None = None,
         signal_id: str | None = None,
         warning_id: str | None = None,
     ) -> dict[str, Any]:
         """第 4 幕双签驳回证据：处置方案 + 审批单/审批任务链（真数据）+ 驳回依据条款。
 
-        定位任一预警信号（warning_id / signal_id / 集团名），沿
+        定位任一预警信号（warning_id / signal_id / 集团编号），沿
         ap_warning_disposal → ap_approve_order（remark 内嵌信号号）→ ap_approve_task
-        展开审批链；固定携带 2023 关联交易办法第二十三条（驳回「拆分授信绕开归集」的依据）。
+        展开审批链；集团定位以 group_customer_no 为主键（名称仅展示，根因一串号修复）；
+        固定携带 2023 关联交易办法第二十三条（驳回「拆分授信绕开归集」的依据）。
         """
         with self._conn() as conn:
             signal = self._resolve_signal(
                 conn,
                 warning_id=warning_id,
                 signal_id=signal_id,
+                group_customer_no=group_customer_no,
                 group_name=group_customer_name,
             )
             if signal is None:
@@ -767,7 +842,8 @@ class EvidenceService:
         *,
         warning_id: str | None,
         signal_id: str | None,
-        group_name: str | None,
+        group_customer_no: str | None,
+        group_name: str | None = None,
     ) -> dict[str, Any] | None:
         if warning_id:
             row = conn.execute(
@@ -781,19 +857,32 @@ class EvidenceService:
                 "FROM ap_warning_signal WHERE signal_id=?",
                 (signal_id,),
             ).fetchone()
-        elif group_name:
+        elif group_customer_no or group_name:
+            if group_customer_no:
+                gno = group_customer_no
+            else:
+                rows = conn.execute(
+                    "SELECT group_customer_no FROM customer.ap_group_customer "
+                    "WHERE group_customer_name=?",
+                    (group_name,),
+                ).fetchall()
+                if not rows:
+                    return None
+                if len(rows) > 1:
+                    raise EvidenceError(
+                        f"集团名「{group_name}」不唯一，请用 group_customer_no 精确定位"
+                    )
+                gno = rows[0]["group_customer_no"]
             row = conn.execute(
-                "SELECT w.warning_id, w.signal_id, w.warn_level, w.signal_status, "
-                "w.warn_reason FROM ap_warning_signal w "
-                "JOIN customer.ap_group_customer g ON w.group_customer_no = g.group_customer_no "
-                "WHERE g.group_customer_name=? "
-                "ORDER BY CASE w.warn_level WHEN '红' THEN 0 WHEN '橙' THEN 1 "
+                "SELECT warning_id, signal_id, warn_level, signal_status, warn_reason "
+                "FROM ap_warning_signal WHERE group_customer_no=? "
+                "ORDER BY CASE warn_level WHEN '红' THEN 0 WHEN '橙' THEN 1 "
                 "WHEN '黄' THEN 2 ELSE 3 END LIMIT 1",
-                (group_name,),
+                (gno,),
             ).fetchone()
         else:
             raise EvidenceError(
-                "必须提供 warning_id / signal_id / group_customer_name 之一"
+                "必须提供 warning_id / signal_id / group_customer_no 之一"
             )
         return dict(row) if row else None
 
