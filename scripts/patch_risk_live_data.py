@@ -459,6 +459,41 @@ def patch_concentration_reason_percent(conn: sqlite3.Connection) -> None:
         print(f"  [F2] 浓度类事由剥离百分比（{n} 行）")
 
 
+def patch_concentration_reason_phrase(conn: sqlite3.Connection) -> None:
+    """F8：RNG 浓度类事由残余「集团集中度敞口超限」全量剥离（漏网路径补清）。
+
+    生成器 risk_generators._warn_reason 已改为「集团集中度指标异动」（未来再生成即无
+    「敞口超限」）；本函数对存量库迁移 ap_warning_signal + ap_warn_signal_derive（含
+    warn_reason_updated）——该硬断言与源库集中度实算（concentration_limit 归集）脱钩，
+    低集中度集团会被误判「敞口超限」；改监测语气「指标异动」，口径以实算为准。
+    幂等：无匹配即零变更。
+    """
+    import re
+
+    pat = re.compile(r"^集团集中度敞口超限(?:\s*\d+%)?")
+    tables = (
+        ("ap_warning_signal", "warn_reason", "warning_id"),
+        ("ap_warn_signal_derive", "warn_reason", "derive_warning_id"),
+        ("ap_warn_signal_derive", "warn_reason_updated", "derive_warning_id"),
+    )
+    total = 0
+    for table, col, pk_col in tables:
+        rows = conn.execute(
+            f"SELECT {pk_col} AS pk, {col} AS v FROM {table} "
+            f"WHERE {col} LIKE '集团集中度敞口超限%'"
+        ).fetchall()
+        for r in rows:
+            new = pat.sub("集团集中度指标异动", r["v"] or "")
+            if new != r["v"]:
+                conn.execute(
+                    f"UPDATE {table} SET {col}=? WHERE {pk_col}=?",
+                    (new, r["pk"]),
+                )
+                total += 1
+    if total:
+        print(f"  [F8] 浓度类事由残余「敞口超限」剥离（{total} 行）")
+
+
 def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
     """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
 
@@ -780,6 +815,9 @@ def main() -> int:
         conn.commit()
         print("[6b] F2 浓度类事由剥离百分比（文案对齐实算）")
         patch_concentration_reason_percent(conn)
+        conn.commit()
+        print("[6b2] F8 浓度类事由残余「敞口超限」全量剥离（漏网路径）")
+        patch_concentration_reason_phrase(conn)
         conn.commit()
         print("[6c] F3 瑞华敞口重分布（单家 < 行内限额）")
         patch_ruihua_redistribution(conn)

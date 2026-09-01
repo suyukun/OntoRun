@@ -141,7 +141,8 @@ def test_r1a_governed_marker() -> None:
     assert is_r1a_governed(
         {"warn_reason": "10.8% 触发橙色预警（R1a 集团层归集集中度）"}
     )
-    assert not is_r1a_governed({"warn_reason": "集团集中度敞口超限 11%，触发橙色预警"})
+    # F8：RNG 浓度类事由已剥离「集团集中度敞口超限」→ 监测语气「集团集中度指标异动」
+    assert not is_r1a_governed({"warn_reason": "集团集中度指标异动，触发橙色预警"})
 
 
 def test_governing_level() -> None:
