@@ -33,7 +33,11 @@ RISK_RELATED_TOOL_NAME = (
     "risk_related_reveal"  # 第 2 幕升级识别：三线索 + R2 重算 12.8% 红
 )
 RISK_APPROVAL_TOOL_NAME = "risk_approval_chain"  # 第 4 幕双签驳回：处置审批链证据
-RISK_VERIFY_TOOL_NAME = "risk_verify_reason"  # 质疑/复核实查：标红/橙行真实原因维度（R2-P0-A）
+RISK_VERIFY_TOOL_NAME = "risk_verify_reason"  # 质疑/复核实查：标红/橙行真实原因维度
+# 附带 P2（M4 第三轮终审）：剧本工具链轮次上限调参——风险场景链更长
+# （定位 group_customer_no → 揭示/升级 → 质疑实查），基类 6 轮易撞上限导致
+# 「同题两次一半概率拒答」，风险 Agent 显式放宽到 16 轮。
+RISK_MAX_TOOL_ROUNDS = 16
 SCRIPT_TOOL_NAMES = (
     RISK_REVEAL_TOOL_NAME,
     RISK_RELATED_TOOL_NAME,
@@ -456,12 +460,14 @@ class RiskAgent(Agent):
         *,
         system_prompt: str | None = None,
         evidence: EvidenceService | None = None,
+        max_tool_rounds: int = RISK_MAX_TOOL_ROUNDS,
     ) -> None:
         super().__init__(
             registry,
             provider,
             executor,
             system_prompt=system_prompt or build_risk_system_prompt(registry, query),
+            max_tool_rounds=max_tool_rounds,
         )
         self._query = query
         self._evidence = evidence or EvidenceService()

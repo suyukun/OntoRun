@@ -408,6 +408,54 @@ def test_agent_chat_evidence_attached(tmp_path, monkeypatch) -> None:
         assert ev["denominator"]["value_yi"] == GROUP_CAPITAL_YI
 
 
+def test_two_consecutive_questions_evidence_backfilled(
+    tmp_path, monkeypatch
+) -> None:
+    """两连问（附带 P2）：第二轮未命中工具（evidence=null）→ 用会话最近一次载荷补位。
+
+    修复前第二轮 evidence=None，答案证据链断链；修复后回填上一轮证据链载荷。
+    """
+    from src.agent.provider import ChatResponse, MockProvider, ToolCall
+
+    mock = MockProvider(
+        responses=[
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="t1",
+                        name="risk_group_reveal",
+                        arguments={"group_customer_no": TIANSHENG_NO},
+                    )
+                ]
+            ),
+            ChatResponse(content="天晟归集 86.4 亿元 ÷ 800 亿元 = 10.8%，橙色预警。"),
+            # 第二轮：纯文本回答（无工具调用 → 无新证据）
+            ChatResponse(content="分母是集团并表资本 800 亿元。"),
+        ]
+    )
+    monkeypatch.setattr("src.agent.provider.get_provider", lambda name=None: mock)
+
+    from src.app.main import create_risk_agent_app
+
+    app = create_risk_agent_app()
+    with TestClient(app) as c:
+        r1 = c.post(
+            "/agent/risk/chat",
+            json={"message": "天晟集团风险有多大？", "session_id": "s-ev-backfill"},
+        )
+        assert r1.status_code == 200, r1.text
+        assert r1.json()["evidence"]
+        sid = r1.json()["session_id"]  # 会话由路由生成，取返回值续问
+        r2 = c.post(
+            "/agent/risk/chat",
+            json={"message": "分母是什么？", "session_id": sid},
+        )
+        assert r2.status_code == 200, r2.text
+        body = r2.json()
+        assert body["evidence"], "两连问第二轮 evidence 应补位（不再 null）"
+        assert body["evidence"][0]["intent"] == "act1_group_reveal"
+
+
 def test_agent_chat_risk_query_evidence(tmp_path, monkeypatch) -> None:
     """普通 risk_query 答案也带最小证据链载荷（依据表名/明细行引用）。"""
     from src.agent.provider import ChatResponse, MockProvider, ToolCall

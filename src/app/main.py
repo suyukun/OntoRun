@@ -651,9 +651,16 @@ def register_risk_agent_routes(app: FastAPI) -> None:
         else:
             risk_sessions.set_pending(session_id, None)
         # P1-1：缓存最近一次证据链载荷（供下一轮追问直接引用）
+        # 附带 P2（M4 第三轮终审）：两连问第二轮若未命中工具（evidence=null），
+        # 用会话最近一次载荷补位，保证「每个答案统一附证据链」不因轮次空窗断链。
         ev = _extract_evidence(turn)
         if ev:
             state.last_evidence = ev[-1]
+            response_evidence: list | None = ev
+        elif state.last_evidence:
+            response_evidence = [state.last_evidence]
+        else:
+            response_evidence = None
         risk_sessions.persist(session_id, agent)
 
         need_confirm_dict = None
@@ -679,7 +686,7 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             reply=turn.reply or "",
             need_confirm=need_confirm_dict,
             outcome=outcome,
-            evidence=_extract_evidence(turn),
+            evidence=response_evidence,
         )
 
     @app.post("/agent/risk/confirm")

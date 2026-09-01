@@ -114,6 +114,7 @@ class Agent:
         executor: ActionExecutor,
         *,
         system_prompt: str | None = None,
+        max_tool_rounds: int = _MAX_TOOL_ROUNDS,
     ) -> None:
         self._registry = registry
         self._provider = provider
@@ -125,6 +126,10 @@ class Agent:
         self._system_prompt = system_prompt or build_system_prompt(registry)
         self._history: list[ChatMessage] = []
         self._pending: ToolCall | None = None
+        # 附带 P2：工具轮次上限可配置（M4 第三轮终审——同题两次一半概率拒答的根因是
+        # 剧本工具链轮次撞上限；风险场景链更长（定位 group_customer_no → 揭示 → 实查），
+        # 由 RiskAgent 显式调高，S1 基类保持 6 不变）。
+        self._max_tool_rounds = max_tool_rounds
 
     @property
     def history(self) -> list[ChatMessage]:
@@ -216,7 +221,7 @@ class Agent:
         - 超轮次上限：LLM 输出视为不可信输入，兜底终止（不静默执行、不烧 token）。
         """
         results = list(extra_results or [])
-        for _ in range(_MAX_TOOL_ROUNDS):
+        for _ in range(self._max_tool_rounds):
             if not resp.has_tool_calls:
                 content = resp.content or ""
                 self._history.append(ChatMessage(role="assistant", content=content))
