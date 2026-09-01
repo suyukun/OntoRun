@@ -261,6 +261,41 @@ def test_f7_tiansheng_two_level_pre_post(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# F13：明细行 is_internal 标记 + 结论抵销勾稽说明（口径包§一 内部抵销注记）
+# ---------------------------------------------------------------------------
+
+
+def test_f13_detail_is_internal_marker(client: TestClient) -> None:
+    """F13：detail_rows 加 is_internal 标记——区分「集团内部成员间交叉授信」与「外部融资敞口」。
+
+    天晟为外部集团客户（融资对手方均为非安平成员），故逐家明细均 is_internal=False
+    （外部融资敞口，internal_balance_yi=0）；勾稽说明出现在结论与 r2 note。
+    """
+    reveal = _reveal(client)
+    assert reveal["detail_rows"], "天晟应含逐家明细"
+    for d in reveal["detail_rows"]:
+        assert "is_internal" in d, f"明细行缺 is_internal 标记: {d['org_name']}"
+        assert d["is_internal"] is False
+        assert d["internal_balance_yi"] == 0.0
+        assert d["external_balance_yi"] == d["balance_yi"]
+    assert "抵销后外部净敞口" in reveal["conclusion"], "结论应带抵销勾稽说明"
+    assert "不可直接对比" in reveal["r2_levels"]["note"]
+
+    up = _upgrade(client)
+    assert up["detail_rows"], "天晟应含隐性关联方明细"
+    for d in up["detail_rows"]:
+        assert d["is_internal"] is False, "恒昌等隐性关联方为外部一致行动人（外部敞口）"
+    assert "抵销后外部净敞口" in up["conclusion"]
+
+    draft = client.get(
+        "/risk/reporting/draft", params={"group_customer_no": TIANSHENG_NO}
+    ).json()["data"]
+    for b in draft["breakdown"]:
+        assert "is_internal" in b, f"报送 breakdown 缺 is_internal: {b['org_name']}"
+    assert "抵销后外部净敞口" in draft["consolidated_exposure"]["caliber_note"]
+
+
+# ---------------------------------------------------------------------------
 # 第 4 幕：双签驳回（2023 办法第二十三条 → 处置退回重新起草）
 # ---------------------------------------------------------------------------
 

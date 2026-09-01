@@ -159,6 +159,13 @@ def _pct_display(ratio: float) -> str:
     return pct_display(ratio)
 
 
+# F13 勾稽说明（口径包§一 内部抵销注记）：明细=单家口径，归集=并表抵销后口径
+RECONCILIATION_NOTE = (
+    "成员间交叉授信/内部融资已按并表口径抵销，归集数为抵销后外部净敞口；"
+    "明细为单家口径（各附属机构外部融资逐家加总，未抵销），二者不可直接对比"
+)
+
+
 class EvidenceError(RuntimeError):
     """证据链查询输入非法/未命中（fail-closed，拒答而非瞎编）。"""
 
@@ -466,8 +473,14 @@ class EvidenceService:
             cfg = pre.config
             group_cap = cfg.group_capital_yi
             # 逐家附属机构单看明细（口径包§七 第 1 幕「联合授信台账逐家亮出」）
+            # F13：明细行区分「外部融资敞口」与「集团内部成员间交叉授信」——并表口径下
+            # 集团内部融资/交叉授信须抵销，不并入归集分子；以融资对手方是否为安平金控
+            # 成员判定（is_internal），避免处长钻到 detail 层时把单家口径明细与并表
+            # 抵销后归集数直接对比（口径包§一 内部抵销注记）。
             org_rows = conn.execute(
-                "SELECT s.org_name, SUM(s.business_balance) AS t "
+                "SELECT s.org_name, SUM(s.business_balance) AS t, "
+                "SUM(CASE WHEN s.customer_name LIKE '安平%' "
+                "     THEN s.business_balance ELSE 0 END) AS internal_t "
                 "FROM customer.ap_subsidiary_credit_detail s "
                 "JOIN customer.ap_customer c ON s.cert_no = c.cert_no "
                 "WHERE c.group_customer_no=? GROUP BY s.org_name ORDER BY t DESC",
@@ -475,7 +488,9 @@ class EvidenceService:
             ).fetchall()
             detail: list[dict[str, Any]] = []
             for r in org_rows:
-                yi = round((r["t"] or 0.0) / _WAN_TO_YI, 2)
+                raw_yi = (r["t"] or 0.0) / _WAN_TO_YI
+                internal_yi = round((r["internal_t"] or 0.0) / _WAN_TO_YI, 2)
+                yi = round(raw_yi, 2)
                 item: dict[str, Any] = {
                     "row_ref": (
                         f"customer.ap_subsidiary_credit_detail"
@@ -483,6 +498,9 @@ class EvidenceService:
                     ),
                     "org_name": r["org_name"],
                     "balance_yi": yi,
+                    "external_balance_yi": round(raw_yi - internal_yi, 2),
+                    "internal_balance_yi": internal_yi,
+                    "is_internal": internal_yi > 0,
                 }
                 denom_id = _ORG_REFERENCE_DENOM.get(r["org_name"])
                 denom_yi = cap.get(denom_id) if denom_id else None
@@ -525,6 +543,7 @@ class EvidenceService:
             f"{group_cap:.0f} 亿元 = {compare_pre} → R1a 定级「{pre.level}」"
             f"（本行为纳入隐性关联前的归集口径）"
             + self._signal_tail(signals, "橙")
+            + f"；勾稽说明：{RECONCILIATION_NOTE}。"
         )
         # F7b：证据链显式给出 pre_R2 / post_R2 两行 + 「纳入隐性关联前后」说明
         r2_levels = {
@@ -546,7 +565,8 @@ class EvidenceService:
             },
             "note": (
                 "纳入隐性关联（恒昌贸易）前后的归集口径对比；"
-                "看板/报送口径为纳入隐性关联后（post_R2）"
+                "看板/报送口径为纳入隐性关联后（post_R2）；"
+                + RECONCILIATION_NOTE
             ),
         }
         return {
@@ -654,12 +674,15 @@ class EvidenceService:
                                     ),
                                 }
                             )
+                # F13：隐性关联方（恒昌贸易等）为集团外部一致行动人，属外部融资敞口；
+                # 仅安平金控成员间融资才标记内部（is_internal=True，并表抵销不入归集）。
                 detail.append(
                     {
                         "customer_name": p.customer_name,
                         "balance_yi": round(p.balance_yi, 2),
                         "clue_names": p.clues,
                         "relation_clues": clue_rows,
+                        "is_internal": False,
                     }
                 )
             signals = self._group_signals(conn, gno)
@@ -678,6 +701,7 @@ class EvidenceService:
             f"{r2.total_yi:.1f} 亿元 ÷ 集团并表资本 {group_cap:.0f} 亿元 = "
             f"{compare} → R1a+R2 定级「{r2.level}」"
             + self._signal_tail(signals, "红")
+            + f"；勾稽说明：{RECONCILIATION_NOTE}。"
         )
         # F7b：pre_R2 / post_R2 两行（与第 1 幕揭示同构，说明「纳入隐性关联前后」）
         r2_levels = {
@@ -699,7 +723,8 @@ class EvidenceService:
             },
             "note": (
                 "纳入隐性关联（恒昌贸易）前后的归集口径对比；"
-                "看板/报送口径为纳入隐性关联后（post_R2）"
+                "看板/报送口径为纳入隐性关联后（post_R2）；"
+                + RECONCILIATION_NOTE
             ),
         }
         return {

@@ -85,6 +85,13 @@ def _pct_display(ratio: float) -> str:
     return pct_display(ratio)
 
 
+# F13 勾稽说明（口径包§一 内部抵销注记；与 risk_evidence.RECONCILIATION_NOTE 同源）
+RECONCILIATION_NOTE = (
+    "成员间交叉授信/内部融资已按并表口径抵销，归集数为抵销后外部净敞口；"
+    "明细为单家口径（各附属机构外部融资逐家加总，未抵销），二者不可直接对比"
+)
+
+
 class _ReportService:
     """读侧聚合服务：全局督办看板 + 监管报送初稿（ap_anping 六库实算，只读）。"""
 
@@ -169,8 +176,12 @@ class _ReportService:
         self, conn: sqlite3.Connection, group_no: str, denoms: dict[str, float]
     ) -> list[dict[str, Any]]:
         # 按唯一 cert_no 关联真实集团身份（group_customer_no），杜绝同名客户跨集团串号
+        # F13：明细行区分「外部融资敞口」与「集团内部成员间交叉授信」（并表口径下
+        # 集团内部融资须抵销，不并入归集分子）——以融资对手方是否为安平金控成员判定。
         rows = conn.execute(
-            "SELECT s.org_name, SUM(s.business_balance) t "
+            "SELECT s.org_name, SUM(s.business_balance) t, "
+            "SUM(CASE WHEN s.customer_name LIKE '安平%' "
+            "     THEN s.business_balance ELSE 0 END) AS internal_t "
             "FROM ap_subsidiary_credit_detail s "
             "JOIN ap_customer c ON s.cert_no = c.cert_no "
             "WHERE c.group_customer_no = ? GROUP BY s.org_name ORDER BY t DESC",
@@ -178,11 +189,16 @@ class _ReportService:
         ).fetchall()
         out = []
         for r in rows:
-            yi = round((r["t"] or 0.0) / 10000.0, 4)
+            raw_yi = (r["t"] or 0.0) / 10000.0
+            internal_yi = round((r["internal_t"] or 0.0) / 10000.0, 4)
+            yi = round(raw_yi, 4)
             denom = denoms.get(r["org_name"])
             item: dict[str, Any] = {
                 "org_name": r["org_name"],
                 "balance_yi": yi,
+                "external_balance_yi": round(raw_yi - internal_yi, 4),
+                "internal_balance_yi": internal_yi,
+                "is_internal": internal_yi > 0,
             }
             if denom:
                 item["reference_denom_yi"] = denom
@@ -450,6 +466,8 @@ class _ReportService:
                     "group_consolidated_capital_yi": group_cap,
                     "concentration_ratio": ratio,
                     "ratio_display": _pct_display(ratio),  # F6：展示统一两位小数
+                    # F13：归集数为并表抵销后口径（成员间交叉授信/内部融资已抵销）
+                    "caliber_note": RECONCILIATION_NOTE,
                 },
                 "breakdown": breakdown,
                 "hidden_related_parties": hidden,
