@@ -231,6 +231,21 @@ class EvidenceService:
         return f"{display} < 关注线 {cfg.concern_line * 100:.0f}%"
 
     @staticmethod
+    def _signal_tail(signals: list[dict[str, Any]], level: str) -> str:
+        """F9：结论尾句「预警信号已生成」加维度限定——紧跟集中度句不得歧义。
+
+        信号属集中度维度（warn_reason 含 R1a 标记）→ 明示「本信号为集中度维度」；
+        否则（行为/内控/模型评分类）→ 标「非集中度维度预警，事由见信号明细」，
+        杜绝「R1a 定级无 却紧接 橙色预警信号已生成」的裸对比歧义。
+        """
+        sig = next((s for s in signals if s["warn_level"] == level), None)
+        if sig is None:
+            return ""
+        if R1A_RULE_MARKER in (sig["warn_reason"] or ""):
+            return f"，{level}色预警信号已生成（本信号为集中度维度）"
+        return f"，{level}色预警信号已生成（非集中度维度预警，事由见信号明细）"
+
+    @staticmethod
     def _assert_level_consistent(ratio: float, cfg: Any, level: str, ctx: str) -> None:
         """结论自检：computed ratio 的 R1a 定级须与结论声明的 level 一致，不一致即抛错。
 
@@ -487,7 +502,6 @@ class EvidenceService:
         self._assert_level_consistent(
             post.ratio, cfg, post.level, "第 1 幕 group_reveal(post_R2)"
         )
-        warn = next((s for s in signals if s["warn_level"] == "橙"), None)
         # F1/F3 结论模板按实算：逐家安全断言由 _org_single_safety 对各自参考线实算，
         # 不再写死「银行 …低于行内限额 60 亿」（非道具组无 ratio_display 曾致 KeyError 500；
         # 瑞华 75.2 亿单挂安平银行实超 60 亿却断言「均安全」系算术矛盾）。
@@ -512,7 +526,7 @@ class EvidenceService:
             f"{head}；归集实算 {pre.total_yi:.1f} 亿元 ÷ 集团并表资本 "
             f"{group_cap:.0f} 亿元 = {compare_pre} → R1a 定级「{pre.level}」"
             f"（本行为纳入隐性关联前的归集口径）"
-            + ("，橙色预警信号已生成" if warn else "")
+            + self._signal_tail(signals, "橙")
         )
         # F7b：证据链显式给出 pre_R2 / post_R2 两行 + 「纳入隐性关联前后」说明
         r2_levels = {
@@ -656,7 +670,6 @@ class EvidenceService:
         # P0-2 结论自检：R2 纳入后比较短语由 computed ratio 实算生成（杜绝「>12% 却定级非红」）
         compare = self._r1a_comparison_text(r2.ratio, cfg)
         self._assert_level_consistent(r2.ratio, cfg, r2.level, "第 2 幕 related_upgrade")
-        red = next((s for s in signals if s["warn_level"] == "红"), None)
         party_txt = "、".join(
             f"{d['customer_name']}（{d['balance_yi']:.1f} 亿，{('、'.join(d['clue_names']))}）"
             for d in detail
@@ -666,7 +679,7 @@ class EvidenceService:
             f"纳入归集重算：{group} 自身 {base:.1f} 亿 + 关联方 {rel:.1f} 亿 = "
             f"{r2.total_yi:.1f} 亿元 ÷ 集团并表资本 {group_cap:.0f} 亿元 = "
             f"{compare} → R1a+R2 定级「{r2.level}」"
-            + ("，红色预警信号已生成" if red else "")
+            + self._signal_tail(signals, "红")
         )
         # F7b：pre_R2 / post_R2 两行（与第 1 幕揭示同构，说明「纳入隐性关联前后」）
         r2_levels = {
