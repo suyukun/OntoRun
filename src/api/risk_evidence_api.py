@@ -62,6 +62,15 @@ def register_risk_evidence_routes(app: FastAPI) -> None:
         """R1a 三线阈值可查询（P0-1）：谁定的/怎么改（出处条款/版本/审批人/更新时间/分子构成/分母/净额规则）。"""
         return _envelope(service.thresholds())
 
+    @app.get("/risk/evidence/verify-reason")
+    def risk_evidence_verify_reason(request: Request):
+        """质疑/复核实查（R2-P0-A）：按集团实查标红/橙行的真实原因维度（集中度/非集中度）+ R1a computed 比对。"""
+        group = request.query_params.get("group_customer_name") or ""
+        try:
+            return _envelope(service.verify_red_reason(group))
+        except EvidenceError as exc:
+            return _envelope_error("GROUP_NOT_FOUND", str(exc))
+
     @app.get("/risk/evidence/approval-chain")
     def risk_evidence_approval_chain(request: Request):
         try:

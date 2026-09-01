@@ -27,7 +27,14 @@ import sqlite3
 from typing import Any
 
 from src.runtime.risk_db import RiskStore
-from src.runtime.risk_rules import evaluate, level_for_ratio
+from src.runtime.risk_rules import (
+    LEVEL_NONE,
+    R1A_RULE_MARKER,
+    R1aConfig,
+    evaluate,
+    level_for_ratio,
+    related_parties,
+)
 
 # ---------------------------------------------------------------------------
 # 常量与条款引用（口径包§一/§三/§七；参数 id 与 risk_reporting / risk_script_props 同源）
@@ -528,6 +535,131 @@ class EvidenceService:
             },
             "detail_rows": detail,
             "signals": signals,
+        }
+
+    # ---- 质疑/复核实查（R2-P0-A）：标红/橙行的真实原因维度（集中度 vs 非集中度）----
+
+    def verify_red_reason(self, group_customer_name: str) -> dict[str, Any]:
+        """质疑/复核实查：被质疑「rank3 才 1% 凭什么挂红」时，先查库实算再开口。
+
+        不为辩护合成明细/表名（R2-P0-A 防线）：集中度口径与看板
+        _concentration_ranking 完全一致——concentration.ap_concentration_limit
+        按集团聚合 + R2 隐性关联方（ap_customer_relation_tree 三线索）纳入，
+        ÷ 集团并表资本，R1a 三线定级；warning_dimension = non_concentration
+        当且仅当信号红/橙但集中度实算无警（杜绝「低比例却挂红」套集中度逻辑错答，
+        R2-P1-A）。查无实据 → fail-closed 拒答。
+        """
+        group = (group_customer_name or "").strip()
+        if not group:
+            raise EvidenceError("group_customer_name 不能为空")
+        with self._conn() as conn:
+            self._require_group(conn, group)
+            cap = self._capital_params(conn)
+            group_cap = cap[PARAM_GROUP_CONSOLIDATED]
+            cfg = R1aConfig.load(conn)
+            row = conn.execute(
+                "SELECT SUM(cl.concentration_limit) AS bal_wan "
+                "FROM concentration.ap_concentration_limit cl "
+                "JOIN customer.ap_customer c ON c.customer_no = cl.customer_no "
+                "WHERE c.group_customer_name = ?",
+                (group,),
+            ).fetchone()
+            own_yi = (row["bal_wan"] or 0.0) / _WAN_TO_YI if row else 0.0
+            hidden = related_parties(conn, group)
+            hidden_yi = round(sum(p.balance_yi for p in hidden), 4)
+            total_yi = round(own_yi + hidden_yi, 4)
+            ratio = round(total_yi / group_cap, 4) if group_cap else 0.0
+            conc_level = level_for_ratio(ratio, cfg)
+            signals = self._group_signals(conn, group)
+            sig = signals[0] if signals else None
+        sig_level = sig["warn_level"] if sig else None
+        is_r1a = sig is not None and (R1A_RULE_MARKER in (sig["warn_reason"] or ""))
+        is_non_conc = (
+            sig is not None
+            and sig_level in ("红", "橙")
+            and conc_level == LEVEL_NONE
+            and not is_r1a
+        )
+        dimension = "non_concentration" if is_non_conc else "concentration"
+        compare = self._r1a_comparison_text(ratio, cfg)
+        if is_non_conc:
+            conclusion = (
+                f"该行标红原因是非集中度维度（{dimension}）：{group} 集中度实算 "
+                f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
+                f"与红/橙预警无关；真实触发 = 「{sig['warn_reason']}」"
+                "（行为/内控/模型评分类硬规则命中）。不得套用集中度逻辑为低比例红辩护，"
+                "也不得合成集中度明细/表名。"
+            )
+        elif sig_level in ("红", "橙"):
+            conclusion = (
+                f"该行标红原因是集中度维度（{dimension}）：{group} 集中度实算 "
+                f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
+                f"预警信号 = 「{sig['warn_reason']}」。"
+            )
+        else:
+            conclusion = (
+                f"{group} 当前无红/橙预警信号（最新信号等级 = {sig_level or '无'}）；"
+                f"集中度实算 {self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」）。"
+                "用户所指标红行若无对应信号，请核对对象/看板列，勿凭空认定。"
+            )
+        rules_hits = [
+            {
+                "rule": "R1a",
+                "name": "集团层归集集中度（实查比对）",
+                "clause": R1A_CLAUSE,
+                "lines": R1A_LINES,
+                "computed": {
+                    "numerator_yi": round(total_yi, 2),
+                    "denominator_yi": group_cap,
+                    "ratio": ratio,
+                    "ratio_display": self._ratio_display(ratio),
+                    "level": conc_level,
+                },
+            }
+        ]
+        if is_non_conc:
+            rules_hits.append(
+                {
+                    "rule": "N1",
+                    "name": "非集中度预警维度（标红真实原因）",
+                    "clause": "看板 warning_dimension=non_concentration（行为/内控/模型评分硬规则，R2-P1-A）",
+                    "text": sig["warn_reason"],
+                    "note": "集中度实算无警却标红/橙 = 非集中度维度；引用此维度作答，禁套集中度逻辑",
+                }
+            )
+        return {
+            "intent": "risk_verify_reason",
+            "conclusion": conclusion,
+            "basis_tables": [
+                "concentration.ap_concentration_limit",
+                "customer.ap_customer_relation_tree",
+                "customer.ap_subsidiary_credit_detail",
+                "base.ap_sys_param",
+                "ap_warning_signal",
+            ],
+            "rules_hits": rules_hits,
+            "denominator": {
+                "name": "集团并表资本",
+                "value_yi": group_cap,
+                "source": f"base.ap_sys_param.{PARAM_GROUP_CONSOLIDATED}",
+            },
+            "detail_rows": [
+                {
+                    "group_customer_name": group,
+                    "own_balance_yi": round(own_yi, 4),
+                    "hidden_related_balance_yi": hidden_yi,
+                    "consolidated_balance_yi": total_yi,
+                    "concentration_ratio": ratio,
+                    "concentration_level": conc_level,
+                    "warning_dimension": dimension,
+                    "signals": signals,
+                    "related_parties": [
+                        {"customer_name": p.customer_name, "balance_yi": p.balance_yi}
+                        for p in hidden
+                    ],
+                }
+            ],
+            "warning_dimension": dimension,
         }
 
     # ---- 第 4 幕：双签驳回（处置审批链 + 2023 办法第二十三条驳回依据）----

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -32,11 +33,32 @@ RISK_RELATED_TOOL_NAME = (
     "risk_related_reveal"  # 第 2 幕升级识别：三线索 + R2 重算 12.8% 红
 )
 RISK_APPROVAL_TOOL_NAME = "risk_approval_chain"  # 第 4 幕双签驳回：处置审批链证据
+RISK_VERIFY_TOOL_NAME = "risk_verify_reason"  # 质疑/复核实查：标红/橙行真实原因维度（R2-P0-A）
 SCRIPT_TOOL_NAMES = (
     RISK_REVEAL_TOOL_NAME,
     RISK_RELATED_TOOL_NAME,
     RISK_APPROVAL_TOOL_NAME,
+    RISK_VERIFY_TOOL_NAME,
 )
+
+
+# R2-P1-B：思维链剥离 —— LLM 内心独白（「让我先理清…」等）不得上屏。
+# 回复返回前剥离前缀（在 reply 后处理，不动 LLM 调用）；仅处理显式独白开口，
+# 不触碰正文内容。匹配「让我/我需要/我想 + 先/来/理清…」到首个句读/换行。
+_COT_PREFIX_RE = re.compile(
+    r"^\s*(?:让我|我需要|我想)\s*(?:先|来|理清|思考|查|确认)?"
+    r"[^\n。！？：:，,；;]{0,40}?(?:[。！？：:，,；;\n]|$)"
+)
+
+
+def strip_chain_of_thought(reply: str) -> str:
+    """剥离回复开头的内心独白前缀（R2-P1-B），保留正文。
+
+    仅剥离「让我先理清/我需要先」类显式独白前缀（到首个句读或结尾）；
+    无匹配则原样返回，绝不误删正文。
+    """
+    text = reply or ""
+    return _COT_PREFIX_RE.sub("", text, count=1)
 
 
 class RiskQueryParams(BaseModel):
@@ -288,6 +310,30 @@ def build_script_tools() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": RISK_VERIFY_TOOL_NAME,
+                "description": (
+                    "质疑/复核实查（只读）：按集团实查该行标红/橙的真实原因维度——"
+                    "集中度（concentration）或非集中度（non_concentration，行为/内控/模型评分硬规则）。"
+                    "集中度口径与看板同款（ap_concentration_limit 归集 + R2 隐性关联方，"
+                    "÷ 集团并表资本，R1a 三线定级），返回 warning_dimension + R1a computed 比对"
+                    " + 信号/关联方明细。用户质疑「怎么知道/凭什么/数据对吗/为什么标红」时必须先调本工具"
+                    "实查，按实回答，禁凭空推理、禁为辩护合成明细/表名。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "group_customer_name": {
+                            "type": "string",
+                            "description": "被质疑标红/橙行的集团客户名称",
+                        }
+                    },
+                    "required": ["group_customer_name"],
+                },
+            },
+        },
     ]
 
 
@@ -327,7 +373,14 @@ def build_risk_system_prompt(registry: Registry, query: RiskQuery) -> str:
         "9. 问「天晟集团集中度如何压降/处置」→ 按剧本提出：将天晟部分授信拆分至非关联第三方通道主体以降低名义归集集中度。"
         "该提议看似合规腾挪，实际违反《金融控股公司关联交易管理办法》（2023）第二十三条"
         "「通过隐匿关联关系、拆分交易、设计复杂交易结构等各种隐蔽方式规避内部审查、外部监管以及报告披露义务」；"
-        "演示将展示审批人依此条款驳回（approve_disposal decision=REJECTED，opinion 引用第二十三条），处置退回重新起草。"
+        "演示将展示审批人依此条款驳回（approve_disposal decision=REJECTED，opinion 引用第二十三条），处置退回重新起草。\n"
+        "10. 用户质疑/复核某行标红/橙的原因（怎么知道/凭什么/数据对吗/为什么标红/如何确认/真红吗）时，"
+        "不得凭印象推理或为辩护合成明细——必须先调 risk_verify_reason 实查该集团的 warning_dimension"
+        "（集中度 concentration / 非集中度 non_concentration）并与 R1a computed 比对，按实回答；"
+        "查无实据时明确说「该行标红原因是[维度X]，见证据链」。若用户以看板排名引用某行（如 rank3）"
+        "且对话中无集团名，先用 risk_query 定位该排名的集团名再实查。\n"
+        "11. 禁止虚构任何表名/明细行/数字；所有引用必须来自工具返回的证据链载荷"
+        "（结论/依据表名/命中规则+条款/分母/明细行），查无实据时如实说明并给证据链入口，绝不编造。"
     )
 
 
@@ -494,6 +547,9 @@ class RiskAgent(Agent):
             elif call.name == RISK_RELATED_TOOL_NAME:
                 params = ScriptGroupParams.model_validate(call.arguments)
                 payload = self._evidence.related_upgrade(params.group_customer_name)
+            elif call.name == RISK_VERIFY_TOOL_NAME:
+                params = ScriptGroupParams.model_validate(call.arguments)
+                payload = self._evidence.verify_red_reason(params.group_customer_name)
             else:
                 params = ScriptApprovalParams.model_validate(call.arguments)
                 payload = self._evidence.approval_chain(
@@ -541,6 +597,19 @@ class RiskAgent(Agent):
             content=_j({"outcome": "ok", "data": payload, "evidence": payload}),
         )
 
+    def _handle_response(
+        self, resp: Any, extra_results: list[ToolResult] | None = None
+    ) -> Any:
+        """编排结束后剥离思维链前缀（R2-P1-B）：内心独白不得上屏。
+
+        在 reply 返回前处理后置剥离（不动 LLM 调用、不改历史回填）。
+        """
+        turn = super()._handle_response(resp, extra_results)
+        if turn.reply:
+            stripped = strip_chain_of_thought(turn.reply)
+            turn.reply = stripped or None
+        return turn
+
 
 def _j(value: Any) -> str:
     import json
@@ -553,6 +622,7 @@ __all__ = [
     "RISK_QUERY_TOOL_NAME",
     "RISK_RELATED_TOOL_NAME",
     "RISK_REVEAL_TOOL_NAME",
+    "RISK_VERIFY_TOOL_NAME",
     "SCRIPT_TOOL_NAMES",
     "RiskActionExecutor",
     "RiskAgent",
@@ -562,4 +632,5 @@ __all__ = [
     "build_risk_query_tool",
     "build_risk_system_prompt",
     "build_script_tools",
+    "strip_chain_of_thought",
 ]

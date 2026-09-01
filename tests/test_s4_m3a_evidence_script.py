@@ -398,3 +398,120 @@ def test_agent_chat_risk_query_evidence(tmp_path, monkeypatch) -> None:
         ev = body["evidence"][0]
         assert ev["intent"] == "risk_query:warning_signal"
         assert "ap_warning_signal" in ev["basis_tables"]
+
+# ---------------------------------------------------------------------------
+# R2-P0-A / R2-P1-B：质疑实查路径 + 思维链剥离（反编造防线）
+# ---------------------------------------------------------------------------
+
+
+def test_verify_reason_non_concentration_dimension(client: TestClient) -> None:
+    """质疑实查：低集中度却标红的行 → warning_dimension=non_concentration（R2-P0-A/R2-P1-A）。
+
+    华信建设西南集团集中度实算 6.2%（< 关注线 9%，R1a 定级「无」）却挂红——
+    真实原因 = 非集中度维度（资质缺失异常/模型评分 88），不得套集中度逻辑错答。
+    """
+    data = client.get(
+        "/risk/evidence/verify-reason",
+        params={"group_customer_name": "华信建设西南集团"},
+    ).json()["data"]
+    assert data["intent"] == "risk_verify_reason"
+    assert data["warning_dimension"] == "non_concentration"
+    for key in EVIDENCE_KEYS:
+        assert key in data, f"质疑实查载荷缺 {key}"
+    comp = data["rules_hits"][0]["computed"]
+    assert comp["ratio"] < 0.09 and comp["level"] == "无"
+    assert "非集中度维度" in data["conclusion"]
+    sig = data["detail_rows"][0]["signals"][0]
+    assert sig["warn_level"] == "红"
+    assert "模型评分" in (sig["warn_reason"] or "")
+    assert data["denominator"]["value_yi"] == GROUP_CAPITAL_YI
+
+
+def test_verify_reason_concentration_dimension(client: TestClient) -> None:
+    """质疑实查：天晟 → warning_dimension=concentration，R1a computed 12.8% 红（口径包§七 第 2 幕）。"""
+    data = client.get(
+        "/risk/evidence/verify-reason", params={"group_customer_name": TIANSHENG}
+    ).json()["data"]
+    assert data["warning_dimension"] == "concentration"
+    comp = data["rules_hits"][0]["computed"]
+    assert comp["ratio"] == pytest.approx(0.128, abs=1e-3)
+    assert comp["ratio_display"] == "12.8%"
+    assert comp["level"] == "红"
+
+
+def test_agent_challenge_routes_to_verify_reason(tmp_path, monkeypatch) -> None:
+    """质疑预设（凭什么挂红）→ 实查路径：调 risk_verify_reason 按实回答（R2-P0-A 防线）。
+
+    挑战消息必须落到 risk_verify_reason 证据链（warning_dimension + R1a computed 比对），
+    回答附证据链载荷，绝不凭空合成集中度明细。
+    """
+    from src.agent.provider import ChatResponse, MockProvider, ToolCall
+
+    mock = MockProvider(
+        responses=[
+            ChatResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="t3",
+                        name="risk_verify_reason",
+                        arguments={"group_customer_name": "华信建设西南集团"},
+                    )
+                ]
+            ),
+            ChatResponse(
+                content=(
+                    "让我先理清用户的问题。该行标红原因是非集中度维度"
+                    "（华信建设西南集团集中度实算 6.2%，R1a 定级「无」），"
+                    "真实触发是资质缺失异常/模型评分 88，见证据链。"
+                )
+            ),
+        ]
+    )
+    monkeypatch.setattr("src.agent.provider.get_provider", lambda name=None: mock)
+
+    from src.app.main import create_risk_agent_app
+
+    app = create_risk_agent_app()
+    with TestClient(app) as c:
+        res = c.post(
+            "/agent/risk/chat",
+            json={"message": "华信建设西南集团才 6.2% 凭什么挂红？"},
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["evidence"], "质疑路径必须走实查证据链"
+        ev = body["evidence"][0]
+        assert ev["intent"] == "risk_verify_reason"
+        assert ev["warning_dimension"] == "non_concentration"
+        assert ev["rules_hits"][0]["computed"]["level"] == "无"
+        # 思维链剥离：内心独白前缀不得上屏
+        assert not body["reply"].startswith("让我先理清")
+        assert "非集中度维度" in body["reply"]
+
+
+def test_agent_chat_strips_chain_of_thought(tmp_path, monkeypatch) -> None:
+    """思维链剥离：回复返回前剥离「让我先理清/我需要先」类内心独白前缀（R2-P1-B）。"""
+    from src.agent.provider import ChatResponse, MockProvider
+
+    mock = MockProvider(
+        responses=[
+            ChatResponse(
+                content=(
+                    "让我先理清用户的问题。天晟集团归集 86.4 亿元 ÷ 800 亿元 = "
+                    "10.8%，触发橙色预警。"
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr("src.agent.provider.get_provider", lambda name=None: mock)
+
+    from src.app.main import create_risk_agent_app
+
+    app = create_risk_agent_app()
+    with TestClient(app) as c:
+        res = c.post("/agent/risk/chat", json={"message": "天晟集团风险有多大？"})
+        assert res.status_code == 200, res.text
+        reply = res.json()["reply"]
+        assert not reply.startswith("让我先理清")
+        assert reply.startswith("天晟集团")
+
