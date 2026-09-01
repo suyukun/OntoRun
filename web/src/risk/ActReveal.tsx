@@ -38,6 +38,7 @@ export default function ActReveal() {
             <div
               key={inst.org}
               data-testid={'reveal-row-' + i}
+              className={shown ? 'risk-fade-up' : undefined}
               style={{
                 display: 'flex',
                 alignItems: 'center',
