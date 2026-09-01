@@ -782,6 +782,36 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             evidence=_extract_evidence(turn),
         )
 
+    @app.get("/risk/audit")
+    def risk_audit(
+        request: Request,
+        action: str | None = None,
+        outcome: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ):
+        """风险审计聚合（F11）：/audit 一键调档改指风险审计库 s3_risk_ontology.db。
+
+        检查组「一键调档」落点：聚合风险动作全程审计（approve_disposal / confirm_warning /
+        adjust_warning_level / submit_disposal …，WORM 哈希链全绿），与 approval-chain 的
+        audit_trail 同库同源；不再读 S1 零售审计库（total=0 空账）。
+        """
+        from src.runtime.audit import AuditLog
+        from src.runtime.risk_db import RiskStore
+
+        audit = AuditLog(RiskStore())
+        items, total = audit.query(
+            action=action, outcome=outcome, page=page, page_size=page_size
+        )
+        return JSONResponse(
+            content={
+                "request_id": "",
+                "outcome": "ok",
+                "data": {"items": items, "total": total},
+                "error": None,
+            }
+        )
+
     @app.post("/risk/demo/reset-approval")
     def risk_demo_reset_approval():
         """演示重置（F10）：天晟审批单回 PROCESS（节点 2 回 PENDING），供现场第 4 幕 live 驳回。

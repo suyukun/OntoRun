@@ -339,6 +339,30 @@ def test_f10_reset_route_registered(client: TestClient) -> None:
     )
 
 
+def test_f11_risk_audit_aggregation(client: TestClient) -> None:
+    """F11：/audit 一键调档改指风险审计库 s3_risk_ontology.db（不再 total=0 空账）。
+
+    检查组「一键调档」：/risk/audit 聚合风险动作全程审计，含预置驳回（approve_disposal，
+    in-universe actor_detail + 2026-12 业务时间戳），与 approval-chain 的 audit_trail 同源。
+    """
+    data = client.get("/risk/audit").json()["data"]
+    assert data["total"] > 0, "风险审计应非空账（读 s3_risk_ontology.db）"
+    # 含预置驳回审计行（approve_disposal + in-universe）
+    appr = client.get("/risk/audit", params={"action": "approve_disposal"}).json()[
+        "data"
+    ]
+    assert appr["total"] >= 1
+    hits = [
+        it
+        for it in appr["items"]
+        if "REJ-2026-90000002" in (it.get("request_id") or "")
+    ]
+    assert hits, "风险审计应含预置驳回审计行（request_id=REJ-2026-90000002）"
+    row = hits[0]
+    assert "s4-preset" not in (row.get("actor_detail") or "")
+    assert row["ts"] >= "2026-12-01"
+
+
 def test_act4_prop_reset_to_pending_then_live_reject(act4_env) -> None:
     """F4：预置 REJECTED 道具链可重置回 PENDING（供现场 live 驳回演示）→ 现场驳回生效。
 
