@@ -135,7 +135,21 @@ export function toZhWarnLevel(v: string | null | undefined): ZhWarnLevel | null 
   return null;
 }
 
-// 工具：百分比数字 → "10.8%"（避免浮点尾巴）
+// 工具：百分比数字 → "10.8%" / "1.03%"（F6 统一两位小数：1.03% 不再截断为 1.0%，
+// 恰好一位小数的值保持一位小数，不显示 10.80% / 8.00%）
 export function pctOf(ratio: number): string {
-  return (ratio * 100).toFixed(1) + '%';
+  const x = Math.round(ratio * 100 * 100) / 100;
+  if (Math.abs(x - Math.round(x * 10) / 10) < 1e-9) {
+    return x.toFixed(1) + '%';
+  }
+  return x.toFixed(2) + '%';
+}
+
+// F6：展示名分离「（NN）」唯一后缀 → {基名, 编号}（编号列展示）。
+// 存储层 group_customer_name 含「（NN）」后缀保证全局唯一（口径包§五 名称纯净化不引入「·」），
+// 展示层把编号拆成独立元素，避免「翔宇电子华北集团（16）」读起来像脚注。
+export function splitGroupSeq(name: string): { base: string; seq: string | null } {
+  const m = /^(.*?)[（(](d{2})[）)]$/.exec(name);
+  if (m) return { base: m[1], seq: m[2] };
+  return { base: name, seq: null };
 }

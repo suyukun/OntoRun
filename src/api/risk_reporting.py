@@ -78,6 +78,14 @@ _ORG_REFERENCE_DENOM: dict[str, str] = {
 _OPEN_STATUSES = ("待确认", "确认中", "已确认", "处置中")
 
 
+def _pct_display(ratio: float) -> str:
+    """百分比展示统一两位小数（尾部零不冗余）：F6 修复「1.0% vs 1.03% 取整两貌」。"""
+    x = round(ratio * 100, 2)
+    if abs(x - round(x, 1)) < 1e-9:
+        return f"{x:.1f}%"
+    return f"{x:.2f}%"
+
+
 class _ReportService:
     """读侧聚合服务：全局督办看板 + 监管报送初稿（ap_anping 六库实算，只读）。"""
 
@@ -448,7 +456,7 @@ class _ReportService:
                     "total_balance_yi": total_yi,
                     "group_consolidated_capital_yi": group_cap,
                     "concentration_ratio": ratio,
-                    "ratio_display": f"{ratio * 100:.1f}%",
+                    "ratio_display": _pct_display(ratio),  # F6：展示统一两位小数
                 },
                 "breakdown": breakdown,
                 "hidden_related_parties": hidden,

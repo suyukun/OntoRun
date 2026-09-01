@@ -154,6 +154,18 @@ PARAM_META: dict[str, dict[str, str]] = {
 _WAN_TO_YI = 10000.0  # business_balance 单位 = 万元 → 亿元
 
 
+def _pct_display(ratio: float) -> str:
+    """百分比展示统一两位小数（尾部零不冗余）：F6 修复「1.0% vs 1.03% 取整两貌」。
+
+    1.03% 不再被截断为 1.0%；10.8% / 8.0% 等恰好一位小数的值保持一位小数（不显示
+    10.80% / 8.00%），与既有断言（8.0% / 10.8% / 12.8%）兼容。
+    """
+    x = round(ratio * 100, 2)
+    if abs(x - round(x, 1)) < 1e-9:
+        return f"{x:.1f}%"
+    return f"{x:.2f}%"
+
+
 class EvidenceError(RuntimeError):
     """证据链查询输入非法/未命中（fail-closed，拒答而非瞎编）。"""
 
@@ -200,7 +212,7 @@ class EvidenceService:
 
     @staticmethod
     def _ratio_display(ratio: float) -> str:
-        return f"{ratio * 100:.1f}%"
+        return _pct_display(ratio)
 
     @staticmethod
     def _r1a_comparison_text(ratio: float, cfg: Any) -> str:
@@ -208,9 +220,9 @@ class EvidenceService:
 
         P0-2 修复：结论模板不再写死「> 12% / ≥ 10%」——比较符与阈值按
         computed.ratio 实际判断生成（如 2.0% → 「< 关注线 9%」，杜绝
-        「2.0% > 12% → 无」类数学错误）。
+        「2.0% > 12% → 无」类数学错误）；F6 展示统一两位小数。
         """
-        display = f"{ratio * 100:.1f}%"
+        display = _pct_display(ratio)
         if ratio > cfg.internal_limit:
             return f"{display} > 内部限额 {cfg.internal_limit * 100:.0f}%"
         if ratio >= cfg.warn_line:

@@ -5,7 +5,7 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useState } from 'react';
 import { FrameShell } from './actFrame';
 import { BOARD_CLOSING_LINE, RUIHUA_YELLOW_CASE } from './sevenAct';
-import { fetchRiskDashboard, pctOf, toZhWarnLevel } from './riskApi';
+import { fetchRiskDashboard, pctOf, splitGroupSeq, toZhWarnLevel } from './riskApi';
 import type { RiskDashboard } from './riskApi';
 import LevelBadge from './LevelBadge';
 import { SIGNAL_STATUS_META_ZH, RISK_COLORS as C } from './riskTheme';
@@ -108,7 +108,22 @@ export default function ActBoard() {
                     return (
                       <tr key={g.rank} data-testid={'rank-row-' + g.rank} style={{ borderTop: '1px solid ' + C.borderSoft }}>
                         <td style={{ padding: '8px 12px', color: C.textFaint }}>{g.rank}</td>
-                        <td style={{ padding: '8px 12px', fontWeight: 500 }}>{g.group_customer_name}</td>
+                        <td style={{ padding: '8px 12px', fontWeight: 500 }}>
+                          {/* F6 编号列展示：唯一后缀「（NN）」拆成独立编号元素，不再嵌在名称里像脚注 */}
+                          {(() => {
+                            const { base, seq } = splitGroupSeq(g.group_customer_name);
+                            return (
+                              <>
+                                {base}
+                                {seq && (
+                                  <span data-testid={'group-seq-' + g.rank} style={{ marginLeft: 6, color: C.textFaint, fontSize: 11, fontWeight: 400 }}>
+                                    〔{seq}〕
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </td>
                         <td className="risk-num" style={{ padding: '8px 12px', textAlign: 'right' }}>{g.consolidated_balance_yi} 亿</td>
                         <td className="risk-num" style={{ padding: '8px 12px', textAlign: 'right' }}>{pctOf(g.concentration_ratio)}</td>
                         <td style={{ padding: '8px 12px', textAlign: 'center' }}>
