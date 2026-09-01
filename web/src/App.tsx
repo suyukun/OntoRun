@@ -31,6 +31,7 @@ import ObjectTypesPage from './pages/builder/ObjectTypesPage';
 import LinkTypesPage from './pages/builder/LinkTypesPage';
 import PipelineCanvas from './components/PipelineCanvas';
 import GraphPage from './pages/GraphPage';
+import RiskHomePage from './risk/RiskHomePage';
 import RiskLandingPage from './risk/RiskLandingPage';
 import RiskBrowsePage from './risk/RiskBrowsePage';
 import EnterpriseOverviewPage from './pages/des/EnterpriseOverviewPage';
@@ -153,24 +154,22 @@ function RiskShell() {
   const location = useLocation();
   const { t } = useTranslation();
 
+  // 信息架构收敛（口径包§六/§七）：Agent 对话 = 唯一一级入口（路由 / 直达）；
+  // 数据浏览 / 图谱 / DES / 零售撤出门面菜单，仅作为 Sider 底部「更多入口」次级链接保留。
   const menuGroups: MenuGroup[] = [
     {
       key: 'risk-demo',
       type: 'group',
       label: t('nav.riskDemo'),
-      children: [
-        { key: '/', icon: <SafetyCertificateOutlined />, label: t('nav.valueOverview') },
-        // 「风险对话·双签」并入工作台入口（工作台右栏即对话面板）
-        { key: '/risk/browse', icon: <DatabaseOutlined />, label: t('nav.riskWorkbench') },
-        { key: '/des', icon: <ClusterOutlined />, label: t('nav.desEnterprise') },
-      ],
+      children: [{ key: '/', icon: <RobotOutlined />, label: t('nav.riskDialogue') }],
     },
-    {
-      key: 'other',
-      type: 'group',
-      label: t('nav.retailDemo'),
-      children: [{ key: '/browse', icon: <AppstoreOutlined />, label: t('nav.retailChain') }],
-    },
+  ];
+
+  const secondaryLinks: { to: string; icon: React.ReactNode; label: string }[] = [
+    { to: '/risk/browse', icon: <DatabaseOutlined />, label: t('nav.riskWorkbench') },
+    { to: '/risk/overview', icon: <SafetyCertificateOutlined />, label: t('nav.valueOverview') },
+    { to: '/des', icon: <ClusterOutlined />, label: t('nav.desEnterprise') },
+    { to: '/browse', icon: <AppstoreOutlined />, label: t('nav.retailChain') },
   ];
 
   const flatKeys = menuGroups.flatMap((g) => g.children.map((c) => c.key));
@@ -206,6 +205,28 @@ function RiskShell() {
             items={menuGroups}
             onClick={({ key }) => navigate(key)}
           />
+          {/* 更多入口（已撤出门面菜单，仅保留路由可达） */}
+          <div style={{ padding: '14px 16px 4px', borderTop: '1px solid ' + RISK_COLORS.borderSoft, marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: RISK_COLORS.textFaint, letterSpacing: '0.1em', marginBottom: 8 }}>
+              {t('nav.moreEntries')}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {secondaryLinks.map((l) => (
+                <button
+                  key={l.to}
+                  onClick={() => navigate(l.to)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                    background: 'transparent', border: 0, cursor: 'pointer', padding: '5px 6px',
+                    color: RISK_COLORS.textDim, fontSize: 12.5, borderRadius: 6,
+                  }}
+                >
+                  <span style={{ color: RISK_COLORS.textFaint, fontSize: 13, width: 14 }}>{l.icon}</span>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </Sider>
         <Layout>
           <Header
@@ -227,13 +248,15 @@ function RiskShell() {
           </Header>
           <Content style={{ background: 'transparent', padding: 0 }}>
             <Routes>
-              <Route path="/" element={<RiskLandingPage />} />
-              {/* 数据工作台：左数据浏览 + 右风险对话·双签（原 /risk/chat 已并入） */}
+              {/* 唯一一级入口：Agent 对话 + 七幕剧本演示 */}
+              <Route path="/" element={<RiskHomePage />} />
+              {/* 撤出门面的次级路由（页脚/Sider 更多入口可达，不再进菜单） */}
               <Route path="/risk/browse" element={<RiskBrowsePage />} />
+              <Route path="/risk/overview" element={<RiskLandingPage />} />
               <Route path="/des" element={<EnterpriseOverviewPage />} />
-              {/* 旧链接兜底：/risk/chat 与任意 /risk/* 一律进入工作台 */}
-              <Route path="/risk/chat" element={<Navigate to="/risk/browse" replace />} />
-              <Route path="/risk/*" element={<Navigate to="/risk/browse" replace />} />
+              {/* 旧链接兜底：/risk/chat 与任意 /risk/* 一律进入对话主页 */}
+              <Route path="/risk/chat" element={<Navigate to="/" replace />} />
+              <Route path="/risk/*" element={<Navigate to="/" replace />} />
             </Routes>
           </Content>
         </Layout>

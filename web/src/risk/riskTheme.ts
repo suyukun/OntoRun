@@ -26,7 +26,8 @@ export const RISK_COLORS = {
   accentText: '#ffffff',
   // 预警等级语义色（按浅底可读性取深调，均可作 Tag 文字或白字底色，对比 ≥4.5:1）
   red: '#b42318',
-  yellow: '#b54708', // 黄=琥珀深调（浅底可读；纯黄在白底不可读）
+  yellow: '#b54708', // 黄=关注（琥珀深调，浅底可读；纯黄在白底不可读）
+  orange: '#c2410c', // 橙=紧急（独立于黄/红的暖橙，浅底可读，与 colorWarning 不混用）
   blue: '#175cd3',
   green: '#067647',
 } as const;
@@ -35,8 +36,34 @@ export const RISK_COLORS = {
 export const WARN_TAG_TINTS = {
   RED: { bg: '#fceceb', border: '#efb3ae' },
   YELLOW: { bg: '#fdf3e3', border: '#ecc89a' },
+  ORANGE: { bg: '#fdeae1', border: '#f2bda1' },
   BLUE: { bg: '#e7f0ff', border: '#aacbf5' },
 } as const;
+
+// 中文枚举预警等级（口径包§五/§八：黄/橙/红，存储即所见）——语义色对齐 RISK_COLORS，
+// 与 AntD colorWarning（黄色）显式区分：橙=紧急用独立 ORANGE 色，绝不与 warning 混用。
+export interface ZhWarnMeta {
+  color: string;
+  label: string;
+  bg: string;
+  border: string;
+}
+export const ZH_WARN_META: Record<'黄' | '橙' | '红', ZhWarnMeta> = {
+  黄: { color: RISK_COLORS.yellow, label: '黄色预警 · 关注', ...WARN_TAG_TINTS.YELLOW },
+  橙: { color: RISK_COLORS.orange, label: '橙色预警 · 紧急', ...WARN_TAG_TINTS.ORANGE },
+  红: { color: RISK_COLORS.red, label: '红色预警 · 危急', ...WARN_TAG_TINTS.RED },
+};
+
+// 预警生命周期七态（口径包§四：待确认/确认中/已确认/处置中/已关闭/已撤销/已排除）
+export const SIGNAL_STATUS_META_ZH: Record<string, { color: string; label: string }> = {
+  待确认: { color: RISK_COLORS.textFaint, label: '待确认' },
+  确认中: { color: RISK_COLORS.blue, label: '确认中' },
+  已确认: { color: RISK_COLORS.yellow, label: '已确认' },
+  处置中: { color: RISK_COLORS.red, label: '处置中' },
+  已关闭: { color: RISK_COLORS.green, label: '已关闭' },
+  已撤销: { color: RISK_COLORS.textDim, label: '已撤销' },
+  已排除: { color: RISK_COLORS.textFaint, label: '已排除' },
+};
 
 // AntD 浅色算法定制（仅作用于风险演示分支与 DES 页，不影响 S1 零售界面）
 export const riskLightTheme: ThemeConfig = {

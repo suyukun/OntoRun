@@ -14,6 +14,8 @@
     "pipelines": "Pipeline Canvas",
     "graph": "Ontology Graph",
     "riskDemo": "Risk Warning Demo",
+    "riskDialogue": "Risk Dialogue",
+    "moreEntries": "More entries (off the facade)",
     "valueOverview": "Value Overview",
     "riskWorkbench": "Data Workbench · Chat",
     "desEnterprise": "Enterprise Simulation (DES)",
