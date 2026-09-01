@@ -295,6 +295,36 @@ def test_f13_detail_is_internal_marker(client: TestClient) -> None:
     assert "抵销后外部净敞口" in draft["consolidated_exposure"]["caliber_note"]
 
 
+def test_f15_audit_in_universe(client: TestClient) -> None:
+    """F15：/risk/audit 展示层 in-universe——无 llm:/call_ 机码，actor_detail 空值补齐。
+
+    WORM 审计原行不改，仅展示层映射：actor=llm → AI 智能体（风险预警助手）；
+    actor_detail 含 DeepSeekProvider/confirmed_call → 归一业务文案；空 → 按 action 回填岗位。
+    """
+    data = client.get("/risk/audit").json()["data"]
+    items = data["items"]
+    assert items, "审计应非空"
+    assert data["total"] == 55  # F11 哈希链总数保持
+    machine = [
+        it
+        for it in items
+        if "llm:" in (it.get("actor") or "")
+        or "call_" in (it.get("actor_detail") or "")
+        or "DeepSeekProvider" in (it.get("actor_detail") or "")
+        or it.get("actor") in ("llm", "human")
+    ]
+    assert not machine, f"审计展示泄漏机码: {machine}"
+    assert all((it.get("actor_detail") or "").strip() for it in items), (
+        "首页 actor_detail 空值应补齐"
+    )
+    # approval_chain 审计回放同样 in-universe
+    ac = client.get(
+        "/risk/evidence/approval-chain", params={"warning_id": "WS-2026-90000002"}
+    ).json()["data"]
+    for a in ac["detail_rows"][0].get("audit_trail") or []:
+        assert "call_" not in (a.get("actor_detail") or ""), f"审计回放泄漏机码: {a}"
+
+
 def test_f14_push_columns_cleanup() -> None:
     """F14：推送列「集团集中度敞口超限」残留 = 0（同 F8 监测语气，活库补丁幂等双落）。
 

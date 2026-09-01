@@ -165,6 +165,54 @@ RECONCILIATION_NOTE = (
     "明细为单家口径（各附属机构外部融资逐家加总，未抵销），二者不可直接对比"
 )
 
+# F15 审计展示 in-universe（WORM 不可改原行，仅展示层映射机码 → 业务文案）
+_AUDIT_ACTOR_AI = "AI 智能体（风险预警助手）"
+_AUDIT_ACTOR_HUMAN = "风险管理部人工"
+_AUDIT_ROLE_BY_ACTION: dict[str, str] = {
+    "confirm_warning": "风险管理部专员（确认预警）",
+    "adjust_warning_level": "风险管理部专员（调整定级）",
+    "submit_disposal": "风险管理部专员（提交处置方案）",
+    "approve_disposal": "风控部门审批人（双签审批）",
+    "push_warning": "风险管理部专员（推送督办）",
+    "close_warning": "风险管理部专员（解除关闭）",
+}
+
+
+def audit_display_item(item: dict[str, Any]) -> dict[str, Any]:
+    """审计行展示层 in-universe 化（F15）：actor/actor_detail 开发期机码 → 业务文案。
+
+    审计为 WORM（append-only，原行不可改），本函数只做展示映射、绝不写回：
+    - actor：llm → AI 智能体（风险预警助手）；human → 风险管理部人工；
+    - actor_detail：空 → 按 action_name 回填岗位；含 DeepSeekProvider / confirmed_call
+      等机码 → 归一为「人工确认 + AI 智能体」类业务文案；其余剥机码前缀保留可读部分。
+    """
+    out = dict(item)
+    actor = item.get("actor") or ""
+    detail = (item.get("actor_detail") or "").strip()
+    action = item.get("action_name") or ""
+    if actor == "llm":
+        out["actor"] = _AUDIT_ACTOR_AI
+    elif actor == "human":
+        out["actor"] = _AUDIT_ACTOR_HUMAN
+    else:
+        out["actor"] = actor or "系统"
+    if not detail:
+        out["actor_detail"] = _AUDIT_ROLE_BY_ACTION.get(action, "风险管理部操作员")
+    elif "confirmed_call:" in detail:
+        out["actor_detail"] = "人工确认 + AI 智能体（风险预警助手）"
+    elif "DeepSeekProvider" in detail:
+        out["actor_detail"] = _AUDIT_ACTOR_AI
+    elif detail.startswith("human:"):
+        parts = []
+        for seg in detail.split(";"):
+            seg = seg.strip()
+            if not seg:
+                continue
+            parts.append(seg.split(":", 1)[1].strip() if ":" in seg else seg)
+        cleaned = "；".join(p for p in parts if p)
+        out["actor_detail"] = cleaned or _AUDIT_ROLE_BY_ACTION.get(action, "风险管理部操作员")
+    return out
+
 
 class EvidenceError(RuntimeError):
     """证据链查询输入非法/未命中（fail-closed，拒答而非瞎编）。"""
@@ -1033,7 +1081,8 @@ class EvidenceService:
                 for r in rows:
                     params = r["params_json"] or ""
                     if any(oid in params for oid in order_ids):
-                        audit_trail.append(dict(r))
+                        # F15：审计展示 in-universe（WORM 原行不改，仅展示层映射机码）
+                        audit_trail.append(audit_display_item(dict(r)))
             except Exception:  # noqa: BLE001  # 审计回放尽力而为：本体审计库不可读时证据链仍须返回
                 audit_trail = []
             finally:
@@ -1181,6 +1230,8 @@ __all__ = [
     "R1B_LINES",
     "R2_CLAUSE",
     "R2_DESC",
+    "RECONCILIATION_NOTE",
     "EvidenceError",
     "EvidenceService",
+    "audit_display_item",
 ]

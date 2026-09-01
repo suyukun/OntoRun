@@ -798,16 +798,20 @@ def register_risk_agent_routes(app: FastAPI) -> None:
         """
         from src.runtime.audit import AuditLog
         from src.runtime.risk_db import RiskStore
+        from src.runtime.risk_evidence import audit_display_item
 
         audit = AuditLog(RiskStore())
         items, total = audit.query(
             action=action, outcome=outcome, page=page, page_size=page_size
         )
+        # F15：审计展示 in-universe——actor/actor_detail 开发期机码（llm:DeepSeekProvider、
+        # confirmed_call:call_00_…）→ 业务文案；WORM 原行不改，仅展示层映射。
+        display = [audit_display_item(dict(it)) for it in items]
         return JSONResponse(
             content={
                 "request_id": "",
                 "outcome": "ok",
-                "data": {"items": items, "total": total},
+                "data": {"items": display, "total": total},
                 "error": None,
             }
         )
