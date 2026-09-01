@@ -215,6 +215,11 @@ def create_app(
 
     register_risk_reporting_routes(app)
 
+    # 注册证据链端点（S4 M3a：七幕剧本查询的证据链载荷，独立模块）
+    from src.api.risk_evidence_api import register_risk_evidence_routes
+
+    register_risk_evidence_routes(app)
+
     # 注册 DES 企业模拟概览端点（S3 M4：让 DES 升级可见的界面入口）
     register_des_routes(app)
 
@@ -737,6 +742,9 @@ def create_risk_agent_app() -> FastAPI:
     from src.api.risk_reporting import register_risk_reporting_routes
 
     register_risk_reporting_routes(app)
+    from src.api.risk_evidence_api import register_risk_evidence_routes
+
+    register_risk_evidence_routes(app)
     register_des_routes(app)
     _register_error_handlers(app)
     return app
