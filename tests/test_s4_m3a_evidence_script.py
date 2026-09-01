@@ -295,6 +295,42 @@ def test_f13_detail_is_internal_marker(client: TestClient) -> None:
     assert "抵销后外部净敞口" in draft["consolidated_exposure"]["caliber_note"]
 
 
+def test_f14_push_columns_cleanup() -> None:
+    """F14：推送列「集团集中度敞口超限」残留 = 0（同 F8 监测语气，活库补丁幂等双落）。
+
+    三处漏网写入点：ap_warning_signal.push_warn_reason（2092 行）、ap_warning_push.
+    push_warn_reason（860 行）、ap_warn_derive_sub_push.warn_reason_updated（522 行）
+    仍硬写「集团集中度敞口超限 N%」→ patch_risk_live_data.patch_push_columns_cleanup
+    迁移为「集团集中度指标异动」；生成器 _warn_reason 已同源。
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(str(AP_ANPING_DIR / "risk.db"))
+    try:
+        for alias in ("approval", "concentration", "project", "customer", "base"):
+            conn.execute(
+                f"ATTACH DATABASE ? AS {alias}",
+                (str(AP_ANPING_DIR / f"{alias}.db"),),
+            )
+        for table, col in (
+            ("ap_warning_signal", "push_warn_reason"),
+            ("ap_warning_push", "push_warn_reason"),
+            ("ap_warn_derive_sub_push", "warn_reason_updated"),
+        ):
+            n = conn.execute(
+                f"SELECT COUNT(*) n FROM {table} WHERE {col} LIKE '%敞口超限%'"
+            ).fetchone()[0]
+            assert n == 0, f"F14 残留未清: {table}.{col} 仍有 {n} 行「敞口超限」"
+        # 样本已统一为监测语气
+        row = conn.execute(
+            "SELECT push_warn_reason FROM ap_warning_signal "
+            "WHERE push_warn_reason LIKE '集团集中度%' LIMIT 1"
+        ).fetchone()
+        assert row and "指标异动" in row[0]
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # 第 4 幕：双签驳回（2023 办法第二十三条 → 处置退回重新起草）
 # ---------------------------------------------------------------------------
