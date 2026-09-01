@@ -39,6 +39,7 @@ export const dashboardFixture: RiskDashboard = {
 export const reportingDraftFixture: ReportingDraft = {
   report_title: '大额风险暴露口径监管报送初稿',
   generated_at: '2026-12-31T08:00:00Z',
+  data_as_of: '2026-12-31',
   warning: {
     warning_id: 'WS-2026-90000002',
     signal_id: 'SIG-2026-90000002',

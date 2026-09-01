@@ -25,7 +25,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -421,9 +421,14 @@ class _ReportService:
                 gno,
                 {org: cap[denom] for org, denom in _ORG_REFERENCE_DENOM.items()},
             )
+            # 双时钟统一（R2-P0-C）：数据时钟保持不动（生成器 ANCHOR 既定设计），
+            # generated_at / data_as_of 一律取数据内时钟（MAX(signal_generate_date)），
+            # 不再混用真实 UTC 时钟（否则 2026-09 真实时钟 vs 2026-12 数据时钟两套并存）。
+            as_of = self.as_of_date(conn)
             return {
                 "report_title": "大额风险暴露口径监管报送初稿",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": f"{as_of}T08:00:00+08:00",
+                "data_as_of": as_of,
                 "warning": {
                     "warning_id": signal["warning_id"],
                     "signal_id": signal["signal_id"],

@@ -176,6 +176,11 @@ def test_reporting_draft_red_contains_128(client: TestClient):
     data = body["data"]
     assert data["report_title"] == "大额风险暴露口径监管报送初稿"
     assert data["group_customer"]["group_customer_name"] == "天晟集团有限公司"
+    # R2-P0-C 双时钟统一：generated_at / data_as_of 取数据内时钟（MAX(signal_generate_date)），
+    # 两者日期一致，且不得再泄漏真实 UTC 时钟（数据时钟 2026-12，非 2026-09 真实时钟）。
+    assert data["data_as_of"] == "2026-12-31"
+    assert data["generated_at"].startswith("2026-12-31T")
+    assert data["generated_at"].split("T")[0] == data["data_as_of"]
     exp = data["consolidated_exposure"]
     assert exp["own_balance_yi"] == pytest.approx(86.4, abs=1e-3)
     assert exp["hidden_related_party_balance_yi"] == pytest.approx(16.0, abs=1e-3)

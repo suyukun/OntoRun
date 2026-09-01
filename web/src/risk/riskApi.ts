@@ -71,6 +71,7 @@ export interface HiddenRelatedParty {
 export interface ReportingDraft {
   report_title: string;
   generated_at: string;
+  data_as_of: string;
   warning: {
     warning_id: string;
     signal_id: string;
