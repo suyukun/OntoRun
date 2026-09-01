@@ -782,6 +782,31 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             evidence=_extract_evidence(turn),
         )
 
+    @app.post("/risk/demo/reset-approval")
+    def risk_demo_reset_approval():
+        """演示重置（F10）：天晟审批单回 PROCESS（节点 2 回 PENDING），供现场第 4 幕 live 驳回。
+
+        把预置 REJECTED 驳回态重置回待审：节点 1 保持已审、节点 2 回 PENDING，审批人可现场
+        按 2023 关联交易办法第二十三条驳回；审计 WORM 不清（历史驳回审计行仍可回放），
+        live 驳回将追加新审计行。幂等：可重复执行（每次重置回 PENDING）。
+        """
+        from scripts.patch_risk_live_data import patch_approval_reset_to_pending
+
+        conn = risk_store.source_conn()
+        try:
+            patch_approval_reset_to_pending(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        return JSONResponse(
+            content={
+                "request_id": "",
+                "outcome": "ok",
+                "data": {"reset": True, "approve_order_status": "PROCESS"},
+                "error": None,
+            }
+        )
+
 
 def create_risk_agent_app() -> FastAPI:
     """最小风险 Agent 应用（仅 /agent/risk/* + /des/*，供冒烟/独立部署，不经 S1 API 层）。"""

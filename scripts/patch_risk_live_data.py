@@ -518,7 +518,7 @@ def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
         print(f"  [P0-文案] ap_sys_param.update_user SYSTEM → 系统初始化（{cur.rowcount} 行）")
 
 
-_REJECT_REQUEST_ID = "s4-preset-reject"  # 预置驳回审计行幂等标记
+_REJECT_REQUEST_ID = "REJ-2026-90000002"  # 预置驳回审计行幂等标记（F10：in-universe，不再含 s4-preset）
 
 
 def _node_for_seq(conn: sqlite3.Connection, seq: int) -> tuple[str, str]:
@@ -543,6 +543,7 @@ def _seed_reject_audit() -> None:
     已存在即跳过。演示第 4 幕「全程审计可回放」无需现场写回即可见驳回留痕。
     """
     import json
+    from datetime import datetime, timedelta, timezone
 
     from src.des.generators.risk_script_props import PROP_APPROVE_ORDER
     from src.runtime.audit import AuditLog, AuditRecord
@@ -559,8 +560,12 @@ def _seed_reject_audit() -> None:
     record = AuditRecord(
         action_name="approve_disposal",
         actor="human",
-        actor_detail="human:风控审批人; confirmed_call:s4-preset",
+        # F10：actor_detail 剥离「s4-preset」内部记号 → in-universe 审批人身份
+        actor_detail="风控审批人（人工双签驳回）",
         request_id=_REJECT_REQUEST_ID,
+        # F10：审计时间戳与业务时间线对齐（审批单/任务 approve_time=2026-12-10，
+        # 数据时钟 2026-12；不再落真实 UTC 时钟 2026-09 早于业务时间倒挂）
+        ts=datetime(2026, 12, 10, 9, 0, 0, tzinfo=timezone(timedelta(hours=8))),
         params_json=json.dumps(
             {"approve_order_id": oid, "decision": "REJECTED", "opinion": opinion},
             ensure_ascii=False,
@@ -570,6 +575,71 @@ def _seed_reject_audit() -> None:
     )
     audit.append(record)
     print(f"  [F4] 预置驳回审计行落库（{record.audit_id}）")
+
+
+def patch_preset_audit_in_universe() -> None:
+    """F10：预置驳回审计行 in-universe（存量库迁移）。
+
+    actor_detail 剥离「s4-preset」记号 → 业务口径审批人身份；request_id 改 in-universe；
+    时间戳对齐业务时间线（审批单/任务 approve_time=2026-12-10，数据时钟 2026-12，
+    不再落真实 UTC 时钟 2026-09 早于业务时间倒挂）。哈希链按规格重算（修改行在链尾，
+    verify_integrity 保持全绿）。生成器 _seed_reject_audit 已同源修改，本函数只迁存量。
+    """
+    from src.runtime.audit import _content_of, _hash_chain
+    from src.runtime.risk_db import RiskStore
+
+    store = RiskStore()
+    conn = store.ontology_conn()
+    try:
+        rows = conn.execute(
+            "SELECT seq FROM audit_log WHERE request_id='s4-preset-reject' ORDER BY seq"
+        ).fetchall()
+        if not rows:
+            print("  [F10] 预置驳回审计行已 in-universe，跳过")
+            return
+        # WORM 只读触发器临时摘除（迁移预置审计行，审计为演示数据；完成后重建保 WORM）
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_log_wo_upd")
+        conn.execute("DROP TRIGGER IF EXISTS trg_audit_log_wo_del")
+        for r in rows:
+            conn.execute(
+                "UPDATE audit_log SET actor_detail=?, request_id=?, ts=? WHERE seq=?",
+                (
+                    "风控审批人（人工双签驳回）",
+                    "REJ-2026-90000002",
+                    "2026-12-10 09:00:00",
+                    r["seq"],
+                ),
+            )
+        first_seq = rows[0]["seq"]
+        prev_hash = ""
+        prev = conn.execute(
+            "SELECT record_hash FROM audit_log WHERE seq < ? ORDER BY seq DESC LIMIT 1",
+            (first_seq,),
+        ).fetchone()
+        if prev:
+            prev_hash = prev["record_hash"]
+        for row in conn.execute(
+            "SELECT * FROM audit_log WHERE seq >= ? ORDER BY seq", (first_seq,)
+        ):
+            rec_hash = _hash_chain(prev_hash, _content_of(dict(row)))
+            conn.execute(
+                "UPDATE audit_log SET prev_hash=?, record_hash=? WHERE seq=?",
+                (prev_hash, rec_hash, row["seq"]),
+            )
+            prev_hash = rec_hash
+        # 重建 WORM 只读触发器（审计 append-only 语义恢复）
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS trg_audit_log_wo_upd BEFORE UPDATE ON audit_log "
+            "BEGIN SELECT RAISE(ABORT, 'audit_log 只读（WORM）'); END"
+        )
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS trg_audit_log_wo_del BEFORE DELETE ON audit_log "
+            "BEGIN SELECT RAISE(ABORT, 'audit_log 只读（WORM）'); END"
+        )
+        conn.commit()
+        print(f"  [F10] 预置驳回审计行 in-universe（{len(rows)} 行，时间戳对齐 2026-12）")
+    finally:
+        conn.close()
 
 
 def patch_approval_prop(conn: sqlite3.Connection) -> None:
@@ -824,6 +894,9 @@ def main() -> int:
         conn.commit()
         print("[7/7] F4 第 4 幕审批链（双节点 + 预置 REJECTED 驳回态 + 审计行）")
         patch_approval_prop(conn)
+        conn.commit()
+        print("[7b] F10 预置驳回审计行 in-universe（剥离 s4-preset + 时间戳对齐 2026-12）")
+        patch_preset_audit_in_universe()
         conn.commit()
         print("[8/8] F4 现场 live 演示重置工具（patch_approval_reset_to_pending 已注册，默认不执行）")
     finally:

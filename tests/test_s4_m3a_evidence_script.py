@@ -313,6 +313,32 @@ def test_act4_prop_chain_under_tiansheng_red(client: TestClient) -> None:
     assert "拆分交易" in hit["text"]
 
 
+def test_f10_preset_audit_in_universe(client: TestClient) -> None:
+    """F10：预置驳回审计行 in-universe——actor_detail 无「s4-preset」、时间戳对齐 2026-12 业务线。"""
+    data = client.get(
+        "/risk/evidence/approval-chain", params={"warning_id": "WS-2026-90000002"}
+    ).json()["data"]
+    trail = data["detail_rows"][0].get("audit_trail") or []
+    assert trail, "应有预置驳回审计行"
+    for a in trail:
+        assert "s4-preset" not in (a.get("actor_detail") or ""), (
+            f"actor_detail 泄漏内部记号: {a['actor_detail']}"
+        )
+        # 审计时间戳不得早于业务时间线（数据时钟 2026-12，审批链 approve_time=2026-12-10）
+        assert a["ts"] >= "2026-12-01", f"审计时间戳早于业务线倒挂: {a['ts']}"
+    assert any("REJECTED" in (a.get("params_json") or "") for a in trail)
+
+
+def test_f10_reset_route_registered(client: TestClient) -> None:
+    """F10：演示重置功能以正式路由暴露（OpenAPI 可见），供演示前重置用。"""
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/risk/demo/reset-approval" in paths
+    assert "post" in paths["/risk/demo/reset-approval"]
+    assert "重置" in (
+        paths["/risk/demo/reset-approval"]["post"].get("description") or ""
+    )
+
+
 def test_act4_prop_reset_to_pending_then_live_reject(act4_env) -> None:
     """F4：预置 REJECTED 道具链可重置回 PENDING（供现场 live 驳回演示）→ 现场驳回生效。
 
