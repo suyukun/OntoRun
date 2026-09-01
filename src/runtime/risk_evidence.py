@@ -43,7 +43,9 @@ PARAM_GROUP_CONSOLIDATED = "CAP_GROUP_CONSOLIDATED"  # 集团并表资本（亿�
 PARAM_BANK_NET = "CAP_BANK_NET"  # 安平银行资本净额（亿）= 600
 PARAM_BANK_INTERNAL_LIMIT = "CAP_BANK_INTERNAL_LIMIT"  # 行内内部限额（亿）= 60
 PARAM_SECURITIES_DENOM = "CAP_SECURITIES_DENOM"  # 证券参考线分母（亿）= 400
+PARAM_SECURITIES_REF_LINE = "CAP_SECURITIES_REF_LINE"  # 证券参考线内融资占比（5.5%）
 PARAM_AM_DENOM = "CAP_AM_DENOM"  # 资管参考线分母（亿）= 200
+PARAM_AM_REF_LINE = "CAP_AM_REF_LINE"  # 资管参考线内融资占比（8.2%）
 PARAM_CONCERN_LINE = "CAP_CONCERN_LINE"  # R1a 关注线（9%，黄）
 PARAM_WARN_LINE = "CAP_WARN_LINE"  # R1a 预警线（10%，橙）
 PARAM_INTERNAL_LIMIT_RATIO = "CAP_INTERNAL_LIMIT_RATIO"  # R1a 内部限额（12%，红须 >）
@@ -180,13 +182,15 @@ class EvidenceService:
         """资本/参考线分母（亿）与 R1a 三线，来自 base.ap_sys_param（单一来源）。"""
         rows = conn.execute(
             "SELECT param_id, param_value FROM base.ap_sys_param "
-            "WHERE param_type_code = 'CAPITAL' AND param_id IN (?,?,?,?,?,?,?,?)",
+            "WHERE param_type_code = 'CAPITAL' AND param_id IN (?,?,?,?,?,?,?,?,?,?)",
             (
                 PARAM_GROUP_CONSOLIDATED,
                 PARAM_BANK_NET,
                 PARAM_BANK_INTERNAL_LIMIT,
                 PARAM_SECURITIES_DENOM,
+                PARAM_SECURITIES_REF_LINE,
                 PARAM_AM_DENOM,
+                PARAM_AM_REF_LINE,
                 "CAP_CONCERN_LINE",
                 "CAP_WARN_LINE",
                 "CAP_INTERNAL_LIMIT_RATIO",
@@ -367,6 +371,39 @@ class EvidenceService:
         ).fetchone()
         return row is not None
 
+    @staticmethod
+    def _org_single_safety(
+        d: dict[str, Any], cap: dict[str, float]
+    ) -> tuple[str, bool]:
+        """单家附属机构是否在其参考线内（实算），返回 (单家描述, 是否安全)。
+
+        F1/F3 修复：逐家安全断言按各自参考线实算——安平银行对行内限额（绝对额 60 亿）、
+        安平证券/资管对参考线内融资占比（5.5% / 8.2%）；无参考线机构不参与「单看均安全」
+        断言（仅列余额）。杜绝「银行 12.5%，低于行内限额 60 亿」类算术矛盾（75.2 亿
+        实超 60 亿却被模板写死「低于」）。
+        """
+        org = d["org_name"]
+        balance = d["balance_yi"]
+        if org == "安平银行":
+            limit_yi = cap[PARAM_BANK_INTERNAL_LIMIT]
+            ok = balance <= limit_yi
+            mark = "行内限额内" if ok else f"超行内限额 {limit_yi:.0f} 亿"
+            return f"{org} {balance:.1f} 亿（{mark}）", ok
+        denom = _ORG_REFERENCE_DENOM.get(org)
+        if denom in (PARAM_SECURITIES_DENOM, PARAM_AM_DENOM):
+            line_id = (
+                PARAM_SECURITIES_REF_LINE
+                if denom == PARAM_SECURITIES_DENOM
+                else PARAM_AM_REF_LINE
+            )
+            ref_ratio = cap[line_id]
+            ratio = d.get("org_reference_ratio")
+            ok = ratio is not None and ratio <= ref_ratio
+            display = EvidenceService._ratio_display(ratio) if ratio is not None else "-"
+            mark = f"参考线 {ref_ratio * 100:.1f}% 内" if ok else f"超参考线 {ref_ratio * 100:.1f}%"
+            return f"{org} {display}（{mark}）", ok
+        return f"{org} {balance:.1f} 亿", True
+
     # ---- 第 1 幕：揭示（逐家单看都安全 → 归集 10.8% 橙）----
 
     def group_reveal(
@@ -425,11 +462,28 @@ class EvidenceService:
         compare = self._r1a_comparison_text(r1a.ratio, cfg)
         self._assert_level_consistent(r1a.ratio, cfg, r1a.level, "第 1 幕 group_reveal")
         warn = next((s for s in signals if s["warn_level"] == "橙"), None)
+        # F1/F3 结论模板按实算：逐家安全断言由 _org_single_safety 对各自参考线实算，
+        # 不再写死「银行 …低于行内限额 60 亿」（非道具组无 ratio_display 曾致 KeyError 500；
+        # 瑞华 75.2 亿单挂安平银行实超 60 亿却断言「均安全」系算术矛盾）。
+        if detail:
+            org_parts: list[str] = []
+            all_safe = True
+            for item in detail:
+                txt, ok = self._org_single_safety(item, cap)
+                org_parts.append(txt)
+                if "reference_denom_yi" in item and not ok:
+                    all_safe = False
+            safety = "；".join(org_parts)
+            head = (
+                f"{group} 逐家附属机构单看均安全（{safety}）"
+                if all_safe
+                else f"{group} 逐家附属机构单看已有超参考线（{safety}）"
+            )
+        else:
+            head = f"{group} 无授信台账明细"
         conclusion = (
-            f"{group} 逐家附属机构单看均安全（银行 {detail[0]['ratio_display'] if detail else '-'}"
-            f"，低于行内限额 {cap[PARAM_BANK_INTERNAL_LIMIT]:.0f} 亿），但归集实算 "
-            f"{r1a.total_yi:.1f} 亿元 ÷ 集团并表资本 {group_cap:.0f} 亿元 = "
-            f"{compare} → R1a 定级「{r1a.level}」"
+            f"{head}；归集实算 {r1a.total_yi:.1f} 亿元 ÷ 集团并表资本 "
+            f"{group_cap:.0f} 亿元 = {compare} → R1a 定级「{r1a.level}」"
             + ("，橙色预警信号已生成" if warn else "")
         )
         return {
@@ -459,7 +513,11 @@ class EvidenceService:
                     "name": "银行层授信集中度（对照）",
                     "clause": R1B_CLAUSE,
                     "lines": R1B_LINES,
-                    "note": "对照口径：单看每家附属机构均安全（行内限额 60 亿内）",
+                    "note": (
+                        "对照口径：逐家单看均低于各自参考线/限额"
+                        if all_safe
+                        else "对照口径：逐家单看已有机构接近/超过参考线"
+                    ),
                 },
             ],
             "denominator": {
