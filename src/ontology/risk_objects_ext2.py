@@ -26,6 +26,29 @@ from src.ontology.objects import (
 )
 
 
+class SysParam(BaseModel):
+    """系统参数（P0-1：阈值可查询对象，源 base.ap_sys_param）。
+
+    含元数据列（出处条款/版本/审批人/更新时间/分子构成/分母/净额规则），
+    供「预警线谁定的、怎么改」直接原文回显（口径包§三 金控办法第三十二/三十三条自设口径）。
+    """
+
+    sys_param_id: str = own(OWN_SOURCE, "主键ID（PK/Title）")
+    param_type_code: str = own(OWN_SOURCE, "参数类型（CAPITAL/R1A_LINE 等）")
+    param_type_name: str = own(OWN_SOURCE, "参数类型名称")
+    param_id: str = own(OWN_SOURCE, "参数编码（如 CAP_CONCERN_LINE）")
+    param_value: str = own(OWN_SOURCE, "参数值")
+    param_description: str = own(OWN_SOURCE, "参数描述")
+    version: str = own(OWN_SOURCE, "版本号")
+    update_time: datetime = own(OWN_SOURCE, "更新时间")
+    update_user: str = own(OWN_SOURCE, "更新人")
+    param_source: str = own(OWN_SOURCE, "出处（依据条款/口径来源）")
+    param_approver: str = own(OWN_SOURCE, "定值/审批人")
+    numerator_desc: str = own(OWN_SOURCE, "分子构成")
+    denominator_desc: str = own(OWN_SOURCE, "分母说明")
+    netting_rule: str = own(OWN_SOURCE, "净额规则")
+
+
 class ConcentrationWarnAdj(BaseModel):
     """集中度预警调整表。PK/Title = concentration_warn_adj_id（源 o_a_erms_larg_cust_warn_adj）。"""
 
@@ -265,6 +288,15 @@ class ApproveOperLog(BaseModel):
 
 
 RISK_OBJECT_TYPES_EXT_2: list[ObjectTypeDef] = [
+    ObjectTypeDef(
+        name="SysParam",
+        api_name="sys_param",
+        description="SysParam（系统参数，源 base.ap_sys_param）——R1a 阈值/资本常量可查询对象",
+        model=SysParam,
+        pk_field="sys_param_id",
+        title_field="sys_param_id",
+        source_table="o_base_stm_parm",
+    ),
     ObjectTypeDef(
         name="ConcentrationWarnAdj",
         api_name="concentration_warn_adj",

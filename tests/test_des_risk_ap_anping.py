@@ -209,13 +209,14 @@ def test_five_classification_distribution(ap_dir: Path) -> None:
 
 
 def test_concentration_status_follows_rule(ap_dir: Path) -> None:
-    """规则 3 集中度状态与敞口/资本净额一致（current_status 可机验）。"""
+    """规则 3 集中度状态与敞口/资本净额一致（current_status 可机验；P1-2 中文枚举）。"""
     rows = _query(
         ap_dir, "concentration",
         "SELECT concentration_limit, warning_value, current_status FROM ap_concentration_limit",
     )
     statuses = {r["current_status"] for r in rows}
-    assert statuses <= {"NORMAL", "YELLOW_ALERT", "ORANGE_ALERT", "RED_ALERT"}
+    # P1-2：存储即所见中文（红/橙/黄/正常），不再残留英文告警码
+    assert statuses <= {"正常", "黄", "橙", "红"}
 
 
 def test_event_type_distribution(ap_dir: Path) -> None:
@@ -337,11 +338,11 @@ def test_five_category_assign_rule_table() -> None:
 
 
 def test_concentration_calc_rule_table() -> None:
-    """规则 3 决策表：≤10% 正常 / ≤15% 黄警 / ≤25% 橙警 / >25% 红警。"""
-    assert concentration_calc(0.05, 1)["status"] == "NORMAL"
-    assert concentration_calc(0.12, 1)["status"] == "YELLOW_ALERT"
+    """规则 3 决策表：≤10% 正常 / ≤15% 黄警 / ≤25% 橙警 / >25% 红警（P1-2 中文状态）。"""
+    assert concentration_calc(0.05, 1)["status"] == "正常"
+    assert concentration_calc(0.12, 1)["status"] == "黄"
     assert concentration_calc(0.12, 1)["need_approval"] is False
-    assert concentration_calc(0.18, 1)["status"] == "ORANGE_ALERT"
+    assert concentration_calc(0.18, 1)["status"] == "橙"
     assert concentration_calc(0.18, 1)["need_approval"] is True
-    assert concentration_calc(0.30, 1)["status"] == "RED_ALERT"
+    assert concentration_calc(0.30, 1)["status"] == "红"
     assert concentration_calc(0.30, 1)["warn_level"] == "红"

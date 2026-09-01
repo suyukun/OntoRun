@@ -15,8 +15,9 @@
 - 归集余额 = 联合授信台账 ap_subsidiary_credit_detail.business_balance（单位=万元）按
   ap_customer.customer_name 关联出真实集团身份（group_customer_no）后求和，/10000 → 亿；
 - 看板「前十大集团客户集中度排名」排名对象 = concentration.ap_concentration_limit 按集团
-  聚合的归集余额（口径包§一 集团层归集监测），÷ 集团并表资本 800 亿；前两名 = 天晟 10.8% /
-  瑞华 9.4%（与 verify_demo_numbers.py 实算一致），其后为小额背景集团；
+  聚合的归集余额（口径包§一 集团层归集监测）+ R2 隐性关联方归集（口径包§七 第 2 幕），
+  ÷ 集团并表资本 800 亿；天晟 = 自身 86.4 + 恒昌 16 = 102.4 亿 → 12.8% 红、瑞华 9.4% 黄
+  （与 verify_demo_numbers.py 实算一致），其后为小额背景集团（级别按 R1a 实算，<9% 不标红/橙）；
 - 报送初稿归集 = 集团自身归集 + 经 ap_customer_relation_tree 识别的隐性关联方归集（R2），
   天晟红色案例 = 86.4 + 恒昌 16 = 102.4 亿 → 12.8%。
 """
@@ -32,6 +33,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.runtime.risk_db import RiskStore
+from src.runtime.risk_rules import (
+    LEVEL_NONE,
+    R1A_RULE_MARKER,
+    R1aConfig,
+    level_for_ratio,
+)
 
 # ---------------------------------------------------------------------------
 # 资本与限额常量 id（口径包§一/§三，读 base.ap_sys_param，单一来源）
@@ -125,7 +132,9 @@ class _ReportService:
         """经客户关系树识别并纳入归集的隐性关联方（R2，口径包§三）。"""
         names = conn.execute(
             "SELECT DISTINCT customer_name FROM ap_customer_relation_tree "
-            "WHERE group_customer_name = ? AND customer_name IS NOT NULL",
+            "WHERE group_customer_name = ? AND customer_name IS NOT NULL "
+            "AND (clear_remark_1 IS NOT NULL OR clear_remark_2 IS NOT NULL "
+            "     OR clear_remark_3 IS NOT NULL)",
             (group_name,),
         ).fetchall()
         out: list[dict[str, Any]] = []
@@ -191,11 +200,13 @@ class _ReportService:
             as_of = self.as_of_date(conn)
             as_of_date = date.fromisoformat(as_of)
             cutoff = (as_of_date - timedelta(days=overdue_days)).isoformat()
+            conc = self._concentration_ranking(conn, cap)
             return {
                 "as_of_date": as_of,
                 "capital": self._capital_block(cap),
                 "overdue_days_threshold": overdue_days,
-                "group_concentration_ranking": self._concentration_ranking(conn, cap),
+                "group_concentration_ranking": conc["ranking"],
+                "non_concentration_warnings": conc["non_concentration_warnings"],
                 "signal_status_distribution": self._signal_status_dist(conn),
                 "overdue": self._overdue(conn, cutoff),
                 "subsidiary_response": self._subsidiary_response(conn, as_of),
@@ -215,25 +226,39 @@ class _ReportService:
 
     def _concentration_ranking(
         self, conn: sqlite3.Connection, cap: dict[str, float]
-    ) -> list[dict[str, Any]]:
-        """前十大集团客户集中度排名：归集余额（ap_concentration_limit 按集团聚合，
-        ÷ 集团并表资本 800 亿）。归集余额与联合授信台账对道具集团口径一致（天晟 86.4 亿）。"""
+    ) -> dict[str, Any]:
+        """前十大集团客户集中度排名（P0-3 看板自洽修复）。
+
+        - 分子 = **R2 纳入后口径**：自身归集 + 隐性关联方归集（恒昌→天晟 16 亿），
+          天晟 102.4 亿 → 12.8% 红（口径包§七 第 2 幕，不再显示 10.8% 红矛盾）；
+        - 级别展示与比例校验一致：concentration_level 由 R1a 按 computed ratio 实算
+          （<9% 定级「无」，绝不标红/橙）；
+        - 非集中度类预警（行为/合规等硬规则命中，级别高于集中度实算）→ 分列维度
+          non_concentration_warnings，不再混进集中度排名的级别列。
+        """
         group_cap = cap[PARAM_GROUP_CONSOLIDATED]
+        cfg = R1aConfig.load(conn)
         rows = conn.execute(
             "SELECT a.group_customer_no AS gno, a.group_customer_name AS gname, "
             "SUM(cl.concentration_limit) AS bal_wan "
             "FROM concentration.ap_concentration_limit cl "
             "JOIN customer.ap_customer a ON a.customer_no = cl.customer_no "
-            "GROUP BY gno ORDER BY bal_wan DESC LIMIT 10"
+            "GROUP BY gno ORDER BY bal_wan DESC LIMIT 20"
         ).fetchall()
         ranking = []
+        non_conc: list[dict[str, Any]] = []
         for r in rows:
             gno = r["gno"]
-            balance_yi = (r["bal_wan"] or 0.0) / 10000.0
-            ratio = round(balance_yi / group_cap, 4) if group_cap else 0.0
+            gname = r["gname"]
+            own_yi = (r["bal_wan"] or 0.0) / 10000.0
+            hidden = self.hidden_related_yi(conn, gname)
+            hidden_yi = round(sum(h["balance_yi"] for h in hidden), 4)
+            total_yi = round(own_yi + hidden_yi, 4)
+            ratio = round(total_yi / group_cap, 4) if group_cap else 0.0
+            conc_level = level_for_ratio(ratio, cfg)
             sig = conn.execute(
-                "SELECT warn_level, signal_status FROM ap_warning_signal "
-                "WHERE group_customer_no = ? ORDER BY "
+                "SELECT signal_id, warn_level, signal_status, warn_reason "
+                "FROM ap_warning_signal WHERE group_customer_no = ? ORDER BY "
                 "CASE warn_level WHEN '红' THEN 0 WHEN '橙' THEN 1 "
                 "WHEN '黄' THEN 2 ELSE 3 END LIMIT 1",
                 (gno,),
@@ -242,21 +267,48 @@ class _ReportService:
                 "SELECT COUNT(*) n FROM ap_warning_signal WHERE group_customer_no = ?",
                 (gno,),
             ).fetchone()["n"]
-            ranking.append(
-                {
-                    "group_customer_no": gno,
-                    "group_customer_name": r["gname"],
-                    "consolidated_balance_yi": round(balance_yi, 4),
-                    "concentration_ratio": ratio,
-                    "latest_warn_level": sig["warn_level"] if sig else None,
-                    "latest_signal_status": sig["signal_status"] if sig else None,
-                    "signal_count": n_sig,
-                }
+            sig_level = sig["warn_level"] if sig else None
+            # 维度判定：最新信号为红/橙但集中度实算无警，且非 R1a 标记（R5/R6 硬规则等）
+            # → 非集中度类预警，分列维度
+            is_r1a = sig is not None and (R1A_RULE_MARKER in (sig["warn_reason"] or ""))
+            is_non_conc = (
+                sig is not None
+                and sig_level in ("红", "橙")
+                and conc_level == LEVEL_NONE
+                and not is_r1a
             )
+            item: dict[str, Any] = {
+                "group_customer_no": gno,
+                "group_customer_name": gname,
+                "own_balance_yi": round(own_yi, 4),
+                "hidden_related_balance_yi": hidden_yi,
+                "consolidated_balance_yi": total_yi,
+                "concentration_ratio": ratio,
+                "concentration_level": conc_level,
+                "latest_warn_level": sig_level,
+                "latest_signal_status": sig["signal_status"] if sig else None,
+                "signal_count": n_sig,
+                "warning_dimension": (
+                    "non_concentration" if is_non_conc else "concentration"
+                ),
+            }
+            ranking.append(item)
+            if is_non_conc:
+                non_conc.append(
+                    {
+                        "group_customer_no": gno,
+                        "group_customer_name": gname,
+                        "concentration_ratio": ratio,
+                        "signal_id": sig["signal_id"],
+                        "warn_level": sig_level,
+                        "signal_status": sig["signal_status"],
+                        "warn_reason": sig["warn_reason"],
+                    }
+                )
         ranking.sort(key=lambda g: g["concentration_ratio"], reverse=True)
         for i, g in enumerate(ranking, start=1):
             g["rank"] = i
-        return ranking
+        return {"ranking": ranking[:10], "non_concentration_warnings": non_conc}
 
     @staticmethod
     def _signal_status_dist(conn: sqlite3.Connection) -> dict[str, int]:

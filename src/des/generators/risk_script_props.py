@@ -39,6 +39,87 @@ CAP_CONCERN_LINE = 0.09
 CAP_WARN_LINE = 0.10
 CAP_INTERNAL_LIMIT_RATIO = 0.12
 
+# R1a 阈值/资本参数元数据（P0-1：可答「谁定的、怎么改」；param_id → 元数据列值）
+PARAM_META: dict[str, dict[str, str]] = {
+    "CAP_GROUP_CONSOLIDATED": {
+        "param_source": "口径包§一 资本常量（安平金控演示设定，并表口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元，集团层分母）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（演示明细注明）",
+    },
+    "CAP_BANK_NET": {
+        "param_source": "口径包§一 资本常量（银行层 R1b 分母）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "单一集团客户授信余额（银行层口径）",
+        "denominator_desc": "安平银行资本净额（600 亿元）",
+        "netting_rule": "净额项按 2010 修订第十二条",
+    },
+    "CAP_BANK_TIER1": {
+        "param_source": "口径包§一 资本常量（大额风险暴露分母）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "风险暴露（大额风险暴露口径）",
+        "denominator_desc": "安平银行一级资本净额（480 亿元）",
+        "netting_rule": "2018 办法大额风险暴露口径",
+    },
+    "CAP_BANK_INTERNAL_LIMIT": {
+        "param_source": "口径包§一 资本常量（行内内部限额 = 资本净额×10%）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "单一集团客户授信余额",
+        "denominator_desc": "安平银行资本净额（600 亿元，×10% = 60 亿）",
+        "netting_rule": "银行层内部限额（与集团层预警线 10% 同名不同分母，演示带绝对额）",
+    },
+    "CAP_SECURITIES_REF_LINE": {
+        "param_source": "口径包§一（证券参考线内融资占比）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "证券子公司融资额",
+        "denominator_desc": "证券参考线分母（400 亿元）",
+        "netting_rule": "参考线口径（单看都安全）",
+    },
+    "CAP_SECURITIES_DENOM": {
+        "param_source": "口径包§一（证券参考线分母）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "证券子公司融资额",
+        "denominator_desc": "证券参考线分母（400 亿元）",
+        "netting_rule": "参考线口径",
+    },
+    "CAP_AM_REF_LINE": {
+        "param_source": "口径包§一（资管参考线内融资占比）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "资管子公司融资额",
+        "denominator_desc": "资管参考线分母（200 亿元）",
+        "netting_rule": "参考线口径（单看都安全）",
+    },
+    "CAP_AM_DENOM": {
+        "param_source": "口径包§一（资管参考线分母）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "资管子公司融资额",
+        "denominator_desc": "资管参考线分母（200 亿元）",
+        "netting_rule": "参考线口径",
+    },
+    "CAP_CONCERN_LINE": {
+        "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+    },
+    "CAP_WARN_LINE": {
+        "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+    },
+    "CAP_INTERNAL_LIMIT_RATIO": {
+        "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+    },
+}
+
 # 落库 base.ap_sys_param 的资本常量行（param_id → (类型, 值, 描述)）
 CAPITAL_PARAMS: tuple[tuple[str, str, str, str], ...] = (
     ("CAP_GROUP_CONSOLIDATED", "GROUP_CAPITAL", "800",
@@ -118,9 +199,10 @@ PROP_CLUES = (
 )
 # 集中度限额道具（concentration.ap_concentration_limit；归集余额/预警线 单位=万元）
 #   (id, customer_no, customer_name, 归集余额万, 预警线万, 状态) —— 天晟 10.8% 橙 / 瑞华 9.4% 黄
+#   P1-2：状态用中文「橙/黄」（口径包§八，不再用 ORANGE_ALERT/YELLOW_ALERT）
 PROP_CONCENTRATION = (
-    ("CL-2026-900001", "CUST-2026-900001", "天晟实业有限公司", 864000.0, 800000.0, "ORANGE_ALERT"),
-    ("CL-2026-900002", "CUST-2026-900003", "瑞华实业有限公司", 752000.0, 720000.0, "YELLOW_ALERT"),
+    ("CL-2026-900001", "CUST-2026-900001", "天晟实业有限公司", 864000.0, 800000.0, "橙"),
+    ("CL-2026-900002", "CUST-2026-900003", "瑞华实业有限公司", 752000.0, 720000.0, "黄"),
 )
 # 处置跟踪道具（ap_warning_disposal；瑞华走完整闭环=已处置，天晟结束于处置中/已督办）
 #   (disposal_id, warning_id, disposal_status, disposal_progress)
@@ -551,6 +633,7 @@ def _sys_param_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     year = ctx["year"]
     rows = []
     for seq, (pid, ptype, value, desc) in enumerate(CAPITAL_PARAMS, start=1):
+        meta = PARAM_META.get(pid, {})
         rows.append(
             {
                 "sys_param_id": f"SP-{year:04d}-{900000 + seq:05d}",
@@ -562,12 +645,17 @@ def _sys_param_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
                 "whether_cache": 1,
                 "create_time": _TS,
                 "create_user": "SYSTEM",
-                "update_time": _TS,
+                "update_time": "2026-11-30",  # P0-1 元数据：演示数据时点后的最近更新时间
                 "update_user": "SYSTEM",
                 "extended_id": None,
                 "del_ind": 0,
-                "version": "1.0",
+                "version": "v1.0",  # P0-1 元数据：口径版本（口径包 v0.3）
                 "tenant_id": "AP001",
+                "param_source": meta.get("param_source"),
+                "param_approver": meta.get("param_approver"),
+                "numerator_desc": meta.get("numerator_desc"),
+                "denominator_desc": meta.get("denominator_desc"),
+                "netting_rule": meta.get("netting_rule"),
             }
         )
     return rows

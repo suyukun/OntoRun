@@ -23,11 +23,11 @@ from .risk_generators import (
     DEAL_TYPE_POOL,
     DISPOSAL_STATUS_POOL,
     DIVISION_POOL,
-    EVENT_TYPE_DIST,
     ENTERPRISE_NATURE_POOL,
     ENTERPRISE_SCALE_POOL,
     ESTAB_END,
     ESTAB_START,
+    EVENT_TYPE_DIST,
     EXTERNAL_LEVEL_POOL,
     FIVE_CLASS_DIST,
     GROUP_SUFFIX,
@@ -35,14 +35,12 @@ from .risk_generators import (
     INDUSTRY_LEVEL_POOL,
     INDUSTRY_POOL,
     INTERNAL_LEVEL_POOL,
-    LEVEL1_TOPICS,
     LEVEL2_BY_L1,
     METRIC_DEFS,
     ORDER_STATUS_DIST,
     ORG_POOL,
     SCORE_LEVEL_POOL,
     SIGNAL_STATUS_DIST,
-    SIGNAL_STATUS_POOL,
     SIGNAL_WAY_POOL,
     WARN_LEVEL_DIST,
     WARN_SOURCE_POOL,
@@ -79,6 +77,17 @@ from .risk_generators import (
 
 # 行生成器（每表独立 RNG 流；引用 ctx 缓存的上游表确定性输出）
 # ---------------------------------------------------------------------------
+def _group_name(rng: random.Random) -> str:
+    """P1-3 集团名池再洗：自然长度 ≤9 字（基名+中缀+后缀过长则收敛为「集团」），
+    避免「翔宇电子华北实业集团」这类失真长名。"""
+    base = rng.choice(CUST_NAME_POOL)
+    mid = rng.choice(CUST_NAME_MID)
+    cand = f"{base}{mid}{rng.choice(GROUP_SUFFIX)}"
+    if len(cand) <= 9:
+        return cand
+    return f"{base}{mid}集团"
+
+
 def generate_ap_group_customer_rows(
     rng: random.Random, ctx: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -91,7 +100,7 @@ def generate_ap_group_customer_rows(
             {
                 "group_customer_no": anping_grp_no(year, seq),
                 "data_date": random_date(rng),
-                "group_customer_name": f"{rng.choice(CUST_NAME_POOL)}{rng.choice(CUST_NAME_MID)}{rng.choice(GROUP_SUFFIX)}",
+                "group_customer_name": _group_name(rng),
                 "customer_status": rng.choice(("正常", "关注", "注销", "吊销")),
                 "group_peer_flag": rng.randint(0, 1),
                 "asset_quality_level_code": code,
@@ -220,6 +229,20 @@ def generate_ap_warning_signal_rows(
             risk_exp = round(rng.uniform(100, 50000) * rng.uniform(0.95, 1.20), 2)
         sig_status = _weighted(rng, SIGNAL_STATUS_DIST)
         lc = _lifecycle_fields(sig_status)
+        # P0-3 时间单调：update_time / signal_update_date ≥ signal_generate_date
+        gen_date = random_date(rng)
+        est_date = max(gen_date, random_date(rng))
+        upd_date = max(gen_date, random_date(rng))
+        # P0-3 处置对齐：disposal_status 按生命周期（处置中→处置中；已关闭→已处置；其余→未处置）
+        disp_by_status = {
+            "待确认": "未处置",
+            "确认中": "未处置",
+            "已确认": "未处置",
+            "处置中": "处置中",
+            "已关闭": "已处置",
+            "已撤销": "未处置",
+            "已排除": "未处置",
+        }
         rows.append(
             {
                 "warning_id": f"WS-{year:04d}-{seq:08d}",
@@ -241,10 +264,10 @@ def generate_ap_warning_signal_rows(
                 "signal_level1_topic": event_type,
                 "signal_level2_topic": level2,
                 "signal_description": f"{cust['customer_name']} {event_type}（{level2}）监测异常，建议关注",
-                "signal_generate_date": random_date(rng),
-                "signal_establish_date": random_date(rng),
+                "signal_generate_date": gen_date,
+                "signal_establish_date": est_date,
                 "signal_establish_operator": _person_name(rng),
-                "signal_update_date": random_date(rng),
+                "signal_update_date": upd_date,
                 "data_source": rng.choice(DATA_SOURCE_POOL),
                 "is_important_customer": 1 if rng.random() < 0.10 else 0,
                 "info_type": rng.randint(0, 1),
@@ -253,7 +276,7 @@ def generate_ap_warning_signal_rows(
                 "clear_remark_1": None,
                 "clear_remark_2": None,
                 "clear_remark_3": None,
-                "update_time": random_date(rng),
+                "update_time": upd_date,
                 "update_user": _person_name(rng),
                 "del_ind": 0,
                 "push_warn_reason": _warn_reason(level, level2, inputs),
@@ -266,11 +289,7 @@ def generate_ap_warning_signal_rows(
                     ("单一集团", "关联集团", "一致行动人")
                 ),
                 "risk_exposure": risk_exp,
-                "disposal_status": (
-                    "处置中"
-                    if sig_status == "处置中"
-                    else ("已处置" if sig_status == "已关闭" else rng.choice(DISPOSAL_STATUS_POOL))
-                ),
+                "disposal_status": disp_by_status[sig_status],
                 "disposal_demand": rng.choice(
                     ("3 个工作日内反馈", "10 个工作日内处置完毕", "立即处置")
                 ),
@@ -295,24 +314,28 @@ def generate_ap_warning_disposal_rows(
         signals, min(_row_count(ctx, "risk.ap_warning_disposal"), len(signals))
     )
     rows: list[dict[str, Any]] = []
+    # P0-3 处置对齐：progress 按 status 收敛（已处置→完成/解除；处置中→执行中；未处置→待制定）
+    progress_by_status = {
+        "未处置": "待制定处置方案",
+        "处置中": ("方案执行中", "已制定处置方案", "已上报集团", "待评估"),
+        "暂缓处置": ("暂缓处置，待补充材料", "待重新制定方案"),
+        "已处置": ("已完成处置", "已解除并销号", "风险敞口已压降"),
+    }
     for seq, sig in enumerate(chosen, start=1):
+        status = rng.choice(DISPOSAL_STATUS_POOL)
+        opts = progress_by_status[status]
+        progress = rng.choice(opts) if isinstance(opts, tuple) else opts
+        d_time = random_date(rng)
+        o_time = max(d_time, random_date(rng))  # P0-3 时间单调：operate ≥ disposal
         rows.append(
             {
                 "disposal_id": f"WD-{year:04d}-{seq:08d}",
                 "warning_id": sig["warning_id"],
-                "disposal_status": rng.choice(DISPOSAL_STATUS_POOL),
-                "disposal_progress": rng.choice(
-                    (
-                        "已制定处置方案",
-                        "方案执行中",
-                        "已上报集团",
-                        "已完成处置",
-                        "待评估",
-                    )
-                ),
-                "disposal_time": random_date(rng),
+                "disposal_status": status,
+                "disposal_progress": progress,
+                "disposal_time": d_time,
                 "operator_user": _person_name(rng),
-                "operate_time": random_date(rng),
+                "operate_time": o_time,
             }
         )
     return rows

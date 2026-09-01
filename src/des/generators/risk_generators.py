@@ -340,32 +340,36 @@ def five_category_assign(
 
 
 def concentration_calc(exposure: float, net_capital: float) -> dict[str, Any]:
-    """规则 3 大额客户集中度：敞口/资本净额 → {ratio,status,warn_level,need_approval}。"""
+    """规则 3 大额客户集中度：敞口/资本净额 → {ratio,status,warn_level,need_approval}。
+
+    P1-2：status 用中文「红/橙/黄/正常」（存储即所见，口径包§八拍板），不再用英文
+    RED_ALERT/ORANGE_ALERT/YELLOW_ALERT/NORMAL。
+    """
     ratio = exposure / net_capital if net_capital > 0 else 1.0
     if ratio > CONCENTRATION_ORANGE:
         return {
             "ratio": ratio,
-            "status": "RED_ALERT",
+            "status": "红",
             "warn_level": "红",
             "need_approval": True,
         }
     if ratio > CONCENTRATION_WARN:
         return {
             "ratio": ratio,
-            "status": "ORANGE_ALERT",
+            "status": "橙",
             "warn_level": "橙",
             "need_approval": True,
         }
     if ratio > CONCENTRATION_NORMAL:
         return {
             "ratio": ratio,
-            "status": "YELLOW_ALERT",
+            "status": "黄",
             "warn_level": "黄",
             "need_approval": False,
         }
     return {
         "ratio": ratio,
-        "status": "NORMAL",
+        "status": "正常",
         "warn_level": "无",
         "need_approval": False,
     }

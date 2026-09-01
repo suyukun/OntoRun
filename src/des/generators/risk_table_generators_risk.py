@@ -18,7 +18,6 @@ from .risk_generators import (
     DATA_SOURCE_POOL,
     DEAL_SUGGESTION_POOL,
     EVENT_TYPE_DIST,
-    LEVEL1_TOPICS,
     LEVEL2_BY_L1,
     PENALTY_FORM_POOL,
     PUSH_STATUS_POOL,

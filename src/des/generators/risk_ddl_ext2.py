@@ -306,7 +306,7 @@ CREATE TABLE ap_data_dict (
 );
 """
 
-# base.ap_sys_param —— 系统参数（原型 o_base_stm_parm，15 字段）
+# base.ap_sys_param —— 系统参数（原型 o_base_stm_parm，20 字段；P0-1 增元数据列）
 AP_SYS_PARAM_DDL = """
 CREATE TABLE ap_sys_param (
   sys_param_id TEXT NOT NULL,  -- 主键ID
@@ -323,7 +323,12 @@ CREATE TABLE ap_sys_param (
   extended_id TEXT,  -- 扩展编号
   del_ind INTEGER NOT NULL,  -- 删除标志
   version TEXT NOT NULL,  -- 版本号
-  tenant_id TEXT NOT NULL  -- 租户编号
+  tenant_id TEXT NOT NULL,  -- 租户编号
+  param_source TEXT,  -- 出处（依据条款/口径来源，P0-1）
+  param_approver TEXT,  -- 定值/审批人（P0-1）
+  numerator_desc TEXT,  -- 分子构成（P0-1）
+  denominator_desc TEXT,  -- 分母说明（P0-1）
+  netting_rule TEXT  -- 净额规则（P0-1）
 );
 """
 
