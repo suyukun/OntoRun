@@ -11,6 +11,12 @@ src/ontology/risk_error_codes.py）→ 写回真实源库（写中文值，本�
 
 与零售 handler（src/runtime/actions_impl.py）完全独立：本模块只增不改，注册走
 register_risk_action_handlers(engine) 挂到动作名→handler 映射，不触碰既有注册。
+
+S4 M2 扩展（R1a/R2 规则挂接）：confirm_warning / adjust_warning_level /
+submit_disposal 三个 handler 新增 validate_semantics，调用 src.runtime.
+risk_rules_validation 的规则门——仅 warn_reason 引用「R1a」的信号受约束（口径包
+M2 注册范围=剧本命中），升级红须 R1a+R2 实算 >12% 命中否则拒绝并给规则依据；
+非 R1a 信号行为不变。规则引擎见 src.runtime.risk_rules（阈值落 base.ap_sys_param）。
 """
 
 from __future__ import annotations
