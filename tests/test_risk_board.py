@@ -45,18 +45,45 @@ def _pct(ratio: float) -> str:
 class TestDashboard:
     """全局督办看板聚合（§七 第 6 幕）。"""
 
-    def test_concentration_top10_contains_tiansheng_10_8(self, service) -> None:
+    def test_concentration_top10_contains_tiansheng_12_8(self, service) -> None:
         d = service.dashboard()
         ranking = d["group_concentration_ranking"]
         assert len(ranking) == 10, f"前十大集团集中度应恰 10 条，实 {len(ranking)}"
         top = ranking[0]
         assert top["group_customer_name"] == "天晟集团有限公司"
-        assert top["consolidated_balance_yi"] == 86.4
-        assert top["concentration_ratio"] == 0.108
-        assert _pct(top["concentration_ratio"]) == "10.8%"
+        # P0-3：分子用 R2 纳入后口径（自身 86.4 + 恒昌 16 = 102.4 亿 → 12.8% 红）
+        assert top["consolidated_balance_yi"] == 102.4
+        assert top["own_balance_yi"] == 86.4
+        assert top["hidden_related_balance_yi"] == 16.0
+        assert top["concentration_ratio"] == 0.128
+        assert _pct(top["concentration_ratio"]) == "12.8%"
+        assert top["concentration_level"] == "红"
+        assert top["warning_dimension"] == "concentration"
         assert (
             d["capital"]["group_consolidated_capital_yi"] == 800.0
         )  # 口径包§一 并表资本
+
+    def test_concentration_level_consistent_with_ratio(self, service) -> None:
+        """P0-3 级别展示与比例校验一致：<9% 不标红/橙，非集中度类预警分列维度。"""
+        d = service.dashboard()
+        for g in d["group_concentration_ranking"]:
+            assert g["concentration_level"] == self._r1a_level(g["concentration_ratio"])
+            if g["concentration_ratio"] < 0.09:
+                assert g["concentration_level"] not in ("红", "橙")
+        assert "non_concentration_warnings" in d
+        for w in d["non_concentration_warnings"]:
+            assert w["warn_level"] in ("红", "橙")
+            assert w["concentration_ratio"] < 0.09
+
+    @staticmethod
+    def _r1a_level(ratio: float) -> str:
+        from src.runtime.risk_rules import R1aConfig, level_for_ratio, open_rules_conn
+
+        conn = open_rules_conn()
+        try:
+            return level_for_ratio(ratio, R1aConfig.load(conn))
+        finally:
+            conn.close()
 
     def test_state_distribution_sums_to_total_signals(self, service) -> None:
         d = service.dashboard()

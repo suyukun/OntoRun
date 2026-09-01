@@ -25,6 +25,17 @@ def client():
         yield c
 
 
+def _r1a_level(ratio: float) -> str:
+    """与看板同源的 R1a 定级（读 base.ap_sys_param 阈值，禁硬编码）。"""
+    from src.runtime.risk_rules import R1aConfig, level_for_ratio, open_rules_conn
+
+    conn = open_rules_conn()
+    try:
+        return level_for_ratio(ratio, R1aConfig.load(conn))
+    finally:
+        conn.close()
+
+
 def _ts_ranking_entry(data: dict) -> dict:
     """从看板集中度排名中取出天晟集团有限公司条目。"""
     ranking = data["group_concentration_ranking"]
@@ -39,20 +50,43 @@ def _ts_ranking_entry(data: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_contains_tiansheng_108(client: TestClient):
-    """看板前十大集团集中度排名含天晟 10.8%（口径包§七 第 6 幕）。"""
+def test_dashboard_contains_tiansheng_128(client: TestClient):
+    """看板前十大集团集中度排名含天晟 R2 纳入后口径 12.8%（P0-3：分子含隐性关联方恒昌）。"""
     res = client.get("/risk/dashboard")
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["outcome"] == "ok"
     data = body["data"]
     ts = _ts_ranking_entry(data)
-    assert ts["consolidated_balance_yi"] == pytest.approx(86.4, abs=1e-3)
-    assert ts["concentration_ratio"] == pytest.approx(86.4 / GROUP_CAPITAL_YI, abs=1e-3)
-    assert ts["concentration_ratio"] == pytest.approx(0.108, abs=1e-3)
+    # R2 纳入后口径：自身 86.4 + 恒昌 16 = 102.4 亿 → 12.8% 红（P0-3 修复，不再 10.8% 红矛盾）
+    assert ts["consolidated_balance_yi"] == pytest.approx(102.4, abs=1e-3)
+    assert ts["own_balance_yi"] == pytest.approx(86.4, abs=1e-3)
+    assert ts["hidden_related_balance_yi"] == pytest.approx(16.0, abs=1e-3)
+    assert ts["concentration_ratio"] == pytest.approx(102.4 / GROUP_CAPITAL_YI, abs=1e-3)
+    assert ts["concentration_ratio"] == pytest.approx(0.128, abs=1e-3)
+    assert ts["concentration_level"] == "红"  # 与 12.8% 实算一致
+    assert ts["warning_dimension"] == "concentration"
     # 排名按集中度降序
     ratios = [g["concentration_ratio"] for g in data["group_concentration_ranking"]]
     assert ratios == sorted(ratios, reverse=True)
+
+
+def test_dashboard_level_consistent_with_ratio(client: TestClient):
+    """P0-3 级别展示与比例校验一致：<9% 不得标红/橙，非集中度类预警分列维度。"""
+    data = client.get("/risk/dashboard").json()["data"]
+    for g in data["group_concentration_ranking"]:
+        ratio = g["concentration_ratio"]
+        level = g["concentration_level"]
+        if ratio < 0.09:
+            assert level in ("无", "黄"), f"{g['group_customer_name']} {ratio} 不应标红/橙（实得 {level}）"
+            assert level != "红" and level != "橙"
+        # 集中度维度行：级别必须与 ratio 的 R1a 实算一致
+        assert g["concentration_level"] == _r1a_level(ratio)
+    # 非集中度类预警分列维度存在（背景集团行为/合规红警不混进集中度排名级别）
+    assert "non_concentration_warnings" in data
+    for w in data["non_concentration_warnings"]:
+        assert w["warn_level"] in ("红", "橙")
+        assert w["concentration_ratio"] < 0.09
 
 
 def test_dashboard_ruihua_094(client: TestClient):
