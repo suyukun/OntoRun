@@ -11,6 +11,8 @@ RISK_ERROR_CODES: tuple[str, ...] = (
     "WARNING_NOT_CONFIRMABLE",  # 信号状态非 GENERATED，不可确认
     "WARNING_NOT_ADJUSTABLE",  # 信号状态非 CONFIRMED，不可调整等级
     "WARNING_LEVEL_INVALID",  # 预警等级非法，或升级至更高等级需审批
+    "WARNING_LEVEL_NOT_SUPPORTED_BY_R1A",  # 预警等级超出 R1a 归集集中度支持（升级红须 >12% 命中，否则拒绝）
+    "WARNING_LEVEL_INCONSISTENT_WITH_R1A",  # 预警等级与 R1a 归集集中度实算不一致
     # 处置
     "DISPOSAL_NOT_FOUND",  # 处置记录不存在
     "DISPOSAL_NOT_SUBMITTABLE",  # 处置状态非 DRAFT，不可提交

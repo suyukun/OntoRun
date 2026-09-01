@@ -37,6 +37,11 @@ from src.runtime.risk_db import (
     SIGNAL_STATUS_TO_CN,
     build_risk_source_registry,
 )
+from src.runtime.risk_rules_validation import (
+    validate_adjust_level,
+    validate_confirm_level,
+    validate_disposal_level,
+)
 from src.runtime.store import Store
 
 # 审批单 remark 内嵌信号号（生成器格式：对预警信号 SGN-2026-00041235 申请处置审批）
@@ -100,6 +105,10 @@ class ConfirmWarningHandler(ActionHandler):
             return ok, {"signal_status": warning["signal_status"]} if warning else None
         return True, None
 
+    def validate_semantics(self, snapshot: dict, params: Any) -> Violation | None:
+        # S4 M2 R1a：信号等级须与集团归集集中度实算一致（仅 R1a 引用的信号，剧本命中）
+        return validate_confirm_level(self.engine, snapshot["warning"])
+
     def compute_effects(
         self, conn: Any, snapshot: dict, params: Any
     ) -> tuple[list[Effect], list[Writeback]]:
@@ -158,6 +167,10 @@ class AdjustWarningLevelHandler(ActionHandler):
             # new_level ∈ {黄,橙,红} 由参数模型 Literal 强校验；升级审批走双签
             return True, {"note": "枚举由参数模型校验，升级审批由双签承担"}
         return True, None
+
+    def validate_semantics(self, snapshot: dict, params: Any) -> Violation | None:
+        # S4 M2 R1a+R2：目标等级不得高于归集集中度实算定级（升级红须 >12% 命中，否则拒绝）
+        return validate_adjust_level(self.engine, snapshot["warning"], params.new_level)
 
     def compute_effects(
         self, conn: Any, snapshot: dict, params: Any
@@ -242,6 +255,10 @@ class SubmitDisposalHandler(ActionHandler):
                 "disposal_status": disposal["disposal_status"]
             } if disposal else None
         return True, None
+
+    def validate_semantics(self, snapshot: dict, params: Any) -> Violation | None:
+        # S4 M2 R1a：关联信号等级须与归集集中度实算一致（仅 R1a 引用的信号）
+        return validate_disposal_level(self.engine, snapshot["warning"])
 
     def compute_effects(
         self, conn: Any, snapshot: dict, params: Any

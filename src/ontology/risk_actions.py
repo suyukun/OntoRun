@@ -27,14 +27,18 @@ class ConfirmWarningParams(BaseModel):
 
 class AdjustWarningLevelParams(BaseModel):
     warning_id: str = Field(max_length=_STR_MAX, description="预警信号 ID")
-    new_level: Literal["黄", "橙", "红"] = Field(description="调整后的预警等级（黄/橙/红）")
+    new_level: Literal["黄", "橙", "红"] = Field(
+        description="调整后的预警等级（黄/橙/红）"
+    )
     reason: str = Field(min_length=1, max_length=_TEXT_MAX, description="调整原因")
 
 
 class SubmitDisposalParams(BaseModel):
     disposal_id: str = Field(max_length=_STR_MAX, description="处置记录 ID")
     deal_type: str = Field(
-        min_length=1, max_length=_STR_MAX, description="处置类型（字典项P066，M3 补全枚举）"
+        min_length=1,
+        max_length=_STR_MAX,
+        description="处置类型（字典项P066，M3 补全枚举）",
     )
     comment: str = Field(min_length=1, max_length=_TEXT_MAX, description="处置事由")
 
@@ -47,16 +51,22 @@ class ApproveDisposalParams(BaseModel):
 
 class PushWarningParams(BaseModel):
     warning_id: str = Field(max_length=_STR_MAX, description="预警信号 ID")
-    to_user: str = Field(min_length=1, max_length=_STR_MAX, description="推送对象（用户/机构）")
+    to_user: str = Field(
+        min_length=1, max_length=_STR_MAX, description="推送对象（用户/机构）"
+    )
 
 
 class CloseWarningParams(BaseModel):
     warning_id: str = Field(max_length=_STR_MAX, description="预警信号 ID")
-    close_reason: str = Field(min_length=1, max_length=_TEXT_MAX, description="销号原因")
+    close_reason: str = Field(
+        min_length=1, max_length=_TEXT_MAX, description="销号原因"
+    )
 
 
 class AdjustConcentrationLimitParams(BaseModel):
-    concentration_limit_id: str = Field(max_length=_STR_MAX, description="集中度限额记录 ID")
+    concentration_limit_id: str = Field(
+        max_length=_STR_MAX, description="集中度限额记录 ID"
+    )
     new_limit: float = Field(ge=0, description="新集中度限额（万元）")
     reason: str = Field(min_length=1, max_length=_TEXT_MAX, description="调整原因")
 
@@ -64,7 +74,9 @@ class AdjustConcentrationLimitParams(BaseModel):
 class RegisterRiskProjectParams(BaseModel):
     group_customer_no: str = Field(max_length=_STR_MAX, description="所属集团编号")
     project_name: str = Field(min_length=1, max_length=_STR_MAX, description="项目名称")
-    business_type: str = Field(min_length=1, max_length=_STR_MAX, description="业务类型")
+    business_type: str = Field(
+        min_length=1, max_length=_STR_MAX, description="业务类型"
+    )
     five_classification: Literal[
         "NORMAL", "ATTENTION", "SECONDARY", "DOUBTFUL", "LOSS"
     ] = Field(description="五级分类")
@@ -72,7 +84,9 @@ class RegisterRiskProjectParams(BaseModel):
 
 class UpdateRiskProjectProgressParams(BaseModel):
     risk_project_id: str = Field(max_length=_STR_MAX, description="风险项目 ID")
-    project_progress: str = Field(min_length=1, max_length=_TEXT_MAX, description="项目进展")
+    project_progress: str = Field(
+        min_length=1, max_length=_TEXT_MAX, description="项目进展"
+    )
     new_five_classification: Literal[
         "NORMAL", "ATTENTION", "SECONDARY", "DOUBTFUL", "LOSS"
     ] = Field(description="最新五级分类")
@@ -95,7 +109,12 @@ RISK_ACTIONS: list[ActionDef] = [
             ),
         ],
         state_effects=StateEffects(source_backed=["WarningSignal.signal_status"]),
-        error_codes=["INVALID_PARAMS", "WARNING_NOT_FOUND", "WARNING_NOT_CONFIRMABLE"],
+        error_codes=[
+            "INVALID_PARAMS",
+            "WARNING_NOT_FOUND",
+            "WARNING_NOT_CONFIRMABLE",
+            "WARNING_LEVEL_INCONSISTENT_WITH_R1A",  # R1a 归集集中度一致性（S4 M2）
+        ],
     ),
     # ---- 核心动作 2：预警等级调整（CONFIRMED 下 黄/橙/红 调整） ----
     ActionDef(
@@ -125,6 +144,7 @@ RISK_ACTIONS: list[ActionDef] = [
             "WARNING_NOT_FOUND",
             "WARNING_NOT_ADJUSTABLE",
             "WARNING_LEVEL_INVALID",
+            "WARNING_LEVEL_NOT_SUPPORTED_BY_R1A",  # R1a 归集集中度支持上限（S4 M2）
         ],
         high_risk=True,
     ),
@@ -153,6 +173,7 @@ RISK_ACTIONS: list[ActionDef] = [
             "INVALID_PARAMS",
             "DISPOSAL_NOT_FOUND",
             "DISPOSAL_NOT_SUBMITTABLE",
+            "WARNING_LEVEL_INCONSISTENT_WITH_R1A",  # R1a 归集集中度一致性（S4 M2）
         ],
     ),
     # ---- 占位动作（参数/前置/效果骨架，M3 动作执行器细化） ----

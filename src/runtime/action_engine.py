@@ -64,6 +64,8 @@ ERROR_MESSAGES: dict[str, str] = {
     "WARNING_NOT_CONFIRMABLE": "预警信号状态非待确认，不可确认",
     "WARNING_NOT_ADJUSTABLE": "预警信号状态非确认中，不可调整等级",
     "WARNING_LEVEL_INVALID": "预警等级非法，或升级至更高等级需审批",
+    "WARNING_LEVEL_NOT_SUPPORTED_BY_R1A": "预警等级超出 R1a 归集集中度规则支持范围（升级红须 >12% 命中，否则拒绝）",
+    "WARNING_LEVEL_INCONSISTENT_WITH_R1A": "预警等级与 R1a 归集集中度实算不一致，请核对归集口径",
     "DISPOSAL_NOT_FOUND": "处置记录不存在",
     "DISPOSAL_NOT_SUBMITTABLE": "处置状态非草稿，不可提交",
     "APPROVE_ORDER_NOT_FOUND": "审批单不存在",
