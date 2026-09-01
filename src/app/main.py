@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +38,19 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """POST /agent/chat 响应体。"""
+    """POST /agent/chat 响应体。
+
+    S4 M3a：evidence 为证据链载荷列表（口径包§六「每个答案统一附证据链」）——
+    剧本工具（risk_group_reveal / risk_related_reveal / risk_approval_chain）与
+    risk_query 的结果内嵌 {结论, 依据表名, 命中规则+条款, 分母说明, 明细行引用}，
+    路由层聚合后随答案返回（S1 /agent 不产生 evidence，保持 None 向后兼容）。
+    """
 
     session_id: str
     reply: str
     need_confirm: dict | None = None
     outcome: str | None = None
+    evidence: list[dict] | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -58,6 +66,25 @@ class ConfirmResponse(BaseModel):
 
     reply: str
     outcome: str
+    evidence: list[dict] | None = None
+
+
+def _extract_evidence(turn: Any) -> list[dict] | None:
+    """从一轮编排的工具结果聚合证据链载荷（工具内容 JSON 的 evidence 键）。
+
+    剧本工具与 risk_query 的结果信封内嵌 evidence（见 src/agent/risk_agent.py），
+    此处把每轮命中的证据链载荷汇总附到答案上（口径包§六「每个答案统一附证据链载荷」）。
+    """
+    out: list[dict] = []
+    for r in turn.tool_results:
+        try:
+            payload = json.loads(r.content)
+        except (TypeError, ValueError):
+            continue
+        ev = payload.get("evidence")
+        if isinstance(ev, dict):
+            out.append(ev)
+    return out or None
 
 
 # ======================================================================
@@ -604,6 +631,7 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             reply=turn.reply or "",
             need_confirm=need_confirm_dict,
             outcome=outcome,
+            evidence=_extract_evidence(turn),
         )
 
     @app.post("/agent/risk/confirm")
@@ -696,6 +724,7 @@ def register_risk_agent_routes(app: FastAPI) -> None:
         return ConfirmResponse(
             reply=turn.reply or "",
             outcome=outcome,
+            evidence=_extract_evidence(turn),
         )
 
 

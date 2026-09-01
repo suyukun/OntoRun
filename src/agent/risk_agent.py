@@ -21,10 +21,22 @@ from src.agent.agent import ActionExecutor, Agent, ToolResult
 from src.agent.provider import LLMProvider
 from src.agent.tools_generator import READ_TOOL_NAME
 from src.ontology.registry import Registry
+from src.runtime.risk_evidence import EvidenceError, EvidenceService
 from src.runtime.risk_query import RiskQuery, RiskQueryError
 from src.runtime.risk_query_spec import ANALYTIC_PARAMS, MAX_LIMIT
 
 RISK_QUERY_TOOL_NAME = "risk_query"
+# 七幕剧本只读工具（口径包 v0.3 §七；真实数据 + M2 引擎实算，返回带证据链载荷）
+RISK_REVEAL_TOOL_NAME = "risk_group_reveal"  # 第 1 幕揭示：逐家 → 归集 10.8% 橙
+RISK_RELATED_TOOL_NAME = (
+    "risk_related_reveal"  # 第 2 幕升级识别：三线索 + R2 重算 12.8% 红
+)
+RISK_APPROVAL_TOOL_NAME = "risk_approval_chain"  # 第 4 幕双签驳回：处置审批链证据
+SCRIPT_TOOL_NAMES = (
+    RISK_REVEAL_TOOL_NAME,
+    RISK_RELATED_TOOL_NAME,
+    RISK_APPROVAL_TOOL_NAME,
+)
 
 
 class RiskQueryParams(BaseModel):
@@ -176,6 +188,109 @@ def build_risk_query_tool(query: RiskQuery) -> dict:
     }
 
 
+class ScriptGroupParams(BaseModel):
+    """剧本工具参数：按集团名查询（第 1/2 幕）。"""
+
+    group_customer_name: str = Field(
+        min_length=1, max_length=100, description="集团客户名称"
+    )
+
+
+class ScriptApprovalParams(BaseModel):
+    """剧本工具参数：第 4 幕审批链（集团名 / 信号号 / 预警 ID 三选一）。"""
+
+    group_customer_name: str | None = Field(
+        default=None, max_length=100, description="集团客户名称（与 signal_id 二选一）"
+    )
+    signal_id: str | None = Field(
+        default=None, max_length=64, description="预警信号号（SGN-...）"
+    )
+    warning_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="预警信号 ID（ap_warning_signal.warning_id）",
+    )
+
+
+def build_script_tools() -> list[dict]:
+    """七幕剧本只读工具（真数据 + M2 引擎实算；工具结果携带 data + evidence）。
+
+    剧本工具是演示的证据链来源：答案引用其返回的归集实算与线索明细，证据链
+    载荷随对话答案一并返回（口径包§六「Agent 对话框唯一一级入口」）。
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": RISK_REVEAL_TOOL_NAME,
+                "description": (
+                    "第 1 幕揭示（只读）：按集团查联合授信台账逐家附属机构归集"
+                    "（银行/证券/资管，各自分母单看都安全）→ R1a 归集集中度实算 → 定级。"
+                    "返回带证据链载荷（结论/依据表名/命中规则+条款/分母/明细行）。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "group_customer_name": {
+                            "type": "string",
+                            "description": "集团客户名称，如 天晟集团有限公司",
+                        }
+                    },
+                    "required": ["group_customer_name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": RISK_RELATED_TOOL_NAME,
+                "description": (
+                    "第 2 幕升级识别（只读）：查客户关系树三线索（股权代持/交叉担保/资金往来）"
+                    "识别的隐性一致行动人，R2 纳入归集后按 R1a 重算定级。"
+                    "返回带证据链载荷（线索明细行/规则/分母/重算结论）。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "group_customer_name": {
+                            "type": "string",
+                            "description": "集团客户名称，如 天晟集团有限公司",
+                        }
+                    },
+                    "required": ["group_customer_name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": RISK_APPROVAL_TOOL_NAME,
+                "description": (
+                    "第 4 幕双签驳回证据（只读）：查集团/信号对应的处置方案 + 审批单/审批任务链，"
+                    "并固定给出 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易）驳回依据。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "group_customer_name": {
+                            "type": "string",
+                            "description": "集团客户名称（与 signal_id 二选一）",
+                        },
+                        "signal_id": {
+                            "type": "string",
+                            "description": "预警信号号（SGN-...，与集团名二选一）",
+                        },
+                        "warning_id": {
+                            "type": "string",
+                            "description": "预警信号 ID（ap_warning_signal.warning_id）",
+                        },
+                    },
+                },
+            },
+        },
+    ]
+
+
 def build_risk_system_prompt(registry: Registry, query: RiskQuery) -> str:
     """风险场景系统提示词：可表达集 + 数据截至 + 域外拒答 + 双签规则。"""
     high_risk = [a.name for a in registry.actions() if a.high_risk]
@@ -194,7 +309,15 @@ def build_risk_system_prompt(registry: Registry, query: RiskQuery) -> str:
         "2. 超出可表达集的问题（如 巴塞尔协议/资本充足率/违约概率预测/预测未来/导出客户敏感数据）"
         "必须明确拒答（DECLINE）并引导可查项，绝不编造数字；查询结果为空要如实说明。\n"
         "3. 动作执行结果中的错误码是权威规则结论：被拒绝时向用户说明原因并给出合规替代方案。\n"
-        f"4. 高风险动作（{', '.join(high_risk) or '无'}）：只能先提议，必须用户明确确认后才执行。"
+        f"4. 高风险动作（{', '.join(high_risk) or '无'}）：只能先提议，必须用户明确确认后才执行。\n"
+        "演示剧本设定（口径包 v0.3 §七，对话为演示一级入口）：\n"
+        "5. 问「X集团风险/集中度有多大」→ 优先用 risk_group_reveal（第 1 幕：逐家附属机构单看都安全 → R1a 归集实算）；"
+        "问「隐性关联/一致行动人」→ risk_related_reveal（第 2 幕：三线索 + R2 纳入重算）。"
+        "两工具返回带证据链载荷（结论/依据表名/命中规则+条款/分母/明细行），答案必须引用，绝不凭印象编数字。\n"
+        "6. 问「天晟集团集中度如何压降/处置」→ 按剧本提出：将天晟部分授信拆分至非关联第三方通道主体以降低名义归集集中度。"
+        "该提议看似合规腾挪，实际违反《金融控股公司关联交易管理办法》（2023）第二十三条"
+        "「通过隐匿关联关系、拆分交易、设计复杂交易结构等各种隐蔽方式规避内部审查、外部监管以及报告披露义务」；"
+        "演示将展示审批人依此条款驳回（approve_disposal decision=REJECTED，opinion 引用第二十三条），处置退回重新起草。"
     )
 
 
@@ -266,6 +389,7 @@ class RiskAgent(Agent):
         query: RiskQuery,
         *,
         system_prompt: str | None = None,
+        evidence: EvidenceService | None = None,
     ) -> None:
         super().__init__(
             registry,
@@ -274,11 +398,13 @@ class RiskAgent(Agent):
             system_prompt=system_prompt or build_risk_system_prompt(registry, query),
         )
         self._query = query
-        # 风险工具清单：9 风险动作 + risk_query（剔除弱 search_objects，读走受限契约）
+        self._evidence = evidence or EvidenceService()
+        # 风险工具清单：9 风险动作 + risk_query + 3 剧本工具（剔除弱 search_objects）
         self._tools = [
             t for t in self._tools if t["function"]["name"] != READ_TOOL_NAME
         ]
         self._tools.append(build_risk_query_tool(query))
+        self._tools.extend(build_script_tools())
         self._tool_map = {t["function"]["name"]: t for t in self._tools}
 
     def _execute_tool_call(
@@ -286,6 +412,8 @@ class RiskAgent(Agent):
     ) -> ToolResult:
         if call.name == RISK_QUERY_TOOL_NAME:
             return self._execute_risk_query(call)
+        if call.name in SCRIPT_TOOL_NAMES:
+            return self._execute_script_tool(call)
         return super()._execute_tool_call(call, actor=actor, actor_detail=actor_detail)
 
     def _execute_risk_query(self, call: Any) -> ToolResult:
@@ -333,10 +461,74 @@ class RiskAgent(Agent):
                     }
                 ),
             )
+        ev = self._evidence.query_evidence(self._registry, params.to_contract(), result)
+        content: dict[str, Any] = {"outcome": "ok", "data": result}
+        if ev:
+            content["evidence"] = ev
         return ToolResult(
             tool_call_id=call.id,
             name=call.name,
-            content=_j({"outcome": "ok", "data": result}),
+            content=_j(content),
+        )
+
+    def _execute_script_tool(self, call: Any) -> ToolResult:
+        """剧本只读工具：参数校验 → EvidenceService 实算 → data + evidence 信封。
+
+        剧本工具（risk_group_reveal / risk_related_reveal / risk_approval_chain）返回
+        全量证据链载荷（结论/依据表名/命中规则+条款/分母/明细行），随对话答案一并返回。
+        """
+        try:
+            if call.name == RISK_REVEAL_TOOL_NAME:
+                params = ScriptGroupParams.model_validate(call.arguments)
+                payload = self._evidence.group_reveal(params.group_customer_name)
+            elif call.name == RISK_RELATED_TOOL_NAME:
+                params = ScriptGroupParams.model_validate(call.arguments)
+                payload = self._evidence.related_upgrade(params.group_customer_name)
+            else:
+                params = ScriptApprovalParams.model_validate(call.arguments)
+                payload = self._evidence.approval_chain(
+                    group_customer_name=params.group_customer_name,
+                    signal_id=params.signal_id,
+                    warning_id=params.warning_id,
+                )
+        except ValidationError as exc:
+            detail = [
+                {"loc": ".".join(str(x) for x in e["loc"]), "msg": e["msg"]}
+                for e in exc.errors()
+            ]
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content=_j(
+                    {
+                        "outcome": "invalid_params",
+                        "error": {
+                            "code": "INVALID_PARAMS",
+                            "message": f"{call.name} 参数校验失败",
+                            "detail": detail,
+                        },
+                    }
+                ),
+            )
+        except EvidenceError as exc:
+            # fail-closed：集团不存在/参数缺失 → 拒答（不瞎编）
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content=_j(
+                    {
+                        "outcome": "declined",
+                        "error": {
+                            "code": "EVIDENCE_NOT_FOUND",
+                            "message": str(exc),
+                        },
+                    }
+                ),
+            )
+        return ToolResult(
+            tool_call_id=call.id,
+            name=call.name,
+            content=_j({"outcome": "ok", "data": payload, "evidence": payload}),
         )
 
 
@@ -347,10 +539,17 @@ def _j(value: Any) -> str:
 
 
 __all__ = [
+    "RISK_APPROVAL_TOOL_NAME",
     "RISK_QUERY_TOOL_NAME",
+    "RISK_RELATED_TOOL_NAME",
+    "RISK_REVEAL_TOOL_NAME",
+    "SCRIPT_TOOL_NAMES",
     "RiskActionExecutor",
     "RiskAgent",
     "RiskQueryParams",
+    "ScriptApprovalParams",
+    "ScriptGroupParams",
     "build_risk_query_tool",
     "build_risk_system_prompt",
+    "build_script_tools",
 ]
