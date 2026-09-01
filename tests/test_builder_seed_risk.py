@@ -156,8 +156,9 @@ def test_seed_skips_same_name_conflict_rows(client, ontology_path):
 
     summary = SEED.seed(ontology_path)
 
-    # 33 - 1 冲突 = 32 条新增；risk_customer（RiskCustomer）保留人工行
-    assert summary["object_types"]["inserted"] == 32
+    # 34 - 1 冲突 = 33 条新增（S4 彩排修复 P0-1：sys_param 注册为可查询对象）；
+    # risk_customer（RiskCustomer）保留人工行
+    assert summary["object_types"]["inserted"] == 33
     conn = sqlite3.connect(ontology_path)
     kept = conn.execute(
         "SELECT id, status FROM object_types WHERE name = 'risk_customer'"

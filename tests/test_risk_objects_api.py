@@ -62,10 +62,12 @@ def test_unknown_type_returns_404(client: TestClient):
     assert body["error"]["code"] == "OBJECT_TYPE_NOT_FOUND"
 
 
-def test_all_33_objects_queryable_by_api_name(client: TestClient):
-    """铁律②机器验证：「全部 33 对象可查」的承诺按 api_name 风格成立。"""
+def test_all_34_objects_queryable_by_api_name(client: TestClient):
+    """铁律②机器验证：「全部 34 对象可查」的承诺按 api_name 风格成立。
+
+    （S4 彩排修复 P0-1：sys_param 注册为可查询对象，33 → 34。）"""
     names = _risk_api_names()
-    assert len(names) == 33
+    assert len(names) == 34
     for name in names:
         res = client.get(f"/risk-objects/{name}", params={"page_size": 1})
         assert res.status_code == 200, f"{name} -> {res.status_code} {res.text[:120]}"
