@@ -97,6 +97,20 @@ def test_evidence_denominator_has_source(client: TestClient) -> None:
     assert denom["source"] == "base.ap_sys_param.CAP_GROUP_CONSOLIDATED"
 
 
+def test_evidence_fail_closed_unknown_group(client: TestClient) -> None:
+    """不存在的集团 → 400 GROUP_NOT_FOUND（fail-closed，绝不回显 0% 玩具结果）。"""
+    res = client.get(
+        "/risk/evidence/group-reveal", params={"group_customer_name": "不存在集团"}
+    )
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "GROUP_NOT_FOUND"
+    res2 = client.get(
+        "/risk/evidence/related-upgrade", params={"group_customer_name": "不存在集团"}
+    )
+    assert res2.status_code == 400
+    assert res2.json()["error"]["code"] == "GROUP_NOT_FOUND"
+
+
 # ---------------------------------------------------------------------------
 # 第 1 幕：揭示（逐家单看都安全 → 归集 10.8% 橙）
 # ---------------------------------------------------------------------------

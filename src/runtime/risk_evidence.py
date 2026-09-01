@@ -132,6 +132,18 @@ class EvidenceService:
     def _ratio_display(ratio: float) -> str:
         return f"{ratio * 100:.1f}%"
 
+    @staticmethod
+    def _require_group(conn: sqlite3.Connection, group: str) -> None:
+        """fail-closed：集团须存在且有授信台账（防对不存在集团回显 0% 玩具结果）。"""
+        row = conn.execute(
+            "SELECT 1 FROM customer.ap_group_customer WHERE group_customer_name=? "
+            "UNION SELECT 1 FROM customer.ap_subsidiary_credit_detail "
+            "WHERE group_customer_name=? LIMIT 1",
+            (group, group),
+        ).fetchone()
+        if row is None:
+            raise EvidenceError(f"集团不存在或无授信台账: {group}")
+
     def _group_signals(
         self, conn: sqlite3.Connection, group_name: str
     ) -> list[dict[str, Any]]:
@@ -159,6 +171,7 @@ class EvidenceService:
         if not group:
             raise EvidenceError("group_customer_name 不能为空")
         with self._conn() as conn:
+            self._require_group(conn, group)
             cap = self._capital_params(conn)
             r1a = evaluate(conn, group, include_related=False)  # M2 引擎实算
             cfg = r1a.config
@@ -247,6 +260,7 @@ class EvidenceService:
         if not group:
             raise EvidenceError("group_customer_name 不能为空")
         with self._conn() as conn:
+            self._require_group(conn, group)
             r2 = evaluate(conn, group, include_related=True)  # R1a+R2 实算
             cfg = r2.config
             group_cap = cfg.group_capital_yi
