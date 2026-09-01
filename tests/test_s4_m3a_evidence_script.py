@@ -209,10 +209,55 @@ def test_act4_approval_chain_article23(client: TestClient) -> None:
     assert row["approve_orders"][0]["order"]["approve_order_status"] == "PROCESS"
 
 
+PROP_APPROVE_ORDER_ID = "APP-2026-90000002"  # 天晟红警下挂审批单（根因三道具）
+
+
+def test_act4_prop_chain_under_tiansheng_red(client: TestClient) -> None:
+    """天晟红警 WS-2026-90000002 下挂 PROCESS 审批单（根因三道具修复）：
+    AI 拆分提议待审批，approval-chain 可一键调档，固定附 2023 办法第二十三条驳回依据。"""
+    data = client.get(
+        "/risk/evidence/approval-chain", params={"warning_id": "WS-2026-90000002"}
+    ).json()["data"]
+    row = data["detail_rows"][0]
+    assert row["signal"]["signal_id"] == "SGN-2026-90000002"
+    orders = {o["order"]["approve_order_id"]: o for o in row["approve_orders"]}
+    assert PROP_APPROVE_ORDER_ID in orders, "天晟红警必须下挂审批单（不再「暂无待审批单」）"
+    o = orders[PROP_APPROVE_ORDER_ID]["order"]
+    assert o["approve_order_status"] == "PROCESS"
+    assert "拆分" in (o["remark"] or "")
+    assert "SGN-2026-90000002" in (o["remark"] or "")
+    hit = data["rules_hits"][0]
+    assert hit["rule"] == "2023 关联交易办法第二十三条"
+    assert "拆分交易" in hit["text"]
+
+
 def _pick_process_order(store: RiskStore) -> dict:
-    """从 ap_anping（或其副本）挑一个与处置关联的 PROCESS 审批单。"""
+    """从 ap_anping（或其副本）挑一个与处置关联的 PROCESS 审批单：优先天晟红警道具链。"""
     conn = store.source_conn()
     try:
+        # 根因三：优先第 4 幕道具链（天晟红警 WS-2026-90000002）
+        prop = conn.execute(
+            "SELECT approve_order_id, remark FROM approval.ap_approve_order "
+            "WHERE approve_order_id=?",
+            (PROP_APPROVE_ORDER_ID,),
+        ).fetchone()
+        if prop and re.search(r"SGN-\d{4}-\d{8}", prop["remark"] or ""):
+            m = re.search(r"SGN-\d{4}-\d{8}", prop["remark"])
+            w = conn.execute(
+                "SELECT warning_id FROM ap_warning_signal WHERE signal_id=?",
+                (m.group(0),),
+            ).fetchone()
+            d = conn.execute(
+                "SELECT disposal_id FROM ap_warning_disposal WHERE warning_id=?",
+                (w["warning_id"],),
+            ).fetchone()
+            if w and d:
+                return {
+                    "order": prop["approve_order_id"],
+                    "signal": m.group(0),
+                    "warning": w["warning_id"],
+                    "disposal": d["disposal_id"],
+                }
         for o in conn.execute(
             "SELECT approve_order_id, remark FROM approval.ap_approve_order "
             "WHERE approve_order_status='PROCESS' LIMIT 300"

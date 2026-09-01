@@ -14,7 +14,9 @@
   （customer/project/base/risk 六库）；
 - P0-串号（M4 第三轮终审根因一）：同名集团加编号后缀（如 翔宇电子华北集团（07）），保证
   group_customer_name 全局唯一，并级联到所有携带 group_customer_name / belong_group 的表；
-- P0-文案（根因二）：「数据异常异常」拼接 bug；ap_sys_param 内部记号 → in-universe 文案。
+- P0-文案（根因二）：「数据异常异常」拼接 bug；ap_sys_param 内部记号 → in-universe 文案；
+- P0-道具（根因三）：天晟红警 WS-2026-90000002 下挂 PROCESS 审批单（AI 拆分提议 → 审批人
+  第二十三条驳回 + 审计落库），落 ap_approve_order / ap_approve_task / ap_approve_warn_rel。
 
 用法（工作目录 = OntoRun 根目录）：
     /opt/anaconda3/bin/python3 scripts/patch_risk_live_data.py
@@ -451,6 +453,69 @@ def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
         print(f"  [P0-文案] ap_sys_param.update_user SYSTEM → 系统初始化（{cur.rowcount} 行）")
 
 
+def patch_approval_prop(conn: sqlite3.Connection) -> None:
+    """P0-道具（根因三）：天晟红警 WS-2026-90000002 下挂 PROCESS 审批单 + 任务 + 预警关联。
+
+    幂等：已存在（remark 含 SGN-2026-90000002）即跳过。演示第 4 幕「人拦 AI」——
+    审批人按 2023 关联交易办法第二十三条 REJECTED（opinion 写驳回依据），审计随动作落库；
+    与生成器 risk_script_props.PROP_APPROVE_* 同源（未来再生成即得正确数据）。
+    """
+    from src.des.generators.risk_script_props import (
+        PROP_APPROVE_ORDER,
+        PROP_APPROVE_TASK,
+        PROP_APPROVE_WARN_REL,
+    )
+
+    oid, title, apply_user, apply_time, status, btype, remark, _opinion = (
+        PROP_APPROVE_ORDER[0]
+    )
+    exists = conn.execute(
+        "SELECT 1 FROM approval.ap_approve_order WHERE approve_order_id=?",
+        (oid,),
+    ).fetchone()
+    if exists:
+        # 幂等对账：任务状态校准为 PENDING（待审批；approve_disposal 只标记 PENDING 任务）
+        for tid, _oid, tstatus, _res, _remark in PROP_APPROVE_TASK:
+            conn.execute(
+                "UPDATE approval.ap_approve_task SET approve_task_status=? "
+                "WHERE approve_task_id=?",
+                (tstatus, tid),
+            )
+        print("  [P0-道具] 天晟审批单已存在，任务状态对账完成")
+        return
+    node = conn.execute(
+        "SELECT approve_node_id, post_id FROM approval.ap_approve_node "
+        "ORDER BY approve_node_id LIMIT 1"
+    ).fetchone()
+    node_id = node["approve_node_id"] if node else "NODE-2026-000001"
+    post_id = node["post_id"] if node else "POST-RISK-MGMT"
+    conn.execute(
+        "INSERT INTO approval.ap_approve_order ("
+        "approve_order_id, approve_order_type, approve_order_title, apply_user_id, "
+        "approved_user_id, apply_time, approve_time, approve_order_status, business_type, "
+        "remark, is_deleted, create_time, update_time, derive_warn_level_red, "
+        "derive_warn_level_yellow, derive_warn_level_blue, opinion_description) "
+        "VALUES (?, 'WARN_SGN', ?, ?, '', ?, NULL, 'PROCESS', ?, ?, 0, ?, ?, 1, 0, 0, NULL)",
+        (oid, title, apply_user, apply_time, btype, remark, apply_time, apply_time),
+    )
+    for tid, _oid, tstatus, tresult, tremark in PROP_APPROVE_TASK:
+        conn.execute(
+            "INSERT INTO approval.ap_approve_task ("
+            "approve_task_id, approve_order_id, approve_node_id, post_id, "
+            "approve_task_status, approve_result, approve_remark, approve_time, "
+            "is_deleted, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)",
+            (tid, oid, node_id, post_id, tstatus, tresult, tremark, apply_time, apply_time),
+        )
+    for rid, _oid, wid in PROP_APPROVE_WARN_REL:
+        conn.execute(
+            "INSERT INTO approval.ap_approve_warn_rel ("
+            "approve_warn_rel_id, approve_order_id, warning_id, is_deleted, "
+            "create_time, update_time) VALUES (?, ?, ?, 0, ?, ?)",
+            (rid, oid, wid, apply_time, apply_time),
+        )
+    print(f"  [P0-道具] 天晟审批链道具落库（{oid} / {PROP_APPROVE_TASK[0][0]} / {PROP_APPROVE_WARN_REL[0][0]}）")
+
+
 def main() -> int:
     print("===== S4 修复轮 · 活系统数据补丁 =====")
     conn = _main_conn()
@@ -474,6 +539,9 @@ def main() -> int:
         patch_group_name_uniqueness(conn)
         patch_data_anomaly_concat(conn)
         patch_sys_param_in_universe(conn)
+        conn.commit()
+        print("[7/7] P0-道具（第 4 幕天晟审批链）")
+        patch_approval_prop(conn)
         conn.commit()
     finally:
         conn.close()

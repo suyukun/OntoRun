@@ -212,6 +212,25 @@ PROP_DISPOSALS = (
     ("WD-2026-900003", "WS-2026-90000003", "已处置", "已完成处置并解除（close_warning+解除报告），风险敞口已压降"),
 )
 
+# 剧本审批道具（§七 第 4 幕：天晟红警 WS-2026-90000002 下挂 PROCESS 审批单——
+# AI 拆分授信提议 → 审批人按 2023 关联交易办法第二十三条 REJECTED + 审计落库）
+#   (approve_order_id, title, apply_user_id, apply_time, status, business_type, remark, opinion)
+PROP_APPROVE_ORDER = (
+    ("APP-2026-90000002", "天晟集团处置方案审批（拆分授信提议）", "U90002",
+     "2026-12-10", "PROCESS", "SGN_CONCENTRAT",
+     "对预警信号 SGN-2026-90000002 申请处置审批：AI 提议将天晟部分授信拆分至非关联第三方通道主体，降低名义归集集中度",
+     None),
+)
+#   (approve_task_id, approve_order_id, approve_task_status, approve_result, approve_remark)
+# 待审批任务用 PENDING（与 RNG approve_flow 末节点一致；approve_disposal 只标记 PENDING 任务）
+PROP_APPROVE_TASK = (
+    ("AT-2026-90000002", "APP-2026-90000002", "PENDING", None, None),
+)
+#   (approve_warn_rel_id, approve_order_id, warning_id)
+PROP_APPROVE_WARN_REL = (
+    ("AWR-2026-90000002", "APP-2026-90000002", "WS-2026-90000002"),
+)
+
 # 各表道具行数（RNG 生成器行数 = 配置 row_count - 本表 prop 数；全量时注入）
 SCRIPT_PROP_COUNTS: dict[str, int] = {
     "customer.ap_group_customer": len(PROP_GROUPS),
@@ -222,6 +241,9 @@ SCRIPT_PROP_COUNTS: dict[str, int] = {
     "risk.ap_warning_signal": len(PROP_SIGNALS),
     "risk.ap_warning_disposal": len(PROP_DISPOSALS),
     "concentration.ap_concentration_limit": len(PROP_CONCENTRATION),
+    "approval.ap_approve_order": len(PROP_APPROVE_ORDER),
+    "approval.ap_approve_task": len(PROP_APPROVE_TASK),
+    "approval.ap_approve_warn_rel": len(PROP_APPROVE_WARN_REL),
     "base.ap_sys_param": len(CAPITAL_PARAMS),
 }
 
@@ -629,6 +651,80 @@ def _disposal_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _approve_order_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for _seq, (
+        oid, title, apply_user, apply_time, status, btype, remark, opinion,
+    ) in enumerate(PROP_APPROVE_ORDER, start=1):
+        rows.append(
+            {
+                "approve_order_id": oid,
+                "approve_order_type": "WARN_SGN",
+                "approve_order_title": title,
+                "apply_user_id": apply_user,
+                "approved_user_id": "" if status == "PROCESS" else "U90003",
+                "apply_time": apply_time,
+                "approve_time": None if status == "PROCESS" else apply_time,
+                "approve_order_status": status,
+                "business_type": btype,
+                "remark": remark,
+                "is_deleted": 0,
+                "create_time": apply_time,
+                "update_time": apply_time,
+                "derive_warn_level_red": 1,
+                "derive_warn_level_yellow": 0,
+                "derive_warn_level_blue": 0,
+                "opinion_description": opinion,
+            }
+        )
+    return rows
+
+
+def _approve_task_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes = ctx.get("approval.ap_approve_node") or []
+    node = (
+        {"approve_node_id": "NODE-2026-000001", "post_id": "POST-RISK-MGMT"}
+        if not nodes
+        else nodes[0]
+    )
+    rows = []
+    for _seq, (tid, oid, status, result, remark) in enumerate(
+        PROP_APPROVE_TASK, start=1
+    ):
+        rows.append(
+            {
+                "approve_task_id": tid,
+                "approve_order_id": oid,
+                "approve_node_id": node["approve_node_id"],
+                "post_id": node["post_id"],
+                "approve_task_status": status,
+                "approve_result": result,
+                "approve_remark": remark,
+                "approve_time": None,
+                "is_deleted": 0,
+                "create_time": "2026-12-10",
+                "update_time": "2026-12-10",
+            }
+        )
+    return rows
+
+
+def _approve_warn_rel_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for _seq, (rid, oid, wid) in enumerate(PROP_APPROVE_WARN_REL, start=1):
+        rows.append(
+            {
+                "approve_warn_rel_id": rid,
+                "approve_order_id": oid,
+                "warning_id": wid,
+                "is_deleted": 0,
+                "create_time": "2026-12-10",
+                "update_time": "2026-12-10",
+            }
+        )
+    return rows
+
+
 def _sys_param_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     year = ctx["year"]
     rows = []
@@ -671,6 +767,9 @@ _PROP_BUILDERS: dict[str, Any] = {
     "risk.ap_warning_signal": _signal_rows,
     "risk.ap_warning_disposal": _disposal_rows,
     "concentration.ap_concentration_limit": _concentration_rows,
+    "approval.ap_approve_order": _approve_order_rows,
+    "approval.ap_approve_task": _approve_task_rows,
+    "approval.ap_approve_warn_rel": _approve_warn_rel_rows,
     "base.ap_sys_param": _sys_param_rows,
 }
 
