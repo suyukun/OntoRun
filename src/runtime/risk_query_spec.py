@@ -173,6 +173,30 @@ RISK_QUERY_FIELDS: dict[str, dict[str, str]] = {
         "create_time": "create_time",
         "org_name_1": "org_name_1",
     },
+    "customer_relation_tree": {
+        "customer_relation_tree_id": "customer_relation_tree_id",
+        "customer_name": "customer_name",
+        "group_customer_name": "group_customer_name",
+        "data_source": "data_source",
+        "clear_remark_1": "clear_remark_1",
+        "clear_remark_2": "clear_remark_2",
+        "clear_remark_3": "clear_remark_3",
+    },
+    "sys_param": {
+        "sys_param_id": "sys_param_id",
+        "param_id": "param_id",
+        "param_type_code": "param_type_code",
+        "param_value": "param_value",
+        "param_description": "param_description",
+        "version": "version",
+        "update_time": "update_time",
+        "update_user": "update_user",
+        "param_source": "param_source",
+        "param_approver": "param_approver",
+        "numerator_desc": "numerator_desc",
+        "denominator_desc": "denominator_desc",
+        "netting_rule": "netting_rule",
+    },
 }
 
 # 派生字段（scalar 子查询，{t} = 主表别名；仅白名单内可算派生可查/可返回）
@@ -216,9 +240,16 @@ class GroupConcentrationParams(BaseModel):
     )
 
 
+class RelatedPartyOfParams(BaseModel):
+    customer_name: str = Field(
+        min_length=1, max_length=100, description="被查询的客户名称（查它是谁的关联方）"
+    )
+
+
 ANALYTIC_PARAMS: dict[str, type[BaseModel]] = {
     "warning_approval_step": ApprovalStepParams,
     "group_concentration_limits": GroupConcentrationParams,
+    "related_party_of": RelatedPartyOfParams,
 }
 
 # 受限多跳查询 SQL 模板（{params} 由执行器按 param_names 顺序绑定；值一律 ? 参数化）。
@@ -260,6 +291,20 @@ ANALYTIC_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
             "WHERE c.group_customer_name = ? ORDER BY cl.concentration_limit DESC LIMIT ?"
         ),
         ("group_customer_name", "limit"),
+    ),
+    # P0-2：关联方向一等可查语义——「X 是谁的关联方」= 查客户关系树中
+    # customer_name=X 的归属集团（group_customer_name），带三线索明细。
+    # 例：恒昌贸易有限公司 → 天晟集团有限公司（恒昌是 天晟的隐性一致行动人，纳入天晟归集）。
+    "related_party_of": (
+        (
+            "SELECT r.customer_name, r.group_customer_name, r.data_source, "
+            "r.clear_remark_1, r.clear_remark_2, r.clear_remark_3 "
+            "FROM customer.ap_customer_relation_tree r "
+            "WHERE r.customer_name = ? "
+            "AND (r.clear_remark_1 IS NOT NULL OR r.clear_remark_2 IS NOT NULL "
+            "     OR r.clear_remark_3 IS NOT NULL) LIMIT ?"
+        ),
+        ("customer_name", "limit"),
     ),
 }
 

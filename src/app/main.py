@@ -87,6 +87,40 @@ def _extract_evidence(turn: Any) -> list[dict] | None:
     return out or None
 
 
+# P1-1 追问信号：来源/真伪/分母/依据等，直接回证据链载荷明细，不反问主体
+_FOLLOWUP_KEYWORDS: tuple[str, ...] = (
+    "哪来",
+    "来源",
+    "真吗",
+    "真假",
+    "属实",
+    "可信",
+    "分母",
+    "怎么算",
+    "怎么得",
+    "依据",
+    "凭什么",
+    "明细",
+    "展开",
+    "详细讲讲",
+    "为什么",
+)
+
+
+def _is_followup_question(message: str) -> bool:
+    """判定是否为对上一轮答案的来源/真伪/分母追问（P1-1）。"""
+    return any(k in message for k in _FOLLOWUP_KEYWORDS)
+
+
+def _with_evidence_context(message: str, evidence: dict) -> str:
+    """把会话最近一次证据链载荷注入追问，LLM 直接引用明细作答（不反问主体）。"""
+    return (
+        "[会话最近一次证据链载荷（用户追问来源/真伪/分母时直接引用，勿反问是哪个主体）]\n"
+        + json.dumps(evidence, ensure_ascii=False)
+        + f"\n\n用户追问：{message}"
+    )
+
+
 # ======================================================================
 # ActionExecutor 实现（走 REST 端点，与 UI 同一写入口 §5.5）
 # ======================================================================
@@ -606,11 +640,20 @@ def register_risk_agent_routes(app: FastAPI) -> None:
         else:
             agent = state.agent
 
-        turn = await asyncio.to_thread(agent.run_turn, body.message)
+        # P1-1 会话上下文：追问来源/真伪/分母时，注入最近一次证据链载荷（不反问主体）
+        message = body.message
+        if _is_followup_question(message) and state.last_evidence:
+            message = _with_evidence_context(message, state.last_evidence)
+
+        turn = await asyncio.to_thread(agent.run_turn, message)
         if turn.need_confirm:
             risk_sessions.set_pending(session_id, turn.need_confirm)
         else:
             risk_sessions.set_pending(session_id, None)
+        # P1-1：缓存最近一次证据链载荷（供下一轮追问直接引用）
+        ev = _extract_evidence(turn)
+        if ev:
+            state.last_evidence = ev[-1]
         risk_sessions.persist(session_id, agent)
 
         need_confirm_dict = None

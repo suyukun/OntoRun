@@ -531,7 +531,7 @@ class RiskQuery:
         note = (
             "approve_node_name = 当前审批岗位，approve_node_seq = 节点序号（1 首审）"
             if name == "warning_approval_step"
-            else "concentration_limit=集中度限额，warning_value=预警阈值，current_status=RED_ALERT/NORMAL"
+            else "concentration_limit=集中度限额，warning_value=预警阈值，current_status=红/橙/黄/正常"
         )
         return {"analytic": name, "rows": rows, "note": note}
 

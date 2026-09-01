@@ -27,7 +27,7 @@ import sqlite3
 from typing import Any
 
 from src.runtime.risk_db import RiskStore
-from src.runtime.risk_rules import evaluate
+from src.runtime.risk_rules import evaluate, level_for_ratio
 
 # ---------------------------------------------------------------------------
 # 常量与条款引用（口径包§一/§三/§七；参数 id 与 risk_reporting / risk_script_props 同源）
@@ -37,6 +37,9 @@ PARAM_BANK_NET = "CAP_BANK_NET"  # 安平银行资本净额（亿）= 600
 PARAM_BANK_INTERNAL_LIMIT = "CAP_BANK_INTERNAL_LIMIT"  # 行内内部限额（亿）= 60
 PARAM_SECURITIES_DENOM = "CAP_SECURITIES_DENOM"  # 证券参考线分母（亿）= 400
 PARAM_AM_DENOM = "CAP_AM_DENOM"  # 资管参考线分母（亿）= 200
+PARAM_CONCERN_LINE = "CAP_CONCERN_LINE"  # R1a 关注线（9%，黄）
+PARAM_WARN_LINE = "CAP_WARN_LINE"  # R1a 预警线（10%，橙）
+PARAM_INTERNAL_LIMIT_RATIO = "CAP_INTERNAL_LIMIT_RATIO"  # R1a 内部限额（12%，红须 >）
 
 # 各附属机构参考线分母（口径包§一「单看都安全」分母；其余机构不套用参考线）
 _ORG_REFERENCE_DENOM: dict[str, str] = {
@@ -81,6 +84,62 @@ ANALYTIC_TABLES: dict[str, list[str]] = {
         "concentration.ap_concentration_limit",
         "customer.ap_customer",
     ],
+    "related_party_of": [
+        "customer.ap_customer_relation_tree",
+        "customer.ap_subsidiary_credit_detail",
+    ],
+}
+
+# R1a 阈值/资本参数元数据（P0-1：可答「谁定的、怎么改」；与 risk_script_props.CAPITAL_PARAMS 同源）
+PARAM_META: dict[str, dict[str, str]] = {
+    PARAM_GROUP_CONSOLIDATED: {
+        "param_type_code": "CAPITAL",
+        "param_value": "800",
+        "param_description": "集团并表资本（亿元，集团层归集集中度分母，口径包§一）",
+        "param_source": "口径包§一 资本常量（安平金控演示设定，并表口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元，集团层分母）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（演示明细注明）",
+        "version": "v1.0",
+        "update_time": "2026-11-30",
+    },
+    PARAM_CONCERN_LINE: {
+        "param_type_code": "R1A_LINE",
+        "param_value": "0.09",
+        "param_description": "集团层关注线（9%，黄，口径包§三）",
+        "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+        "version": "v1.0",
+        "update_time": "2026-11-30",
+    },
+    PARAM_WARN_LINE: {
+        "param_type_code": "R1A_LINE",
+        "param_value": "0.10",
+        "param_description": "集团层预警线（10%，橙，口径包§三）",
+        "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+        "version": "v1.0",
+        "update_time": "2026-11-30",
+    },
+    PARAM_INTERNAL_LIMIT_RATIO: {
+        "param_type_code": "R1A_LINE",
+        "param_value": "0.12",
+        "param_description": "集团层内部限额（12%，红，口径包§三）",
+        "param_source": "《金融控股公司监督管理试行办法》第三十二/三十三条（安平内部自设口径）",
+        "param_approver": "安平金控风险管理部（口径包 v0.3 拍板 2026-08-27）",
+        "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
+        "denominator_desc": "集团并表资本（800 亿元）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+        "version": "v1.0",
+        "update_time": "2026-11-30",
+    },
 }
 
 _WAN_TO_YI = 10000.0  # business_balance 单位 = 万元 → 亿元
@@ -133,6 +192,37 @@ class EvidenceService:
         return f"{ratio * 100:.1f}%"
 
     @staticmethod
+    def _r1a_comparison_text(ratio: float, cfg: Any) -> str:
+        """由 computed ratio 与 R1a 三线阈值生成真实比较短语（结论与定级严格一致）。
+
+        P0-2 修复：结论模板不再写死「> 12% / ≥ 10%」——比较符与阈值按
+        computed.ratio 实际判断生成（如 2.0% → 「< 关注线 9%」，杜绝
+        「2.0% > 12% → 无」类数学错误）。
+        """
+        display = f"{ratio * 100:.1f}%"
+        if ratio > cfg.internal_limit:
+            return f"{display} > 内部限额 {cfg.internal_limit * 100:.0f}%"
+        if ratio >= cfg.warn_line:
+            return f"{display} ≥ 预警线 {cfg.warn_line * 100:.0f}%"
+        if ratio >= cfg.concern_line:
+            return f"{display} ≥ 关注线 {cfg.concern_line * 100:.0f}%"
+        return f"{display} < 关注线 {cfg.concern_line * 100:.0f}%"
+
+    @staticmethod
+    def _assert_level_consistent(ratio: float, cfg: Any, level: str, ctx: str) -> None:
+        """结论自检：computed ratio 的 R1a 定级须与结论声明的 level 一致，不一致即抛错。
+
+        防模板写死回归（比较符/结论与 computed 不一致）——结论模板必须由
+        computed.ratio 实际计算生成，任何声称的定级与实算不符都直接失败。
+        """
+        implied = level_for_ratio(ratio, cfg)
+        if implied != level:
+            raise AssertionError(
+                f"{ctx} 结论自检失败：computed ratio {ratio * 100:.1f}% 的 R1a 定级为 "
+                f"「{implied}」，与结论声明的「{level}」不一致（结论模板须由实算生成）"
+            )
+
+    @staticmethod
     def _require_group(conn: sqlite3.Connection, group: str) -> None:
         """fail-closed：集团须存在且有授信台账（防对不存在集团回显 0% 玩具结果）。"""
         row = conn.execute(
@@ -143,6 +233,75 @@ class EvidenceService:
         ).fetchone()
         if row is None:
             raise EvidenceError(f"集团不存在或无授信台账: {group}")
+
+    # ---- P0-1：R1a 阈值可查询（谁定的/怎么改；sys_param 可查询对象 + 元数据列）----
+
+    def thresholds(self) -> dict[str, Any]:
+        """R1a 三线 + 集团并表资本阈值载荷（真库参数行 + 元数据列）。
+
+        P0-1 修复：阈值不再是查不到的黑盒——返回每条参数的
+        {param_id/值/出处条款/版本/审批人/更新时间/分子构成/分母/净额规则}，
+        供「预警线谁定的、怎么改」直接原文回显（口径包§三 金控办法第三十二/三十三条自设口径）。
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT sys_param_id, param_id, param_value, param_description, "
+                "param_type_code, version, update_time, update_user, "
+                "param_source, param_approver, numerator_desc, denominator_desc, netting_rule "
+                "FROM base.ap_sys_param "
+                "WHERE param_id IN (?,?,?,?)",
+                (
+                    PARAM_CONCERN_LINE,
+                    PARAM_WARN_LINE,
+                    PARAM_INTERNAL_LIMIT_RATIO,
+                    PARAM_GROUP_CONSOLIDATED,
+                ),
+            ).fetchall()
+            params = []
+            for r in rows:
+                pid = r["param_id"]
+                meta = PARAM_META.get(pid, {})
+                params.append(
+                    {
+                        "param_id": pid,
+                        "param_value": r["param_value"],
+                        "param_description": r["param_description"],
+                        "param_type_code": r["param_type_code"] or meta.get("param_type_code"),
+                        "param_source": r["param_source"] or meta.get("param_source"),
+                        "param_approver": r["param_approver"] or meta.get("param_approver"),
+                        "numerator_desc": r["numerator_desc"] or meta.get("numerator_desc"),
+                        "denominator_desc": r["denominator_desc"] or meta.get("denominator_desc"),
+                        "netting_rule": r["netting_rule"] or meta.get("netting_rule"),
+                        "version": r["version"] or meta.get("version"),
+                        "update_time": r["update_time"] or meta.get("update_time"),
+                        "update_user": r["update_user"] or "SYSTEM",
+                    }
+                )
+        by_id = {p["param_id"]: p for p in params}
+        return {
+            "intent": "thresholds_r1a",
+            "conclusion": (
+                "R1a 集团层归集集中度三线（安平内部口径，金控办法第三十二/三十三条自设）："
+                "关注线 9%（黄）/ 预警线 10%（橙）/ 内部限额 12%（红，须 >12%）；"
+                "分母 = 集团并表资本 800 亿元。"
+            ),
+            "basis_tables": ["base.ap_sys_param"],
+            "rules_hits": [
+                {
+                    "rule": "R1a",
+                    "name": "集团层归集集中度",
+                    "clause": R1A_CLAUSE,
+                    "lines": R1A_LINES,
+                    "note": "三线阈值全部可配置（base.ap_sys_param），禁硬编码；改参数即改规则",
+                }
+            ],
+            "denominator": {
+                "name": "集团并表资本",
+                "value_yi": float(by_id[PARAM_GROUP_CONSOLIDATED]["param_value"]),
+                "source": f"base.ap_sys_param.{PARAM_GROUP_CONSOLIDATED}",
+            },
+            "detail_rows": params,
+        }
 
     def _group_signals(
         self, conn: sqlite3.Connection, group_name: str
@@ -201,12 +360,15 @@ class EvidenceService:
                 detail.append(item)
             signals = self._group_signals(conn, group)
         group_cap = cfg.group_capital_yi
+        # P0-2 结论自检：比较短语由 computed ratio 实算生成，且与定级严格一致（不一致即抛错）
+        compare = self._r1a_comparison_text(r1a.ratio, cfg)
+        self._assert_level_consistent(r1a.ratio, cfg, r1a.level, "第 1 幕 group_reveal")
         warn = next((s for s in signals if s["warn_level"] == "橙"), None)
         conclusion = (
             f"{group} 逐家附属机构单看均安全（银行 {detail[0]['ratio_display'] if detail else '-'}"
             f"，低于行内限额 {cap[PARAM_BANK_INTERNAL_LIMIT]:.0f} 亿），但归集实算 "
             f"{r1a.total_yi:.1f} 亿元 ÷ 集团并表资本 {group_cap:.0f} 亿元 = "
-            f"{self._ratio_display(r1a.ratio)} ≥ 预警线 10% → R1a 定级「{r1a.level}」"
+            f"{compare} → R1a 定级「{r1a.level}」"
             + ("，橙色预警信号已生成" if warn else "")
         )
         return {
@@ -304,6 +466,9 @@ class EvidenceService:
             signals = self._group_signals(conn, group)
         base = round(r2.base_aggregation_yi, 2)
         rel = round(r2.related_balance_yi, 2)
+        # P0-2 结论自检：R2 纳入后比较短语由 computed ratio 实算生成（杜绝「>12% 却定级非红」）
+        compare = self._r1a_comparison_text(r2.ratio, cfg)
+        self._assert_level_consistent(r2.ratio, cfg, r2.level, "第 2 幕 related_upgrade")
         red = next((s for s in signals if s["warn_level"] == "红"), None)
         party_txt = "、".join(
             f"{d['customer_name']}（{d['balance_yi']:.1f} 亿，{('、'.join(d['clue_names']))}）"
@@ -313,7 +478,7 @@ class EvidenceService:
             f"经客户关系树三线索交叉识别隐性一致行动人：{party_txt or '无'}。"
             f"纳入归集重算：{group} 自身 {base:.1f} 亿 + 关联方 {rel:.1f} 亿 = "
             f"{r2.total_yi:.1f} 亿元 ÷ 集团并表资本 {group_cap:.0f} 亿元 = "
-            f"{self._ratio_display(r2.ratio)} > 内部限额 12% → R1a+R2 定级「{r2.level}」"
+            f"{compare} → R1a+R2 定级「{r2.level}」"
             + ("，红色预警信号已生成" if red else "")
         )
         return {

@@ -97,6 +97,7 @@ SOURCE_TABLE_MAP: dict[str, str] = {
     "CoDebtCustomer": "concentration.ap_codebt_customer",
     "Organization": "base.ap_org",
     "User": "base.ap_user",
+    "SysParam": "base.ap_sys_param",  # P0-1：阈值可查询对象（R1a 三线/资本常量，含元数据列）
     # 全量扩展对象（33 对象全量，真实表名 = 脱敏名 ap_*）
     "CustomerRelation": "customer.ap_customer_relation",
     "CustomerRelationTree": "customer.ap_customer_relation_tree",

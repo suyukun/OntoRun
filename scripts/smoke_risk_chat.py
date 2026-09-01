@@ -119,19 +119,19 @@ def test_read_engine(rq: RiskQuery, store: RiskStore) -> None:
     check(n == n_gt, f"R05 红色预警 {n} 条（GT={n_gt}）")
 
     # ---- R11 集中度超限客户数 ----
-    print("\n[R11] 哪些客户集中度超过集团资本净额 15%（= current_status RED_ALERT）")
+    print("\n[R11] 哪些客户集中度超过集团资本净额 15%（= current_status 红）")
     res = _run(rq, {
         "object_type": "concentration_limit",
-        "filters": [{"field": "current_status", "op": "eq", "value": "RED_ALERT"}],
+        "filters": [{"field": "current_status", "op": "eq", "value": "红"}],
         "aggregations": [{"function": "count", "field": "*"}],
     })
     n = res["aggregations"][0]["value"] if not _is_declined(res) else None
     n_gt = _q1(store, "SELECT COUNT(*) n FROM concentration.ap_concentration_limit "
-                      "WHERE current_status='RED_ALERT'")["n"]
+                      "WHERE current_status='红'")["n"]
     check(n == n_gt, f"R11 集中度超限客户 {n} 家（GT={n_gt}）；另取 Top5 名单抽查")
     res_top = _run(rq, {
         "object_type": "concentration_limit",
-        "filters": [{"field": "current_status", "op": "eq", "value": "RED_ALERT"}],
+        "filters": [{"field": "current_status", "op": "eq", "value": "红"}],
         "order_by": [{"field": "concentration_limit", "direction": "desc"}],
         "limit": 5,
     })

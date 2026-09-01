@@ -57,6 +57,11 @@ def register_risk_evidence_routes(app: FastAPI) -> None:
         except EvidenceError as exc:
             return _envelope_error("GROUP_NOT_FOUND", str(exc))
 
+    @app.get("/risk/thresholds")
+    def risk_thresholds():
+        """R1a 三线阈值可查询（P0-1）：谁定的/怎么改（出处条款/版本/审批人/更新时间/分子构成/分母/净额规则）。"""
+        return _envelope(service.thresholds())
+
     @app.get("/risk/evidence/approval-chain")
     def risk_evidence_approval_chain(request: Request):
         try:

@@ -35,12 +35,13 @@ _MESSAGES = ("user", "assistant", "tool")
 
 @dataclass
 class SessionState:
-    """单个会话的状态：Agent 实例 + 待确认的高风险提议 + owner。"""
+    """单个会话的状态：Agent 实例 + 待确认的高风险提议 + owner + 最近证据链载荷（P1-1）。"""
 
     agent: Any
     pending_confirm: ToolCall | None = None
     owner: str = ""
     created_at: str = field(default_factory=lambda: str(uuid.uuid4().node))
+    last_evidence: dict[str, Any] | None = None  # P1-1：最近一次证据链载荷（追问来源/真伪/分母直答）
 
 
 class SessionManager:
