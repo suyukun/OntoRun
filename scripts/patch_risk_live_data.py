@@ -466,7 +466,7 @@ def patch_approval_prop(conn: sqlite3.Connection) -> None:
         PROP_APPROVE_WARN_REL,
     )
 
-    oid, title, apply_user, apply_time, status, btype, remark, _opinion = (
+    oid, title, apply_user, apply_time, _status, btype, remark, _opinion = (
         PROP_APPROVE_ORDER[0]
     )
     exists = conn.execute(

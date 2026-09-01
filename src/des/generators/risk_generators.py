@@ -591,10 +591,9 @@ def _warn_inputs_for_level(
             rel = round(rng.uniform(0.20, 0.49), 4)
         else:
             score = rng.randint(60, 79)
-    elif level == "黄":
-        if driver == "concentration":
-            conc = round(rng.uniform(0.09, 0.099), 4)  # 关注线 9-10%
-        # 其余驱动保持低位（评分 20-59 / 轻微贬值）→ 关注级
+    elif level == "黄" and driver == "concentration":
+        conc = round(rng.uniform(0.09, 0.099), 4)  # 关注线 9-10%
+    # 其余驱动保持低位（评分 20-59 / 轻微贬值）→ 关注级
     return {
         "risk_score": score,
         "collateral_depreciation": coll,

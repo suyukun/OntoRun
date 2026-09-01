@@ -536,7 +536,7 @@ def _signal_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _relation_tree_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
-    hc = [c for c in PROP_CUSTOMERS if c[3] == "恒昌贸易有限公司"][0]
+    hc = next(c for c in PROP_CUSTOMERS if c[3] == "恒昌贸易有限公司")
     for seq, (tid, _rel, clue, source) in enumerate(PROP_CLUES, start=1):
         rows.append(
             {
@@ -575,7 +575,7 @@ def _relation_tree_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _relation_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
-    hc = [c for c in PROP_CUSTOMERS if c[3] == "恒昌贸易有限公司"][0]
+    hc = next(c for c in PROP_CUSTOMERS if c[3] == "恒昌贸易有限公司")
     for seq, (_tid, rel, clue, source) in enumerate(PROP_CLUES, start=1):
         rows.append(
             {
