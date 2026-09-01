@@ -494,6 +494,43 @@ def patch_concentration_reason_phrase(conn: sqlite3.Connection) -> None:
         print(f"  [F8] 浓度类事由残余「敞口超限」剥离（{total} 行）")
 
 
+def patch_push_columns_cleanup(conn: sqlite3.Connection) -> None:
+    """F14：推送列「集团集中度敞口超限 N%」硬写百分比剥离（监测语气对齐 F8）。
+
+    F8 只清了信号事由列（warn_reason / warn_reason_updated），推送列漏网：ap_warning_signal.
+    push_warn_reason（2092 行）+ ap_warning_push.push_warn_reason（860 行）+
+    ap_warn_derive_sub_push.warn_reason_updated（522 行）仍为「集团集中度敞口超限 N%，
+    触发X色预警」。该百分比与源库集中度实算（concentration_limit 归集）脱钩（同 F8 根因），
+    改监测语气「集团集中度指标异动」；保留「，触发X色预警」等非百分比部分。
+    生成器 _warn_reason 已同步（未来再生成即无「敞口超限」）；本函数只迁存量。
+    幂等：无匹配即零变更。
+    """
+    import re
+
+    pat = re.compile(r"^集团集中度敞口超限(?:\s*\d+%)?")
+    tables = (
+        ("ap_warning_signal", "push_warn_reason", "warning_id"),
+        ("ap_warning_push", "push_warn_reason", "warning_push_id"),
+        ("ap_warn_derive_sub_push", "warn_reason_updated", "derive_sub_push_id"),
+    )
+    total = 0
+    for table, col, pk_col in tables:
+        rows = conn.execute(
+            f"SELECT {pk_col} AS pk, {col} AS v FROM {table} "
+            f"WHERE {col} LIKE '集团集中度敞口超限%'"
+        ).fetchall()
+        for r in rows:
+            new = pat.sub("集团集中度指标异动", r["v"] or "")
+            if new != r["v"]:
+                conn.execute(
+                    f"UPDATE {table} SET {col}=? WHERE {pk_col}=?",
+                    (new, r["pk"]),
+                )
+                total += 1
+    if total:
+        print(f"  [F14] 推送列「敞口超限」残留剥离（{total} 行）")
+
+
 def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
     """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
 
@@ -888,6 +925,9 @@ def main() -> int:
         conn.commit()
         print("[6b2] F8 浓度类事由残余「敞口超限」全量剥离（漏网路径）")
         patch_concentration_reason_phrase(conn)
+        conn.commit()
+        print("[6b3] F14 推送列「敞口超限」硬写百分比剥离（监测语气对齐 F8）")
+        patch_push_columns_cleanup(conn)
         conn.commit()
         print("[6c] F3 瑞华敞口重分布（单家 < 行内限额）")
         patch_ruihua_redistribution(conn)
