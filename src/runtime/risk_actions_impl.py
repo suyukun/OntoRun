@@ -410,11 +410,16 @@ def _approve_tasks_effects(
 def _approve_disposal_sync(
     disposal: dict | None, warning: dict | None, decision: str, now: str
 ) -> tuple[list[Effect], list[Writeback]]:
-    """审批结论同步处置状态与信号处置状态（纯函数）。"""
+    """审批结论同步处置状态与信号处置状态（纯函数）。
+
+    S4 M3a（口径包 v0.3 §七 第 4 幕）：驳回（REJECTED）后处置退回重新起草——处置状态
+    回到 DRAFT（未处置）可再次 submit_disposal，信号处置状态置「暂缓处置」；审批驳回
+    依据 = 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易），opinion 入审计。
+    """
     effects: list[Effect] = []
     writebacks: list[Writeback] = []
     if disposal is not None:
-        new_status = "APPROVED" if decision == "APPROVED" else "REJECTED"
+        new_status = "APPROVED" if decision == "APPROVED" else "DRAFT"
         effects.append(
             Effect(
                 object_type="Disposal",
@@ -422,7 +427,8 @@ def _approve_disposal_sync(
                 prop="disposal_status",
                 old=_disposal_en(disposal["disposal_status"]),
                 new=new_status,
-                note="处置审批结果同步",
+                note="处置审批结果同步"
+                + ("（驳回退回重新起草）" if decision != "APPROVED" else ""),
             )
         )
         writebacks.append(
