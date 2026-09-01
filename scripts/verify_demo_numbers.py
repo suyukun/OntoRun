@@ -12,6 +12,9 @@
 - 分布（§五）：预警级别 黄55/橙34/红11、事件类型 信用45/市场20/流动性15/合规12/操作8、
   生命周期七态 30/20/20/15/10/3/2；规模：信号 ~2 万 / 客户 ~5 万；名称纯净化（无「·编号尾巴」）；
   理由模板与事件类型严格对齐（level2 ∈ LEVEL2_BY_L1[event_type]）。
+- 引擎路径核对（§七，S4 M2 新增）：src.runtime.risk_rules 规则引擎实算与库内道具一致——
+  天晟 R1a-only 10.8% 橙 / R1a+R2（+恒昌三线索 16 亿）12.8% 红 / 瑞华 9.4% 黄；三档边界
+  8.9 无警/9 黄/10 橙/12 橙（红须 >12%）/12.8 红；阈值从 base.ap_sys_param 读取（禁硬编码）。
 """
 
 from __future__ import annotations
@@ -24,7 +27,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 AP = ROOT / "data" / "des" / "enterprises" / "ap_anping"
 
-from src.des.generators.risk_generators import LEVEL2_BY_L1  # noqa: E402 理由/事件类型同源集
+from src.des.generators.risk_generators import (
+    LEVEL2_BY_L1,
+)
 
 # 口径包§一 期望常量（亿 / 参考线；与 risk_script_props.CAPITAL_PARAMS 同源）
 EXPECT_CAPITAL = {
@@ -227,6 +232,65 @@ def main() -> int:
         if r["signal_level2_topic"] not in LEVEL2_BY_L1[r["event_type"]]:
             l2_mismatch += 1
     check("理由/事件类型严格对齐（level2 同源）", l2_mismatch == 0, f"(错配 {l2_mismatch} 条)")
+
+    # ---- 7. 引擎路径核对（S4 M2：R1a/R2 规则引擎实算，源库只读）----
+    # 与 §1/§2 的「手工 SQL 实算」双轨互证：引擎定级须与库内道具完全一致（口径包§三/§七）。
+    print("\n[7] 引擎路径核对（R1a/R2 规则引擎实算）")
+    from src.runtime.risk_rules import (
+        evaluate,
+        evaluate_warning,
+        level_for_ratio,
+        open_rules_conn,
+    )
+
+    rconn = open_rules_conn()
+    try:
+        from src.runtime.risk_rules import R1aConfig
+
+        cfg = R1aConfig.load(rconn)
+        check("阈值配置来自 ap_sys_param（禁硬编码）",
+              (cfg.concern_line, cfg.warn_line, cfg.internal_limit, cfg.group_capital_yi) == (0.09, 0.10, 0.12, 800.0),
+              f"(库值 {cfg.concern_line}/{cfg.warn_line}/{cfg.internal_limit}/{cfg.group_capital_yi})")
+        # 三档边界：8.9 无警 / 9 黄 / 10 橙 / 12 橙（红须 >12%）/ 12.8 红
+        boundary = {round(r * 1000): level_for_ratio(r, cfg) for r in (0.089, 0.09, 0.10, 0.12, 0.128)}
+        check("三档边界 8.9无/9黄/10橙/12橙/12.8红",
+              boundary == {89: "无", 90: "黄", 100: "橙", 120: "橙", 128: "红"},
+              f"(实算 {boundary})")
+        # 天晟 R1a-only：86.4 亿 → 10.8% 橙（与 §2 手工实算同源互证）
+        ts_r1a = evaluate(rconn, ts_group, include_related=False)
+        check("引擎 天晟 R1a-only 86.4 亿 → 10.8% 橙",
+              near(ts_r1a.base_aggregation_yi, 86.4) and near(ts_r1a.ratio, 0.108) and ts_r1a.level == "橙",
+              f"(实算 {ts_r1a.total_yi:.1f} 亿 → {pct(ts_r1a.ratio)} {ts_r1a.level})")
+        # 天晟 R1a+R2：+恒昌 16 亿 → 102.4 亿 → 12.8% 红（R2 重算，10.8 橙 → 12.8 红）
+        ts_r2 = evaluate(rconn, ts_group, include_related=True)
+        hc = next((p for p in ts_r2.related_parties if "恒昌" in p.customer_name), None)
+        check("引擎 天晟 R1a+R2 关联恒昌 16 亿（三线索）",
+              hc is not None and near(hc.balance_yi, 16.0) and len(hc.clues) == 3,
+              f"(实算 恒昌 {hc.balance_yi if hc else None} 亿 / 线索 {hc.clues if hc else None})")
+        check("引擎 天晟 R1a+R2 102.4 亿 → 12.8% 红（R2 重算）",
+              near(ts_r2.total_yi, 102.4) and near(ts_r2.ratio, 0.128) and ts_r2.level == "红",
+              f"(实算 {ts_r2.total_yi:.1f} 亿 → {pct(ts_r2.ratio)} {ts_r2.level})")
+        # 瑞华：75.2 亿 → 9.4% 黄（完整闭环案例）
+        rw_eval = evaluate(rconn, "瑞华能源集团有限公司", include_related=True)
+        check("引擎 瑞华 75.2 亿 → 9.4% 黄",
+              near(rw_eval.total_yi, 75.2) and near(rw_eval.ratio, 0.094) and rw_eval.level == "黄",
+              f"(实算 {rw_eval.total_yi:.1f} 亿 → {pct(rw_eval.ratio)} {rw_eval.level})")
+        # 引擎管辖级别与库内道具信号级别一致（橙=R1a 自身口径，红=R1a+R2，黄=R1a）
+        def _sig(wid: str) -> dict:
+            row = _q(risk,
+                     "SELECT warn_level, warn_reason, belong_group, group_customer_no "
+                     "FROM ap_warning_signal WHERE warning_id=?", (wid,))[0]
+            return dict(row)
+
+        for wid, expect in (("WS-2026-90000001", "橙"), ("WS-2026-90000002", "红"), ("WS-2026-90000003", "黄")):
+            w = _sig(wid)
+            r1a, r1a_r2 = evaluate_warning(rconn, w)
+            governing = r1a_r2.level if "R2" in (w["warn_reason"] or "") else r1a.level
+            check(f"引擎管辖级别与道具一致 {wid}={expect}",
+                  governing == expect and w["warn_level"] == expect,
+                  f"(引擎 {governing} / 库值 {w['warn_level']})")
+    finally:
+        rconn.close()
 
     _close(cust, risk, conc, base)
     print(f"\n===== 核对结果：通过 {PASS} 项 / 失败 {FAIL} 项 =====")
