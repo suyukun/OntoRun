@@ -128,6 +128,92 @@ def group_aggregation_yi(conn: sqlite3.Connection, group_name: str) -> float:
     return (row[0] if row else 0.0) / _WAN_TO_YI
 
 
+def concentration_ledger_aggregation_yi(
+    conn: sqlite3.Connection, group_no: str
+) -> float:
+    """ap_concentration_limit 台账按集团编号聚合归集余额（亿元，与看板/报送同源，F7）。
+
+    口径包§一 集团层归集监测 = concentration.ap_concentration_limit 按
+    customer.group_customer_no 聚合（含 R2 隐性关联方后 ÷ 集团并表资本）。
+    证据链（group-reveal/related-upgrade/verify-reason）与看板统一走本函数，
+    消除「两套分子源」跨端不一致（F7 P0）。
+    """
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cl.concentration_limit), 0) AS s "
+        "FROM concentration.ap_concentration_limit cl "
+        "JOIN customer.ap_customer c ON c.customer_no = cl.customer_no "
+        "WHERE c.group_customer_no = ?",
+        (group_no,),
+    ).fetchone()
+    return (row["s"] if row else 0.0) / _WAN_TO_YI
+
+
+def has_concentration_ledger(conn: sqlite3.Connection, group_no: str) -> bool:
+    """集团是否含集中度台账（ap_concentration_limit 有行）——证据链同源判定（F7）。
+
+    无台账集团保持 fail-closed 400（无台账不回显 0% 玩具结果）；有台账即可查
+    （rank5 GRP-2026-001234 台账 8.16 亿，修复前 group-reveal 误报 400）。
+    """
+    row = conn.execute(
+        "SELECT 1 FROM concentration.ap_concentration_limit cl "
+        "JOIN customer.ap_customer c ON c.customer_no = cl.customer_no "
+        "WHERE c.group_customer_no = ? LIMIT 1",
+        (group_no,),
+    ).fetchone()
+    return row is not None
+
+
+@dataclass
+class GroupConcentration:
+    """R1a 集团层集中度（ap_concentration_limit 台账口径 + R2 隐性关联纳入，与看板同源，F7）。
+
+    分子 = 集中度台账归集（自身）+ 经 customer_relation_tree 三线索识别的隐性关联方；
+    分母 = 集团并表资本（base.ap_sys_param）；按 R1a 三线定级。证据链三端点共用。
+    """
+
+    group_customer_no: str
+    group_customer_name: str
+    own_balance_yi: float  # ap_concentration_limit 台账归集（亿，自身）
+    related_balance_yi: float  # R2 隐性关联方（亿）
+    total_yi: float  # 归集合计（亿）
+    ratio: float  # total_yi / 集团并表资本
+    level: str  # 黄/橙/红/无
+    config: R1aConfig
+    related_parties: list[RelatedParty] = field(default_factory=list)
+
+
+def evaluate_group_concentration(
+    conn: sqlite3.Connection,
+    group_no: str,
+    group_name: str,
+    *,
+    include_related: bool = True,
+    config: R1aConfig | None = None,
+) -> GroupConcentration:
+    """对集团执行 R1a 归集集中度（ap_concentration_limit 台账口径，可选含 R2 隐性关联）。
+
+    与看板 _concentration_ranking 同源（F7 P0：两套分子源统一）；conn 须含
+    customer./concentration./base. 别名（用 RiskStore.source_conn()）。
+    """
+    cfg = config or R1aConfig.load(conn)
+    own = concentration_ledger_aggregation_yi(conn, group_no)
+    parties = related_parties(conn, group_name) if include_related else []
+    rel = sum(p.balance_yi for p in parties)
+    total = own + rel
+    ratio = total / cfg.group_capital_yi if cfg.group_capital_yi else 0.0
+    return GroupConcentration(
+        group_customer_no=group_no,
+        group_customer_name=group_name,
+        own_balance_yi=own,
+        related_balance_yi=rel,
+        total_yi=total,
+        ratio=ratio,
+        level=level_for_ratio(ratio, cfg),
+        config=cfg,
+        related_parties=parties,
+    )
+
+
 def related_parties(conn: sqlite3.Connection, group_name: str) -> list[RelatedParty]:
     """R2 关联方识别（customer_relation_tree 三线索交叉）并汇总其授信余额（亿元）。
 
@@ -350,6 +436,7 @@ __all__ = [
     "R1A_RULE_MARKER",
     "R2_RULE_MARKER",
     "RESERVED_RULES",
+    "GroupConcentration",
     "R1aConfig",
     "R1aResult",
     "RelatedParty",
@@ -357,10 +444,13 @@ __all__ = [
     "RuleViolation",
     "check_adjust_level",
     "check_level_consistency",
+    "concentration_ledger_aggregation_yi",
     "evaluate",
+    "evaluate_group_concentration",
     "evaluate_warning",
     "governing_level",
     "group_aggregation_yi",
+    "has_concentration_ledger",
     "is_r1a_governed",
     "level_for_ratio",
     "open_rules_conn",

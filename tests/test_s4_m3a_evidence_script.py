@@ -190,6 +190,77 @@ def test_act2_r2_recompute_128_red(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# F7（P0）：两套分子源统一 —— 证据链与看板同源（ap_concentration_limit 台账聚合 + R2）
+# ---------------------------------------------------------------------------
+
+RANK5_NO = "GRP-2026-001234"  # rank5：台账 8.16 亿（修复前 group-reveal 误报 400）
+
+
+def _dash_ranking(client: TestClient) -> list[dict]:
+    return client.get("/risk/dashboard").json()["data"]["group_concentration_ranking"]
+
+
+def test_f7_rank5_group_reveal_same_source(client: TestClient) -> None:
+    """F7：rank5（GRP-2026-001234，台账 8.16 亿）group-reveal 200，数字与看板 1.02% 同源。"""
+    res = client.get(
+        "/risk/evidence/group-reveal", params={"group_customer_no": RANK5_NO}
+    )
+    assert res.status_code == 200, res.text
+    comp = res.json()["data"]["rules_hits"][0]["computed"]
+    assert comp["numerator_yi"] == pytest.approx(8.13, abs=1e-2)
+    assert comp["ratio_display"] == "1.02%"
+    assert comp["level"] == "无"
+    # 与看板同源：看板排名含该集团，ratio 一致
+    entry = next(
+        (g for g in _dash_ranking(client) if g["group_customer_no"] == RANK5_NO), None
+    )
+    assert entry is not None
+    assert entry["concentration_ratio"] == pytest.approx(comp["ratio"], abs=1e-4)
+
+
+def test_f7_evidence_matches_dashboard_same_source(client: TestClient) -> None:
+    """F7 同源：group-reveal/related-upgrade/verify-reason 与看板排名数字完全一致（两套分子源统一）。"""
+    for g in _dash_ranking(client)[:10]:
+        gno = g["group_customer_no"]
+        reveal = client.get(
+            "/risk/evidence/group-reveal", params={"group_customer_no": gno}
+        ).json()["data"]
+        upgrade = client.get(
+            "/risk/evidence/related-upgrade", params={"group_customer_no": gno}
+        ).json()["data"]
+        verify = client.get(
+            "/risk/evidence/verify-reason", params={"group_customer_no": gno}
+        ).json()["data"]
+        # post_R2（R2 纳入后口径）与看板一致
+        assert upgrade["r2_levels"]["post_r2"]["ratio"] == pytest.approx(
+            g["concentration_ratio"], abs=1e-4
+        )
+        assert upgrade["r2_levels"]["post_r2"]["level"] == g["concentration_level"]
+        # reveal 同构含 post_R2；verify-reason 集中度实算一致
+        assert reveal["r2_levels"]["post_r2"]["ratio"] == pytest.approx(
+            g["concentration_ratio"], abs=1e-4
+        )
+        assert verify["rules_hits"][0]["computed"]["ratio"] == pytest.approx(
+            g["concentration_ratio"], abs=1e-4
+        )
+
+
+def test_f7_tiansheng_two_level_pre_post(client: TestClient) -> None:
+    """F7b：天晟两级口径显式给出 pre_R2（10.8% 橙）与 post_R2（12.8% 红）+「纳入隐性关联前后」文案。"""
+    reveal = _reveal(client)
+    rl = reveal["r2_levels"]
+    assert rl["pre_r2"]["ratio_display"] == "10.8%"
+    assert rl["pre_r2"]["level"] == "橙"
+    assert rl["post_r2"]["ratio_display"] == "12.8%"
+    assert rl["post_r2"]["level"] == "红"
+    assert "纳入隐性关联" in rl["note"]
+    assert "纳入隐性关联前" in reveal["conclusion"]
+    up = _upgrade(client)
+    assert up["r2_levels"]["pre_r2"]["ratio_display"] == "10.8%"
+    assert up["r2_levels"]["post_r2"]["ratio_display"] == "12.8%"
+
+
+# ---------------------------------------------------------------------------
 # 第 4 幕：双签驳回（2023 办法第二十三条 → 处置退回重新起草）
 # ---------------------------------------------------------------------------
 

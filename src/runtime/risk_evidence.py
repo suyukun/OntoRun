@@ -30,10 +30,9 @@ from src.runtime.risk_db import RiskStore
 from src.runtime.risk_rules import (
     LEVEL_NONE,
     R1A_RULE_MARKER,
-    R1aConfig,
-    evaluate,
+    evaluate_group_concentration,
+    has_concentration_ledger,
     level_for_ratio,
-    related_parties,
 )
 
 # ---------------------------------------------------------------------------
@@ -374,14 +373,14 @@ class EvidenceService:
         return [dict(r) for r in rows]
 
     @staticmethod
-    def _has_credit(conn: sqlite3.Connection, group_name: str) -> bool:
-        """集团是否含授信台账（第 1/2 幕 fail-closed：无台账不回显 0% 玩具结果）。"""
-        row = conn.execute(
-            "SELECT 1 FROM customer.ap_subsidiary_credit_detail "
-            "WHERE group_customer_name=? LIMIT 1",
-            (group_name,),
-        ).fetchone()
-        return row is not None
+    def _has_credit(conn: sqlite3.Connection, group_no: str) -> bool:
+        """集团是否含集中度台账（第 1/2 幕 fail-closed：无台账不回显 0% 玩具结果）。
+
+        F7：台账判定改指 concentration.ap_concentration_limit（与看板/归集同源）——
+        修复前按 ap_subsidiary_credit_detail 判定，rank5（GRP-2026-001234 台账 8.16 亿）
+        无明细行被误报「无授信台账」400。
+        """
+        return has_concentration_ledger(conn, group_no)
 
     @staticmethod
     def _org_single_safety(
@@ -424,11 +423,14 @@ class EvidenceService:
         group_customer_no: str | None = None,
         group_customer_name: str | None = None,
     ) -> dict[str, Any]:
-        """第 1 幕揭示查询：逐家附属机构融资（真分母单看都安全）+ M2 引擎归集实算。
+        """第 1 幕揭示查询：逐家附属机构融资（真分母单看都安全）+ 归集集中度实算。
 
-        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）；逐家分子按
-        客户真实集团身份（ap_customer.group_customer_no）归集，与看板/报送同源；
-        归集 = M2 引擎 risk_rules.evaluate(include_related=False) 实算（非查表回显）。
+        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）。F7 P0：归集
+        分子统一为 concentration.ap_concentration_limit 台账按集团聚合 + R2 隐性关联
+        纳入（与看板/verify-reason/报送同源，risk_rules.evaluate_group_concentration），
+        分母 = 集团并表资本；rank5（GRP-2026-001234 台账 8.16 亿）可查，无台账集团保持
+        fail-closed 400。F7b：证据链显式给出 pre_R2（纳入隐性关联前）与 post_R2（纳入后）
+        两行 + 说明文案「纳入隐性关联前后」，消除与看板 12.8% 的裸对比矛盾。
         """
         if not group_customer_no and not group_customer_name:
             raise EvidenceError("必须提供 group_customer_no")
@@ -438,11 +440,19 @@ class EvidenceService:
                 group_customer_no=group_customer_no,
                 group_customer_name=group_customer_name,
             )
-            if not self._has_credit(conn, group):
-                raise EvidenceError(f"集团无授信台账: {group}")
+            if not self._has_credit(conn, gno):
+                raise EvidenceError(f"集团无集中度台账: {group}")
             cap = self._capital_params(conn)
-            r1a = evaluate(conn, group, include_related=False)  # M2 引擎实算
-            cfg = r1a.config
+            # F7：两口径均由 ap_concentration_limit 台账聚合（与看板同源）
+            pre = evaluate_group_concentration(
+                conn, gno, group, include_related=False
+            )  # pre_R2：纳入隐性关联前
+            post = evaluate_group_concentration(
+                conn, gno, group, include_related=True
+            )  # post_R2：纳入隐性关联后
+            cfg = pre.config
+            group_cap = cfg.group_capital_yi
+            # 逐家附属机构单看明细（口径包§七 第 1 幕「联合授信台账逐家亮出」）
             org_rows = conn.execute(
                 "SELECT s.org_name, SUM(s.business_balance) AS t "
                 "FROM customer.ap_subsidiary_credit_detail s "
@@ -469,17 +479,21 @@ class EvidenceService:
                     item["ratio_display"] = self._ratio_display(yi / denom_yi)
                 detail.append(item)
             signals = self._group_signals(conn, gno)
-        group_cap = cfg.group_capital_yi
         # P0-2 结论自检：比较短语由 computed ratio 实算生成，且与定级严格一致（不一致即抛错）
-        compare = self._r1a_comparison_text(r1a.ratio, cfg)
-        self._assert_level_consistent(r1a.ratio, cfg, r1a.level, "第 1 幕 group_reveal")
+        compare_pre = self._r1a_comparison_text(pre.ratio, cfg)
+        self._assert_level_consistent(
+            pre.ratio, cfg, pre.level, "第 1 幕 group_reveal(pre_R2)"
+        )
+        self._assert_level_consistent(
+            post.ratio, cfg, post.level, "第 1 幕 group_reveal(post_R2)"
+        )
         warn = next((s for s in signals if s["warn_level"] == "橙"), None)
         # F1/F3 结论模板按实算：逐家安全断言由 _org_single_safety 对各自参考线实算，
         # 不再写死「银行 …低于行内限额 60 亿」（非道具组无 ratio_display 曾致 KeyError 500；
         # 瑞华 75.2 亿单挂安平银行实超 60 亿却断言「均安全」系算术矛盾）。
+        all_safe = True
         if detail:
             org_parts: list[str] = []
-            all_safe = True
             for item in detail:
                 txt, ok = self._org_single_safety(item, cap)
                 org_parts.append(txt)
@@ -492,16 +506,42 @@ class EvidenceService:
                 else f"{group} 逐家附属机构单看已有超参考线（{safety}）"
             )
         else:
-            head = f"{group} 无授信台账明细"
+            head = f"{group} 集中度台账归集（无逐家明细行）"
+        # F7b：第 1 幕结论标注「本行为纳入隐性关联前的归集口径」（pre_R2）
         conclusion = (
-            f"{head}；归集实算 {r1a.total_yi:.1f} 亿元 ÷ 集团并表资本 "
-            f"{group_cap:.0f} 亿元 = {compare} → R1a 定级「{r1a.level}」"
+            f"{head}；归集实算 {pre.total_yi:.1f} 亿元 ÷ 集团并表资本 "
+            f"{group_cap:.0f} 亿元 = {compare_pre} → R1a 定级「{pre.level}」"
+            f"（本行为纳入隐性关联前的归集口径）"
             + ("，橙色预警信号已生成" if warn else "")
         )
+        # F7b：证据链显式给出 pre_R2 / post_R2 两行 + 「纳入隐性关联前后」说明
+        r2_levels = {
+            "pre_r2": {
+                "label": "纳入隐性关联前（R2 纳入前）",
+                "numerator_yi": round(pre.total_yi, 2),
+                "denominator_yi": group_cap,
+                "ratio": round(pre.ratio, 4),
+                "ratio_display": self._ratio_display(pre.ratio),
+                "level": pre.level,
+            },
+            "post_r2": {
+                "label": "纳入隐性关联后（R2 纳入后）",
+                "numerator_yi": round(post.total_yi, 2),
+                "denominator_yi": group_cap,
+                "ratio": round(post.ratio, 4),
+                "ratio_display": self._ratio_display(post.ratio),
+                "level": post.level,
+            },
+            "note": (
+                "纳入隐性关联（恒昌贸易）前后的归集口径对比；"
+                "看板/报送口径为纳入隐性关联后（post_R2）"
+            ),
+        }
         return {
             "intent": "act1_group_reveal",
             "conclusion": conclusion,
             "basis_tables": [
+                "concentration.ap_concentration_limit",
                 "customer.ap_subsidiary_credit_detail",
                 "base.ap_sys_param",
                 "ap_warning_signal",
@@ -513,11 +553,11 @@ class EvidenceService:
                     "clause": R1A_CLAUSE,
                     "lines": R1A_LINES,
                     "computed": {
-                        "numerator_yi": round(r1a.total_yi, 2),
+                        "numerator_yi": round(pre.total_yi, 2),
                         "denominator_yi": group_cap,
-                        "ratio": round(r1a.ratio, 4),
-                        "ratio_display": self._ratio_display(r1a.ratio),
-                        "level": r1a.level,
+                        "ratio": round(pre.ratio, 4),
+                        "ratio_display": self._ratio_display(pre.ratio),
+                        "level": pre.level,
                     },
                 },
                 {
@@ -539,6 +579,7 @@ class EvidenceService:
             },
             "detail_rows": detail,
             "signals": signals,
+            "r2_levels": r2_levels,
         }
 
     # ---- 第 2 幕：升级识别（恒昌三线索 + R2 纳入重算 12.8% 红）----
@@ -549,11 +590,13 @@ class EvidenceService:
         group_customer_no: str | None = None,
         group_customer_name: str | None = None,
     ) -> dict[str, Any]:
-        """第 2 幕升级识别：客户关系树三线索 + R2 纳入归集重算（M2 引擎实算）。
+        """第 2 幕升级识别：客户关系树三线索 + R2 纳入归集重算（与看板同源，F7）。
 
-        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）；
-        线索明细 = customer.ap_customer_relation_tree（clear_remark_1/2/3）；
-        重算 = risk_rules.evaluate(include_related=True) → 天晟 102.4/800 = 12.8% 红。
+        定位：以 group_customer_no 为主键（名称仅展示，根因一串号修复）；线索明细 =
+        customer.ap_customer_relation_tree（clear_remark_1/2/3）；重算 = risk_rules.
+        evaluate_group_concentration(include_related=True)（ap_concentration_limit 台账
+        口径，与看板同源）→ 天晟 102.4/800 = 12.8% 红。F7b：证据链显式给出 pre_R2/post_R2
+        两行 + 「纳入隐性关联前后」说明。
         """
         if not group_customer_no and not group_customer_name:
             raise EvidenceError("必须提供 group_customer_no")
@@ -563,9 +606,11 @@ class EvidenceService:
                 group_customer_no=group_customer_no,
                 group_customer_name=group_customer_name,
             )
-            if not self._has_credit(conn, group):
-                raise EvidenceError(f"集团无授信台账: {group}")
-            r2 = evaluate(conn, group, include_related=True)  # R1a+R2 实算
+            if not self._has_credit(conn, gno):
+                raise EvidenceError(f"集团无集中度台账: {group}")
+            # F7：post_R2（纳入后，本幕焦点）与 pre_R2（纳入前，第 1 幕口径）均由台账聚合
+            r2 = evaluate_group_concentration(conn, gno, group, include_related=True)
+            pre = evaluate_group_concentration(conn, gno, group, include_related=False)
             cfg = r2.config
             group_cap = cfg.group_capital_yi
             detail: list[dict[str, Any]] = []
@@ -606,7 +651,7 @@ class EvidenceService:
                     }
                 )
             signals = self._group_signals(conn, gno)
-        base = round(r2.base_aggregation_yi, 2)
+        base = round(r2.own_balance_yi, 2)
         rel = round(r2.related_balance_yi, 2)
         # P0-2 结论自检：R2 纳入后比较短语由 computed ratio 实算生成（杜绝「>12% 却定级非红」）
         compare = self._r1a_comparison_text(r2.ratio, cfg)
@@ -623,11 +668,35 @@ class EvidenceService:
             f"{compare} → R1a+R2 定级「{r2.level}」"
             + ("，红色预警信号已生成" if red else "")
         )
+        # F7b：pre_R2 / post_R2 两行（与第 1 幕揭示同构，说明「纳入隐性关联前后」）
+        r2_levels = {
+            "pre_r2": {
+                "label": "纳入隐性关联前（R2 纳入前）",
+                "numerator_yi": round(pre.total_yi, 2),
+                "denominator_yi": group_cap,
+                "ratio": round(pre.ratio, 4),
+                "ratio_display": self._ratio_display(pre.ratio),
+                "level": pre.level,
+            },
+            "post_r2": {
+                "label": "纳入隐性关联后（R2 纳入后）",
+                "numerator_yi": round(r2.total_yi, 2),
+                "denominator_yi": group_cap,
+                "ratio": round(r2.ratio, 4),
+                "ratio_display": self._ratio_display(r2.ratio),
+                "level": r2.level,
+            },
+            "note": (
+                "纳入隐性关联（恒昌贸易）前后的归集口径对比；"
+                "看板/报送口径为纳入隐性关联后（post_R2）"
+            ),
+        }
         return {
             "intent": "act2_related_upgrade",
             "conclusion": conclusion,
             "basis_tables": [
                 "customer.ap_customer_relation_tree",
+                "concentration.ap_concentration_limit",
                 "customer.ap_subsidiary_credit_detail",
                 "base.ap_sys_param",
                 "ap_warning_signal",
@@ -670,6 +739,7 @@ class EvidenceService:
             },
             "detail_rows": detail,
             "signals": signals,
+            "r2_levels": r2_levels,
         }
 
     # ---- 质疑/复核实查（R2-P0-A）：标红/橙行的真实原因维度（集中度 vs 非集中度）----
@@ -699,20 +769,15 @@ class EvidenceService:
             )
             cap = self._capital_params(conn)
             group_cap = cap[PARAM_GROUP_CONSOLIDATED]
-            cfg = R1aConfig.load(conn)
-            row = conn.execute(
-                "SELECT SUM(cl.concentration_limit) AS bal_wan "
-                "FROM concentration.ap_concentration_limit cl "
-                "JOIN customer.ap_customer c ON c.customer_no = cl.customer_no "
-                "WHERE c.group_customer_no = ?",
-                (gno,),
-            ).fetchone()
-            own_yi = (row["bal_wan"] or 0.0) / _WAN_TO_YI if row else 0.0
-            hidden = related_parties(conn, group)
-            hidden_yi = round(sum(p.balance_yi for p in hidden), 4)
-            total_yi = round(own_yi + hidden_yi, 4)
-            ratio = round(total_yi / group_cap, 4) if group_cap else 0.0
-            conc_level = level_for_ratio(ratio, cfg)
+            # F7：集中度实算统一走 evaluate_group_concentration（台账聚合 + R2，与看板同源）
+            gc = evaluate_group_concentration(conn, gno, group, include_related=True)
+            cfg = gc.config
+            own_yi = round(gc.own_balance_yi, 4)
+            hidden_yi = round(gc.related_balance_yi, 4)
+            total_yi = round(gc.total_yi, 4)
+            ratio = gc.ratio
+            conc_level = gc.level
+            hidden = gc.related_parties
             signals = self._group_signals(conn, gno)
             sig = signals[0] if signals else None
         sig_level = sig["warn_level"] if sig else None

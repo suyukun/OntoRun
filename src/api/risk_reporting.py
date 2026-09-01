@@ -37,7 +37,8 @@ from src.runtime.risk_rules import (
     LEVEL_NONE,
     R1A_RULE_MARKER,
     R1aConfig,
-    level_for_ratio,
+    concentration_ledger_aggregation_yi,
+    evaluate_group_concentration,
 )
 
 # ---------------------------------------------------------------------------
@@ -123,17 +124,8 @@ class _ReportService:
         ).fetchone()
         return row["m"] or "2026-12-31"
 
-    # ---- 归集余额（亿）：联合授信台账 × 真实集团身份（ap_customer 关联） ----
-
-    def group_balance_yi(self, conn: sqlite3.Connection, group_no: str) -> float:
-        # 按唯一 cert_no 关联真实集团身份（group_customer_no），杜绝同名客户跨集团串号
-        row = conn.execute(
-            "SELECT SUM(s.business_balance) t FROM ap_subsidiary_credit_detail s "
-            "JOIN ap_customer c ON s.cert_no = c.cert_no "
-            "WHERE c.group_customer_no = ?",
-            (group_no,),
-        ).fetchone()
-        return (row["t"] or 0.0) / 10000.0
+    # ---- 归集余额（亿）：与证据链同源（F7：ap_concentration_limit 台账聚合，
+    # 见 risk_rules.concentration_ledger_aggregation_yi / evaluate_group_concentration） ----
 
     def hidden_related_yi(
         self, conn: sqlite3.Connection, group_name: str
@@ -246,26 +238,28 @@ class _ReportService:
         - 非集中度类预警（行为/合规等硬规则命中，级别高于集中度实算）→ 分列维度
           non_concentration_warnings，不再混进集中度排名的级别列。
         """
-        group_cap = cap[PARAM_GROUP_CONSOLIDATED]
         cfg = R1aConfig.load(conn)
         rows = conn.execute(
-            "SELECT a.group_customer_no AS gno, a.group_customer_name AS gname, "
-            "SUM(cl.concentration_limit) AS bal_wan "
+            "SELECT a.group_customer_no AS gno, a.group_customer_name AS gname "
             "FROM concentration.ap_concentration_limit cl "
             "JOIN customer.ap_customer a ON a.customer_no = cl.customer_no "
-            "GROUP BY gno ORDER BY bal_wan DESC LIMIT 20"
+            "GROUP BY gno ORDER BY SUM(cl.concentration_limit) DESC LIMIT 20"
         ).fetchall()
         ranking = []
         non_conc: list[dict[str, Any]] = []
         for r in rows:
             gno = r["gno"]
             gname = r["gname"]
-            own_yi = (r["bal_wan"] or 0.0) / 10000.0
-            hidden = self.hidden_related_yi(conn, gname)
-            hidden_yi = round(sum(h["balance_yi"] for h in hidden), 4)
-            total_yi = round(own_yi + hidden_yi, 4)
-            ratio = round(total_yi / group_cap, 4) if group_cap else 0.0
-            conc_level = level_for_ratio(ratio, cfg)
+            # F7：归集/隐性关联/定级统一走 evaluate_group_concentration（与证据链同源，
+            # ap_concentration_limit 台账聚合 + R2，单一事实来源）
+            gc = evaluate_group_concentration(
+                conn, gno, gname, include_related=True, config=cfg
+            )
+            own_yi = round(gc.own_balance_yi, 4)
+            hidden_yi = round(gc.related_balance_yi, 4)
+            total_yi = round(gc.total_yi, 4)
+            ratio = round(gc.ratio, 4)
+            conc_level = gc.level
             sig = conn.execute(
                 "SELECT signal_id, warn_level, signal_status, warn_reason "
                 "FROM ap_warning_signal WHERE group_customer_no = ? ORDER BY "
@@ -421,7 +415,8 @@ class _ReportService:
                 (gno,),
             ).fetchone()
             group_name = name_row["group_customer_name"] if name_row else None
-            own_yi = self.group_balance_yi(conn, gno)
+            # F7：报送归集分子与看板/证据链同源（ap_concentration_limit 台账聚合）
+            own_yi = concentration_ledger_aggregation_yi(conn, gno)
             hidden = self.hidden_related_yi(conn, group_name) if group_name else []
             hidden_yi = round(sum(h["balance_yi"] for h in hidden), 4)
             total_yi = round(own_yi + hidden_yi, 4)
