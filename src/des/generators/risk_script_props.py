@@ -220,19 +220,23 @@ PROP_DISPOSALS = (
     ("WD-2026-900003", "WS-2026-90000003", "已处置", "已完成处置并解除（close_warning+解除报告），风险敞口已压降"),
 )
 
-# 剧本审批道具（§七 第 4 幕：天晟红警 WS-2026-90000002 下挂 PROCESS 审批单——
-# AI 拆分授信提议 → 审批人按 2023 关联交易办法第二十三条 REJECTED + 审计落库）
+# 剧本审批道具（§七 第 4 幕：天晟红警 WS-2026-90000002 下挂 REJECTED 审批单——F4 预置驳回
+# 演示态：AI 拆分授信提议已被审批人按 2023 关联交易办法第二十三条驳回（opinion 落第二十三条
+# 依据 + 审计落库）；审批链双节点双签（节点 1 风险预警管理岗已审 APPROVED / 节点 2 风控部门
+# 负责人已驳 REJECTED）。patch_risk_live_data.patch_approval_reset_to_pending 可重置回
+# PROCESS（节点 2 回 PENDING）供现场 live 驳回演示。
 #   (approve_order_id, title, apply_user_id, apply_time, status, business_type, remark, opinion)
 PROP_APPROVE_ORDER = (
     ("APP-2026-90000002", "天晟集团处置方案审批（拆分授信提议）", "U90002",
-     "2026-12-10", "PROCESS", "SGN_CONCENTRAT",
+     "2026-12-10", "REJECTED", "SGN_CONCENTRAT",
      "对预警信号 SGN-2026-90000002 申请处置审批：AI 提议将天晟部分授信拆分至非关联第三方通道主体，降低名义归集集中度",
-     None),
+     "驳回：AI 提议将天晟部分授信拆分至非关联第三方通道主体降低名义归集集中度，违反 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易），退回重新起草。"),
 )
-#   (approve_task_id, approve_order_id, approve_task_status, approve_result, approve_remark)
-# 待审批任务用 PENDING（与 RNG approve_flow 末节点一致；approve_disposal 只标记 PENDING 任务）
+#   (approve_task_id, approve_order_id, approve_task_status, approve_result, approve_remark, approve_node_seq)
 PROP_APPROVE_TASK = (
-    ("AT-2026-90000002", "APP-2026-90000002", "PENDING", None, None),
+    ("AT-2026-90000002", "APP-2026-90000002", "COMPLETED", "APPROVED", "同意", 1),
+    ("AT-2026-90000003", "APP-2026-90000002", "COMPLETED", "REJECTED",
+     "驳回：违反 2023 关联交易办法第二十三条，禁止隐匿关联关系拆分交易", 2),
 )
 #   (approve_warn_rel_id, approve_order_id, warning_id)
 PROP_APPROVE_WARN_REL = (
@@ -689,26 +693,35 @@ def _approve_order_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _approve_task_rows(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    # F4：双节点双签——按 approve_node_seq 挂节点 1（风险预警管理岗）/ 节点 2（风控部门负责人）
     nodes = ctx.get("approval.ap_approve_node") or []
-    node = (
-        {"approve_node_id": "NODE-2026-000001", "post_id": "POST-RISK-MGMT"}
-        if not nodes
-        else nodes[0]
-    )
+    fallback = {
+        1: ("NODE-2026-000001", "POST-RISK-MGMT"),
+        2: ("NODE-2026-000002", "POST-RISK-DIR"),
+    }
+
+    def _node_for_seq(seq: int) -> tuple[str, str]:
+        for nd in nodes:
+            if nd.get("approve_node_seq") == seq:
+                return nd["approve_node_id"], nd["post_id"]
+        nid, post = fallback.get(seq, fallback[1])
+        return nid, post
+
     rows = []
-    for _seq, (tid, oid, status, result, remark) in enumerate(
+    for _seq, (tid, oid, status, result, remark, node_seq) in enumerate(
         PROP_APPROVE_TASK, start=1
     ):
+        node_id, post_id = _node_for_seq(node_seq)
         rows.append(
             {
                 "approve_task_id": tid,
                 "approve_order_id": oid,
-                "approve_node_id": node["approve_node_id"],
-                "post_id": node["post_id"],
+                "approve_node_id": node_id,
+                "post_id": post_id,
                 "approve_task_status": status,
                 "approve_result": result,
                 "approve_remark": remark,
-                "approve_time": None,
+                "approve_time": "2026-12-10" if status == "COMPLETED" else None,
                 "is_deleted": 0,
                 "create_time": "2026-12-10",
                 "update_time": "2026-12-10",

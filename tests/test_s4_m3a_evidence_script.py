@@ -213,8 +213,9 @@ PROP_APPROVE_ORDER_ID = "APP-2026-90000002"  # 天晟红警下挂审批单（根
 
 
 def test_act4_prop_chain_under_tiansheng_red(client: TestClient) -> None:
-    """天晟红警 WS-2026-90000002 下挂 PROCESS 审批单（根因三道具修复）：
-    AI 拆分提议待审批，approval-chain 可一键调档，固定附 2023 办法第二十三条驳回依据。"""
+    """天晟红警 WS-2026-90000002 下挂 REJECTED 审批单（F4 预置驳回演示态）：
+    AI 拆分提议已被审批人按 2023 办法第二十三条驳回——双节点双签（节点1 已审 / 节点2 已驳）、
+    opinion 落第二十三条依据、审计行已预置；approval-chain 可一键调档回放。"""
     data = client.get(
         "/risk/evidence/approval-chain", params={"warning_id": "WS-2026-90000002"}
     ).json()["data"]
@@ -223,22 +224,93 @@ def test_act4_prop_chain_under_tiansheng_red(client: TestClient) -> None:
     orders = {o["order"]["approve_order_id"]: o for o in row["approve_orders"]}
     assert PROP_APPROVE_ORDER_ID in orders, "天晟红警必须下挂审批单（不再「暂无待审批单」）"
     o = orders[PROP_APPROVE_ORDER_ID]["order"]
-    assert o["approve_order_status"] == "PROCESS"
+    # F4：预置驳回态（REJECTED + opinion 第二十三条），双节点双签
+    assert o["approve_order_status"] == "REJECTED"
+    assert "第二十三条" in (o["opinion_description"] or "")
     assert "拆分" in (o["remark"] or "")
     assert "SGN-2026-90000002" in (o["remark"] or "")
+    tasks = orders[PROP_APPROVE_ORDER_ID]["tasks"]
+    assert len(tasks) == 2, f"审批链应为双节点双签（实得 {len(tasks)} 条任务）"
+    by_result = {t["approve_result"] for t in tasks}
+    assert by_result == {"APPROVED", "REJECTED"}, f"双签应为 一签通过一签驳回（实得 {by_result}）"
+    assert all(t["approve_task_status"] == "COMPLETED" for t in tasks)
+    # F4/F6：审计行已预置（驳回留痕可回放，非依赖现场 live 写回）
+    assert row.get("audit_trail"), "审批链证据应带预置驳回审计行（不再审计空账）"
+    assert any("REJECTED" in (a.get("params_json") or "") for a in row["audit_trail"])
     hit = data["rules_hits"][0]
     assert hit["rule"] == "2023 关联交易办法第二十三条"
     assert "拆分交易" in hit["text"]
 
 
-def _pick_process_order(store: RiskStore) -> dict:
-    """从 ap_anping（或其副本）挑一个与处置关联的 PROCESS 审批单：优先天晟红警道具链。"""
+def test_act4_prop_reset_to_pending_then_live_reject(act4_env) -> None:
+    """F4：预置 REJECTED 道具链可重置回 PENDING（供现场 live 驳回演示）→ 现场驳回生效。
+
+    道具链 APP-2026-90000002 默认 REJECTED（预置驳回态）；patch_approval_reset_to_pending
+    把审批单重置回 PROCESS、节点 2 回 PENDING（节点 1 保持已审）；审批人现场按第二十三条
+    approve_disposal decision=REJECTED → 状态再回 REJECTED + opinion + 双节点 COMPLETED。
+    """
+    store, engine = act4_env
     conn = store.source_conn()
     try:
-        # 根因三：优先第 4 幕道具链（天晟红警 WS-2026-90000002）
+        # 重置回 PENDING（模拟 patch_approval_reset_to_pending）
+        conn.execute(
+            "UPDATE approval.ap_approve_order SET approve_order_status='PROCESS', "
+            "approve_time=NULL, approved_user_id='', opinion_description=NULL "
+            "WHERE approve_order_id=?", (PROP_APPROVE_ORDER_ID,)
+        )
+        conn.execute(
+            "UPDATE approval.ap_approve_task SET approve_task_status='PENDING', "
+            "approve_result=NULL, approve_remark=NULL, approve_time=NULL "
+            "WHERE approve_task_id=?", ("AT-2026-90000003",)
+        )
+        conn.commit()
+        # 现场驳回（第二十三条）
+        res = engine.execute(
+            "approve_disposal",
+            {
+                "approve_order_id": PROP_APPROVE_ORDER_ID,
+                "decision": "REJECTED",
+                "opinion": (
+                    "驳回：AI 提议将天晟部分授信拆分至非关联第三方通道主体降低名义"
+                    "归集集中度，违反 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易）。"
+                ),
+            },
+            actor="human",
+            actor_detail="human:风控审批人; confirmed_call:s4m3a-f4-live",
+            request_id="s4m3a-f4-live",
+        )
+        assert res.outcome == "applied", f"现场驳回应生效: {res.error_code} {res.message}"
+        order = conn.execute(
+            "SELECT approve_order_status, opinion_description FROM approval.ap_approve_order "
+            "WHERE approve_order_id=?", (PROP_APPROVE_ORDER_ID,)
+        ).fetchone()
+        tasks = conn.execute(
+            "SELECT approve_task_id, approve_task_status, approve_result "
+            "FROM approval.ap_approve_task WHERE approve_order_id=? ORDER BY approve_task_id",
+            (PROP_APPROVE_ORDER_ID,),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert order["approve_order_status"] == "REJECTED"
+    assert "第二十三条" in (order["opinion_description"] or "")
+    assert len(tasks) == 2
+    by_result = {t["approve_result"] for t in tasks}
+    assert by_result == {"APPROVED", "REJECTED"}, f"现场驳回后双节点应 APPROVED+REJECTED（实得 {by_result}）"
+    assert all(t["approve_task_status"] == "COMPLETED" for t in tasks)
+
+
+def _pick_process_order(store: RiskStore) -> dict:
+    """从 ap_anping（或其副本）挑一个与处置关联的 PROCESS 审批单。
+
+    F4：道具链（APP-2026-90000002）默认已是 REJECTED 预置驳回态（不可再审），
+    故仅筛选 approve_order_status='PROCESS' 的审批单（含现场重置回 PENDING 的道具链）。
+    """
+    conn = store.source_conn()
+    try:
+        # 道具链：仅在其为 PROCESS（现场 reset 后）时优先
         prop = conn.execute(
             "SELECT approve_order_id, remark FROM approval.ap_approve_order "
-            "WHERE approve_order_id=?",
+            "WHERE approve_order_id=? AND approve_order_status='PROCESS'",
             (PROP_APPROVE_ORDER_ID,),
         ).fetchone()
         if prop and re.search(r"SGN-\d{4}-\d{8}", prop["remark"] or ""):

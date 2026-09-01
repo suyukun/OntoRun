@@ -483,11 +483,67 @@ def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
         print(f"  [P0-文案] ap_sys_param.update_user SYSTEM → 系统初始化（{cur.rowcount} 行）")
 
 
-def patch_approval_prop(conn: sqlite3.Connection) -> None:
-    """P0-道具（根因三）：天晟红警 WS-2026-90000002 下挂 PROCESS 审批单 + 任务 + 预警关联。
+_REJECT_REQUEST_ID = "s4-preset-reject"  # 预置驳回审计行幂等标记
 
-    幂等：已存在（remark 含 SGN-2026-90000002）即跳过。演示第 4 幕「人拦 AI」——
-    审批人按 2023 关联交易办法第二十三条 REJECTED（opinion 写驳回依据），审计随动作落库；
+
+def _node_for_seq(conn: sqlite3.Connection, seq: int) -> tuple[str, str]:
+    """按 approve_node_seq 取节点（节点 1=风险预警管理岗 / 节点 2=风控部门负责人）。"""
+    for nd in conn.execute(
+        "SELECT approve_node_id, post_id, approve_node_seq FROM approval.ap_approve_node "
+        "ORDER BY approve_node_seq"
+    ):
+        if nd["approve_node_seq"] == seq:
+            return nd["approve_node_id"], nd["post_id"]
+    fallback = {
+        1: ("NODE-2026-000001", "POST-RISK-MGMT"),
+        2: ("NODE-2026-000002", "POST-RISK-DIR"),
+    }
+    return fallback.get(seq, fallback[1])
+
+
+def _seed_reject_audit() -> None:
+    """F4 预置驳回审计行（落风险本体库 data/ontology/s3_risk_ontology.db，幂等）。
+
+    审计为 WORM（append-only，哈希链由 AuditLog 计算）；request_id 固定标记，
+    已存在即跳过。演示第 4 幕「全程审计可回放」无需现场写回即可见驳回留痕。
+    """
+    import json
+
+    from src.des.generators.risk_script_props import PROP_APPROVE_ORDER
+    from src.runtime.audit import AuditLog, AuditRecord
+    from src.runtime.risk_db import RiskStore
+
+    oid = PROP_APPROVE_ORDER[0][0]
+    opinion = PROP_APPROVE_ORDER[0][7]
+    store = RiskStore()
+    audit = AuditLog(store)
+    existing = audit.query(action="approve_disposal", page_size=200)[0]
+    if any(r.get("request_id") == _REJECT_REQUEST_ID for r in existing):
+        print("  [F4] 预置驳回审计行已存在，跳过")
+        return
+    record = AuditRecord(
+        action_name="approve_disposal",
+        actor="human",
+        actor_detail="human:风控审批人; confirmed_call:s4-preset",
+        request_id=_REJECT_REQUEST_ID,
+        params_json=json.dumps(
+            {"approve_order_id": oid, "decision": "REJECTED", "opinion": opinion},
+            ensure_ascii=False,
+        ),
+        outcome="applied",
+        message="处置审批驳回：违反 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易），退回重新起草",
+    )
+    audit.append(record)
+    print(f"  [F4] 预置驳回审计行落库（{record.audit_id}）")
+
+
+def patch_approval_prop(conn: sqlite3.Connection) -> None:
+    """F4：天晟红警 WS-2026-90000002 下挂 REJECTED 审批单（预置驳回演示态）+ 双节点双签 + 审计行。
+
+    演示第 4 幕「人拦 AI」默认即见：AI 拆分授信提议已被审批人按 2023 关联交易办法第二十三条
+    驳回（opinion 落驳回依据），审批链双节点（节点 1 风险预警管理岗已审 APPROVED / 节点 2
+    风控部门负责人已驳 REJECTED），审计行已落库；patch_approval_reset_to_pending 可重置回
+    PROCESS（节点 2 回 PENDING）供现场 live 驳回演示。幂等：按 approve_order_id / task_id 定位。
     与生成器 risk_script_props.PROP_APPROVE_* 同源（未来再生成即得正确数据）。
     """
     from src.des.generators.risk_script_props import (
@@ -496,54 +552,136 @@ def patch_approval_prop(conn: sqlite3.Connection) -> None:
         PROP_APPROVE_WARN_REL,
     )
 
-    oid, title, apply_user, apply_time, _status, btype, remark, _opinion = (
+    oid, title, apply_user, apply_time, status, btype, remark, opinion = (
         PROP_APPROVE_ORDER[0]
     )
-    exists = conn.execute(
-        "SELECT 1 FROM approval.ap_approve_order WHERE approve_order_id=?",
+    order = conn.execute(
+        "SELECT approve_order_id FROM approval.ap_approve_order WHERE approve_order_id=?",
         (oid,),
     ).fetchone()
-    if exists:
-        # 幂等对账：任务状态校准为 PENDING（待审批；approve_disposal 只标记 PENDING 任务）
-        for tid, _oid, tstatus, _res, _remark in PROP_APPROVE_TASK:
+    if order:
+        conn.execute(
+            "UPDATE approval.ap_approve_order SET approve_order_status=?, opinion_description=?, "
+            "approved_user_id=?, approve_time=?, update_time=? WHERE approve_order_id=?",
+            ("REJECTED", opinion, "U90003", apply_time, apply_time, oid),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO approval.ap_approve_order ("
+            "approve_order_id, approve_order_type, approve_order_title, apply_user_id, "
+            "approved_user_id, apply_time, approve_time, approve_order_status, business_type, "
+            "remark, is_deleted, create_time, update_time, derive_warn_level_red, "
+            "derive_warn_level_yellow, derive_warn_level_blue, opinion_description) "
+            "VALUES (?, 'WARN_SGN', ?, ?, 'U90003', ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, 0, ?)",
+            (
+                oid,
+                title,
+                apply_user,
+                apply_time,
+                apply_time,
+                status,
+                btype,
+                remark,
+                apply_time,
+                apply_time,
+                opinion,
+            ),
+        )
+    for tid, _oid, tstatus, tresult, tremark, node_seq in PROP_APPROVE_TASK:
+        node_id, post_id = _node_for_seq(conn, node_seq)
+        exists = conn.execute(
+            "SELECT 1 FROM approval.ap_approve_task WHERE approve_task_id=?", (tid,)
+        ).fetchone()
+        if exists:
             conn.execute(
-                "UPDATE approval.ap_approve_task SET approve_task_status=? "
-                "WHERE approve_task_id=?",
-                (tstatus, tid),
+                "UPDATE approval.ap_approve_task SET approve_order_id=?, approve_node_id=?, "
+                "post_id=?, approve_task_status=?, approve_result=?, approve_remark=?, "
+                "approve_time=? WHERE approve_task_id=?",
+                (
+                    oid,
+                    node_id,
+                    post_id,
+                    tstatus,
+                    tresult,
+                    tremark,
+                    apply_time if tstatus == "COMPLETED" else None,
+                    tid,
+                ),
             )
-        print("  [P0-道具] 天晟审批单已存在，任务状态对账完成")
-        return
-    node = conn.execute(
-        "SELECT approve_node_id, post_id FROM approval.ap_approve_node "
-        "ORDER BY approve_node_id LIMIT 1"
-    ).fetchone()
-    node_id = node["approve_node_id"] if node else "NODE-2026-000001"
-    post_id = node["post_id"] if node else "POST-RISK-MGMT"
-    conn.execute(
-        "INSERT INTO approval.ap_approve_order ("
-        "approve_order_id, approve_order_type, approve_order_title, apply_user_id, "
-        "approved_user_id, apply_time, approve_time, approve_order_status, business_type, "
-        "remark, is_deleted, create_time, update_time, derive_warn_level_red, "
-        "derive_warn_level_yellow, derive_warn_level_blue, opinion_description) "
-        "VALUES (?, 'WARN_SGN', ?, ?, '', ?, NULL, 'PROCESS', ?, ?, 0, ?, ?, 1, 0, 0, NULL)",
-        (oid, title, apply_user, apply_time, btype, remark, apply_time, apply_time),
-    )
-    for tid, _oid, tstatus, tresult, tremark in PROP_APPROVE_TASK:
-        conn.execute(
-            "INSERT INTO approval.ap_approve_task ("
-            "approve_task_id, approve_order_id, approve_node_id, post_id, "
-            "approve_task_status, approve_result, approve_remark, approve_time, "
-            "is_deleted, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)",
-            (tid, oid, node_id, post_id, tstatus, tresult, tremark, apply_time, apply_time),
-        )
+        else:
+            conn.execute(
+                "INSERT INTO approval.ap_approve_task ("
+                "approve_task_id, approve_order_id, approve_node_id, post_id, "
+                "approve_task_status, approve_result, approve_remark, approve_time, "
+                "is_deleted, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                (
+                    tid,
+                    oid,
+                    node_id,
+                    post_id,
+                    tstatus,
+                    tresult,
+                    tremark,
+                    apply_time if tstatus == "COMPLETED" else None,
+                    apply_time,
+                    apply_time,
+                ),
+            )
     for rid, _oid, wid in PROP_APPROVE_WARN_REL:
-        conn.execute(
-            "INSERT INTO approval.ap_approve_warn_rel ("
-            "approve_warn_rel_id, approve_order_id, warning_id, is_deleted, "
-            "create_time, update_time) VALUES (?, ?, ?, 0, ?, ?)",
-            (rid, oid, wid, apply_time, apply_time),
-        )
-    print(f"  [P0-道具] 天晟审批链道具落库（{oid} / {PROP_APPROVE_TASK[0][0]} / {PROP_APPROVE_WARN_REL[0][0]}）")
+        exists = conn.execute(
+            "SELECT 1 FROM approval.ap_approve_warn_rel WHERE approve_warn_rel_id=?", (rid,)
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO approval.ap_approve_warn_rel ("
+                "approve_warn_rel_id, approve_order_id, warning_id, is_deleted, "
+                "create_time, update_time) VALUES (?, ?, ?, 0, ?, ?)",
+                (rid, oid, wid, apply_time, apply_time),
+            )
+    _seed_reject_audit()
+    print(
+        f"  [F4] 天晟审批链预置驳回态完成（{oid} REJECTED / "
+        f"{len(PROP_APPROVE_TASK)} 节点 / 驳回意见+审计行落库）"
+    )
+
+
+def patch_approval_reset_to_pending(conn: sqlite3.Connection) -> None:
+    """F4 现场 live 演示重置：把预置 REJECTED 驳回态重置回 PROCESS（节点 2 回 PENDING）。
+
+    供现场演示第 4 幕「人拦 AI」实时驳回：节点 1 保持已审（COMPLETED/APPROVED），节点 2
+    置回 PENDING（待审批人按第二十三条现场驳回）；审批单回 PROCESS（approve_disposal 仅
+    PROCESS 可审）。审计为 WORM 不可清（历史驳回审计行仍可回放），现场 live 驳回将追加新
+    审计行。幂等：可重复执行（每次重置回 PENDING）。
+    """
+    from src.des.generators.risk_script_props import (
+        PROP_APPROVE_ORDER,
+        PROP_APPROVE_TASK,
+    )
+
+    oid = PROP_APPROVE_ORDER[0][0]
+    apply_time = PROP_APPROVE_ORDER[0][3]
+    conn.execute(
+        "UPDATE approval.ap_approve_order SET approve_order_status='PROCESS', "
+        "approve_time=NULL, approved_user_id='', opinion_description=NULL, update_time=? "
+        "WHERE approve_order_id=?",
+        (apply_time, oid),
+    )
+    for tid, _oid, tstatus, tresult, tremark, node_seq in PROP_APPROVE_TASK:
+        if node_seq == 1:
+            conn.execute(
+                "UPDATE approval.ap_approve_task SET approve_task_status='COMPLETED', "
+                "approve_result='APPROVED', approve_remark='同意', approve_time=? "
+                "WHERE approve_task_id=?",
+                (apply_time, tid),
+            )
+        else:
+            conn.execute(
+                "UPDATE approval.ap_approve_task SET approve_task_status='PENDING', "
+                "approve_result=NULL, approve_remark=NULL, approve_time=NULL "
+                "WHERE approve_task_id=?",
+                (tid,),
+            )
+    print("  [F4] 天晟审批单已重置回 PROCESS（节点 2 回 PENDING，供现场 live 驳回）")
 
 
 _RUIHUA_SPLIT = (
@@ -646,9 +784,10 @@ def main() -> int:
         print("[6c] F3 瑞华敞口重分布（单家 < 行内限额）")
         patch_ruihua_redistribution(conn)
         conn.commit()
-        print("[7/7] P0-道具（第 4 幕天晟审批链）")
+        print("[7/7] F4 第 4 幕审批链（双节点 + 预置 REJECTED 驳回态 + 审计行）")
         patch_approval_prop(conn)
         conn.commit()
+        print("[8/8] F4 现场 live 演示重置工具（patch_approval_reset_to_pending 已注册，默认不执行）")
     finally:
         conn.close()
     print("===== 补丁完成 =====")

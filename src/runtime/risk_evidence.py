@@ -872,21 +872,59 @@ class EvidenceService:
             if disposal
             else "无处置方案"
         )
+        # F4 预置驳回态文案：REJECTED 单展示驳回意见（2023 办法第二十三条）+ 审计回放；
+        # PROCESS 单提示可驳回；办结单给出结论。
         if order_rows:
             o0 = order_rows[0]["order"]
-            chain_txt = (
-                f"审批单 {o0['approve_order_id']} 状态 = {o0['approve_order_status']}"
-                f"（任务 {len(order_rows[0]['tasks'])} 条）"
-            )
-            rejection_hint = (
-                "审批人可依 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易）"
-                "以 approve_disposal decision=REJECTED 驳回，处置退回重新起草。"
-                if o0["approve_order_status"] == "PROCESS"
-                else "审批已办结。"
-            )
+            o_status = o0["approve_order_status"]
+            if o_status == "REJECTED":
+                opinion = (o0.get("opinion_description") or "").strip()
+                chain_txt = (
+                    f"审批单 {o0['approve_order_id']} 状态 = REJECTED（已驳回"
+                    + (f"，意见：{opinion}" if opinion else "")
+                    + f"，任务 {len(order_rows[0]['tasks'])} 条）"
+                )
+                rejection_hint = (
+                    "驳回依据 = 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易），"
+                    "处置已退回重新起草。"
+                )
+            elif o_status == "PROCESS":
+                chain_txt = (
+                    f"审批单 {o0['approve_order_id']} 状态 = PROCESS"
+                    f"（任务 {len(order_rows[0]['tasks'])} 条）"
+                )
+                rejection_hint = (
+                    "审批人可依 2023 关联交易办法第二十三条（禁止隐匿关联关系拆分交易）"
+                    "以 approve_disposal decision=REJECTED 驳回，处置退回重新起草。"
+                )
+            else:
+                chain_txt = (
+                    f"审批单 {o0['approve_order_id']} 状态 = {o_status}"
+                    f"（任务 {len(order_rows[0]['tasks'])} 条）"
+                )
+                rejection_hint = "审批已办结。"
         else:
             chain_txt = "暂无待审批单"
             rejection_hint = ""
+        # F4/F6：审批链审计回放——按审批单号取 approve_disposal 审计行（风险本体库，WORM）
+        audit_trail: list[dict[str, Any]] = []
+        order_ids = {o["order"]["approve_order_id"] for o in order_rows}
+        if order_ids:
+            try:
+                oconn = self._store.ontology_conn()
+                rows = oconn.execute(
+                    "SELECT audit_id, ts, action_name, actor, actor_detail, outcome, "
+                    "params_json, message FROM audit_log "
+                    "WHERE action_name='approve_disposal' ORDER BY seq"
+                ).fetchall()
+                for r in rows:
+                    params = r["params_json"] or ""
+                    if any(oid in params for oid in order_ids):
+                        audit_trail.append(dict(r))
+            except Exception:  # noqa: BLE001  # 审计回放尽力而为：本体审计库不可读时证据链仍须返回
+                audit_trail = []
+            finally:
+                oconn.close()
         conclusion = (
             f"预警 {signal['signal_id']}（等级 {signal['warn_level']}，状态 {status}）；"
             f"{disp_txt}；{chain_txt}。{rejection_hint}"
@@ -899,6 +937,7 @@ class EvidenceService:
                 "ap_warning_disposal",
                 "approval.ap_approve_order",
                 "approval.ap_approve_task",
+                "audit_log",
             ],
             "rules_hits": [
                 {
@@ -915,6 +954,7 @@ class EvidenceService:
                     "signal": signal,
                     "disposal": disposal,
                     "approve_orders": order_rows,
+                    "audit_trail": audit_trail,
                 }
             ],
         }
