@@ -608,7 +608,10 @@ def _warn_reason(level: str, level2: str, inputs: dict[str, float]) -> str:
     if level2 == "押品贬值":
         return f"押品估值较上期下降 {inputs['collateral_depreciation'] * 100:.0f}%，触发{cn}预警"
     if level2 == "集中度超限":
-        return f"集团集中度敞口超限 {inputs['concentration_overrun'] * 100:.0f}%，触发{cn}预警"
+        # F2 修复：RNG 浓度类信号的事由剥离百分比，只留维度描述（不写死「敞口超限 10%」——
+        # 该百分比是 RNG 独立流生成的，与源库集中度实算（concentration_limit 归集）脱钩，
+        # 低集中度集团会被误判为「集中度敞口超限 10%」；剥离后口径以实算为准，文案不再自相矛盾）。
+        return f"集团集中度敞口超限，触发{cn}预警"
     if level2 == "关联交易":
         return f"关联交易异动幅度 {inputs['related_change'] * 100:.0f}%，触发{cn}预警"
     # 根因二：level2 以「异常」结尾（如 数据异常）不再重复拼接「异常」（防「数据异常异常」）

@@ -713,18 +713,34 @@ class EvidenceService:
         )
         dimension = "non_concentration" if is_non_conc else "concentration"
         compare = self._r1a_comparison_text(ratio, cfg)
+        reason_text = (sig["warn_reason"] or "") if sig else ""
+        # F2 修复：verify-reason 先查 warning_dimension 再答——
+        # ① 颜色按信号实级（「标红/标橙」），杜绝「橙说成红」；
+        # ② 非集中度维度下，浓度类文案不得硬归「行为/内控/模型评分」维度（循环自指）：
+        #    文案提及集中度但实算未达关注线 → 明说口径不一致、以实算为准。
         if is_non_conc:
+            color = sig_level or "红/橙"
+            if "集中度" in reason_text:
+                trigger = (
+                    f"信号登记事由 = 「{reason_text}」（提及集中度，但实算集中度 "
+                    f"{self._ratio_display(ratio)} 未达关注线 "
+                    f"{cfg.concern_line * 100:.0f}%，按预警维度归类为非集中度类，"
+                    "口径以实算为准）"
+                )
+            else:
+                trigger = (
+                    f"真实触发 = 「{reason_text}」（行为/内控/模型评分类硬规则命中）"
+                )
             conclusion = (
-                f"该行标红原因是非集中度维度：{group} 集中度实算 "
+                f"该行标{color}原因是非集中度维度：{group} 集中度实算 "
                 f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
-                f"与红/橙预警无关；真实触发 = 「{sig['warn_reason']}」"
-                "（行为/内控/模型评分类硬规则命中）。"
+                f"与集中度阈值无关；{trigger}。"
             )
         elif sig_level in ("红", "橙"):
             conclusion = (
-                f"该行标红原因是集中度维度：{group} 集中度实算 "
+                f"该行标{sig_level}原因是集中度维度：{group} 集中度实算 "
                 f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
-                f"预警信号 = 「{sig['warn_reason']}」。"
+                f"预警信号 = 「{reason_text}」。"
             )
         else:
             conclusion = (
@@ -748,13 +764,22 @@ class EvidenceService:
             }
         ]
         if is_non_conc:
+            if "集中度" in reason_text:
+                n1_clause = "非集中度预警维度（文案与集中度实算不一致，以实算为准）"
+                n1_note = (
+                    "信号文案提及集中度但实算未达关注线，按预警维度归类为非集中度类，"
+                    "口径以实算为准（防文案与实算脱钩）"
+                )
+            else:
+                n1_clause = "非集中度预警维度（行为/内控/模型评分硬规则命中）"
+                n1_note = "该集团集中度实算无警却标红/橙，真实触发见 warn_reason"
             rules_hits.append(
                 {
                     "rule": "N1",
-                    "name": "非集中度预警维度（标红真实原因）",
-                    "clause": "非集中度预警维度（行为/内控/模型评分硬规则命中）",
-                    "text": sig["warn_reason"],
-                    "note": "该集团集中度实算无警却标红/橙，真实触发见 warn_reason",
+                    "name": "非集中度预警维度（真实原因）",
+                    "clause": n1_clause,
+                    "text": reason_text,
+                    "note": n1_note,
                 }
             )
         return {

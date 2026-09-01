@@ -429,6 +429,36 @@ def patch_data_anomaly_concat(conn: sqlite3.Connection) -> None:
         print(f"  [P0-文案] 数据异常异常 → 数据异常（{cur.rowcount} 行）")
 
 
+def patch_concentration_reason_percent(conn: sqlite3.Connection) -> None:
+    """F2：RNG 浓度类信号事由剥离百分比（文案与实算脱钩 → 只留维度描述）。
+
+    生成器 risk_generators._warn_reason 已改（未来再生成即无百分比）；本函数对存量库
+    迁移：把「集团集中度敞口超限 10%」类事由剥离百分比为「集团集中度敞口超限」——
+    该百分比是 RNG 独立流生成的，与源库集中度实算（concentration_limit 归集）脱钩，
+    低集中度集团会被误判为「敞口超限 10%」（如 翔宇东北（05）实算 0.9%）。
+    剧本道具事由（天晟/瑞华「归集余额 X 亿元 ÷ 800 亿元 = Y%」）不以「集团集中度
+    敞口超限」开头，不受影响。
+    """
+    import re
+
+    pat = re.compile(r"^(集团集中度敞口超限) \d+%")
+    rows = conn.execute(
+        "SELECT warning_id, warn_reason FROM ap_warning_signal "
+        "WHERE warn_reason LIKE '集团集中度敞口超限%'"
+    ).fetchall()
+    n = 0
+    for r in rows:
+        new = pat.sub(r"\1", r["warn_reason"] or "")
+        if new != r["warn_reason"]:
+            conn.execute(
+                "UPDATE ap_warning_signal SET warn_reason=? WHERE warning_id=?",
+                (new, r["warning_id"]),
+            )
+            n += 1
+    if n:
+        print(f"  [F2] 浓度类事由剥离百分比（{n} 行）")
+
+
 def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
     """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
 
@@ -539,6 +569,9 @@ def main() -> int:
         patch_group_name_uniqueness(conn)
         patch_data_anomaly_concat(conn)
         patch_sys_param_in_universe(conn)
+        conn.commit()
+        print("[6b] F2 浓度类事由剥离百分比（文案对齐实算）")
+        patch_concentration_reason_percent(conn)
         conn.commit()
         print("[7/7] P0-道具（第 4 幕天晟审批链）")
         patch_approval_prop(conn)
