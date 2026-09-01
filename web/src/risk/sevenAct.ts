@@ -161,12 +161,23 @@ export const RUIHUA_YELLOW_CASE: {
   name: string;
   ratioPct: number;
   level: ZhWarnLevel;
+  institutions: InstitutionExposure[];
+  consolidatedYi: number;
   chain: string[];
   closing: string;
 } = {
   name: '瑞华能源集团有限公司',
   ratioPct: 9.4,
   level: '黄',
+  // F3 修复：瑞华敞口重分布到多家附属机构（单家均 < 行内限额/参考线），与后端
+  // /risk/reporting/draft、ap_subsidiary_credit_detail（SC-2026-900005/6/7）同源：
+  // 安平银行 40 亿（6.7%）+ 安平证券 20 亿（5.0%）+ 安平资管 15.2 亿（7.6%）= 75.2 亿。
+  institutions: [
+    { org: '安平银行', balanceYi: 40, ratioPct: 6.7, denominatorYi: 600, refLine: '行内内部限额 60 亿' },
+    { org: '安平证券', balanceYi: 20, ratioPct: 5.0, denominatorYi: 400, refLine: '参考线 5.5%' },
+    { org: '安平资产管理', balanceYi: 15.2, ratioPct: 7.6, denominatorYi: 200, refLine: '参考线 8.2%' },
+  ],
+  consolidatedYi: 75.2,
   chain: ['黄色预警生成', '确认 + 定级', '处置方案（追加担保 · 压降敞口）', '双签审批', '解除 + 解除报告'],
   closing: '完整解除关闭闭环：close_warning + 解除报告，全链路可回放。',
 };

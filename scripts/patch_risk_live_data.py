@@ -546,6 +546,76 @@ def patch_approval_prop(conn: sqlite3.Connection) -> None:
     print(f"  [P0-道具] 天晟审批链道具落库（{oid} / {PROP_APPROVE_TASK[0][0]} / {PROP_APPROVE_WARN_REL[0][0]}）")
 
 
+_RUIHUA_SPLIT = (
+    ("SC-2026-900005", "安平银行", 400000.0, 40.0),
+    ("SC-2026-900006", "安平证券", 200000.0, 20.0),
+    ("SC-2026-900007", "安平资产管理", 152000.0, 15.2),
+)
+
+
+def patch_ruihua_redistribution(conn: sqlite3.Connection) -> None:
+    """F3：瑞华敞口重分布到多家附属机构（单家 < 行内限额 60 亿），与生成器同源。
+
+    现状：瑞华 75.2 亿全挂安平银行（>行内限额 60 亿），结论模板却断言「单看均安全」——
+    算术矛盾+双重病根（种子全挂一家+模板写死均安全）。重分布为 安平银行 40 亿 +
+    安平证券 20 亿 + 安平资管 15.2 亿（合计 75.2 亿 → 9.4% 黄不变，§七 第 6 幕闭环案例）。
+    幂等：按 project_id 定位（存在即对账更新金额/机构，不存在即插入）。
+    """
+    src = conn.execute(
+        "SELECT * FROM customer.ap_subsidiary_credit_detail WHERE project_id=?",
+        ("SC-2026-900005",),
+    ).fetchone()
+    if src is None:
+        print("  [F3] 瑞华授信行缺失（SC-2026-900005），跳过")
+        return
+    base = dict(src)
+    for pid, org, bal_wan, _yi in _RUIHUA_SPLIT:
+        row = dict(base)
+        row["project_id"] = pid
+        row["org_name"] = org
+        row["project_name"] = f"瑞华实业有限公司{org}授信项目"
+        row["business_balance"] = bal_wan
+        row["risk_exposure"] = bal_wan
+        row["pledge_value"] = round(bal_wan * 0.3, 2)
+        row["guarantee_value"] = round(bal_wan * 0.2, 2)
+        row["limit_value"] = bal_wan
+        exists = conn.execute(
+            "SELECT 1 FROM customer.ap_subsidiary_credit_detail WHERE project_id=?",
+            (pid,),
+        ).fetchone()
+        if exists:
+            conn.execute(
+                "UPDATE customer.ap_subsidiary_credit_detail SET org_name=?, project_name=?, "
+                "business_balance=?, risk_exposure=?, pledge_value=?, guarantee_value=?, "
+                "limit_value=? WHERE project_id=?",
+                (
+                    org,
+                    row["project_name"],
+                    bal_wan,
+                    bal_wan,
+                    row["pledge_value"],
+                    row["guarantee_value"],
+                    bal_wan,
+                    pid,
+                ),
+            )
+        else:
+            cols = ", ".join(row.keys())
+            placeholders = ", ".join("?" * len(row))
+            conn.execute(
+                f"INSERT INTO customer.ap_subsidiary_credit_detail ({cols}) "
+                f"VALUES ({placeholders})",
+                list(row.values()),
+            )
+    n = conn.execute(
+        "SELECT COUNT(*) n FROM customer.ap_subsidiary_credit_detail "
+        "WHERE customer_name='瑞华实业有限公司'"
+    ).fetchone()["n"]
+    print(
+        f"  [F3] 瑞华敞口重分布完成（{n} 行；安平银行 40 / 安平证券 20 / 安平资管 15.2 亿）"
+    )
+
+
 def main() -> int:
     print("===== S4 修复轮 · 活系统数据补丁 =====")
     conn = _main_conn()
@@ -572,6 +642,9 @@ def main() -> int:
         conn.commit()
         print("[6b] F2 浓度类事由剥离百分比（文案对齐实算）")
         patch_concentration_reason_percent(conn)
+        conn.commit()
+        print("[6c] F3 瑞华敞口重分布（单家 < 行内限额）")
+        patch_ruihua_redistribution(conn)
         conn.commit()
         print("[7/7] P0-道具（第 4 幕天晟审批链）")
         patch_approval_prop(conn)
