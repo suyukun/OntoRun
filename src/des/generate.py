@@ -1289,12 +1289,14 @@ def build_enterprise(
 
     # S4 剧本道具注入（口径包§七，全量时）：确定性道具行并入 ctx（RNG 行数已在
     # risk_generators._row_count 扣除对应 prop 数，行数不变量：RNG + 道具 = 配置 row_count）。
+    # 仅注入本企业生成序内的表（table_id in ctx）：S4 金控企业 ap_anping 九张风险表齐备、
+    # 全部注入；S2 零售企业（hc_precision 等）无风险表，SKIP（防 KeyError，M1 回归修复）。
     # 小 scale（scale≠None）不注入（RNG 表行数 = 配置缩放行数）。
     if scale is None:
         from .generators.risk_script_props import build_script_props
 
         for table_id, prop_rows in build_script_props(ctx).items():
-            if not prop_rows:
+            if not prop_rows or table_id not in ctx:
                 continue
             ctx[table_id] = _sort_rows(
                 [*ctx[table_id], *prop_rows], TABLE_SPECS[table_id]["pk"]
