@@ -48,7 +48,7 @@ PARAM_META: dict[str, dict[str, str]] = {
         "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元，集团层分母）",
-        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（演示明细注明）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（不含保证金存款及国债存单净额项）",
     },
     "CAP_BANK_NET": {
         "param_source": "安平银行资本监管报表口径（2025 年末资本净额）",
@@ -69,7 +69,7 @@ PARAM_META: dict[str, dict[str, str]] = {
         "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "单一集团客户授信余额",
         "denominator_desc": "安平银行资本净额（600 亿元，×10% = 60 亿）",
-        "netting_rule": "银行层内部限额（与集团层预警线 10% 同名不同分母，演示带绝对额）",
+        "netting_rule": "银行层内部限额（与集团层预警线 10% 同名不同分母，限额按绝对额执行）",
     },
     "CAP_SECURITIES_REF_LINE": {
         "param_source": "安平证券参考线内融资占比口径（融资额/参考线分母）",

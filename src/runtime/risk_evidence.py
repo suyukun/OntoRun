@@ -109,7 +109,7 @@ PARAM_META: dict[str, dict[str, str]] = {
         "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元，集团层分母）",
-        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（明细注明）",
+        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项（不含保证金存款及国债存单净额项）",
         "version": "v3",
         "update_time": "2026-11-30",
     },
@@ -336,7 +336,7 @@ class EvidenceService:
                     "name": "集团层归集集中度",
                     "clause": R1A_CLAUSE,
                     "lines": R1A_LINES,
-                    "note": "三线阈值全部可配置（base.ap_sys_param），禁硬编码；改参数即改规则",
+                    "note": "三线阈值配置于系统参数表（base.ap_sys_param），调整参数即调整预警线，全行统一、留痕可追溯",
                 }
             ],
             "denominator": {
