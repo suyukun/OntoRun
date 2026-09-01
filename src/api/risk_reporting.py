@@ -39,6 +39,7 @@ from src.runtime.risk_rules import (
     R1aConfig,
     concentration_ledger_aggregation_yi,
     evaluate_group_concentration,
+    pct_display,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,11 +81,8 @@ _OPEN_STATUSES = ("待确认", "确认中", "已确认", "处置中")
 
 
 def _pct_display(ratio: float) -> str:
-    """百分比展示统一两位小数（尾部零不冗余）：F6 修复「1.0% vs 1.03% 取整两貌」。"""
-    x = round(ratio * 100, 2)
-    if abs(x - round(x, 1)) < 1e-9:
-        return f"{x:.1f}%"
-    return f"{x:.2f}%"
+    """百分比展示统一两位小数（F12：单一实现 = risk_rules.pct_display，全链同源）。"""
+    return pct_display(ratio)
 
 
 class _ReportService:

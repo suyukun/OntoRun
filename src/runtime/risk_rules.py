@@ -47,6 +47,20 @@ LEVEL_NONE = "无"
 # business_balance 单位 = 万元 → 亿元
 _WAN_TO_YI = 10000.0
 
+
+def pct_display(ratio: float) -> str:
+    """百分比展示统一两位小数（F6/F12 全链单一实现）：尾部零不冗余。
+
+    1.03% 不被截断为 1.0%；10.8% / 8.0% 等恰好一位小数的值保持一位小数
+    （不显示 10.80% / 8.00%），与既有断言（8.0% / 10.8% / 12.8%）兼容。
+    evidence / reporting / rules 全链共用本函数（F12 补齐漏网点）。
+    """
+    x = round(ratio * 100, 2)
+    if abs(x - round(x, 1)) < 1e-9:
+        return f"{x:.1f}%"
+    return f"{x:.2f}%"
+
+
 # R2 三线索关键词（口径包§七：股权代持线索/交叉担保链/资金往来异动）
 _CLUE_KEYWORDS: tuple[str, ...] = ("股权代持", "交叉担保", "资金往来")
 
@@ -284,7 +298,7 @@ class R1aResult:
         return (
             f"R1a 集团层归集集中度实算：归集 {self.total_yi:.1f} 亿元"
             f"（集团自身 {self.base_aggregation_yi:.1f} 亿{rel_txt}）"
-            f" ÷ 集团并表资本 {cfg.group_capital_yi:.0f} 亿元 = {self.ratio * 100:.1f}%；"
+            f" ÷ 集团并表资本 {cfg.group_capital_yi:.0f} 亿元 = {pct_display(self.ratio)}；"
             f"阈值（base.ap_sys_param）关注线 {cfg.concern_line * 100:.0f}%（黄）/"
             f"预警线 {cfg.warn_line * 100:.0f}%（橙）/内部限额 {cfg.internal_limit * 100:.0f}%"
             f"（红，须 >{cfg.internal_limit * 100:.0f}%）；规则定级：{self.level}"
@@ -454,6 +468,7 @@ __all__ = [
     "is_r1a_governed",
     "level_for_ratio",
     "open_rules_conn",
+    "pct_display",
     "related_parties",
     "resolve_group_name",
 ]

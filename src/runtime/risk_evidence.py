@@ -33,6 +33,7 @@ from src.runtime.risk_rules import (
     evaluate_group_concentration,
     has_concentration_ledger,
     level_for_ratio,
+    pct_display,
 )
 
 # ---------------------------------------------------------------------------
@@ -154,15 +155,8 @@ _WAN_TO_YI = 10000.0  # business_balance 单位 = 万元 → 亿元
 
 
 def _pct_display(ratio: float) -> str:
-    """百分比展示统一两位小数（尾部零不冗余）：F6 修复「1.0% vs 1.03% 取整两貌」。
-
-    1.03% 不再被截断为 1.0%；10.8% / 8.0% 等恰好一位小数的值保持一位小数（不显示
-    10.80% / 8.00%），与既有断言（8.0% / 10.8% / 12.8%）兼容。
-    """
-    x = round(ratio * 100, 2)
-    if abs(x - round(x, 1)) < 1e-9:
-        return f"{x:.1f}%"
-    return f"{x:.2f}%"
+    """百分比展示统一两位小数（F12：单一实现 = risk_rules.pct_display，全链同源）。"""
+    return pct_display(ratio)
 
 
 class EvidenceError(RuntimeError):
@@ -255,7 +249,7 @@ class EvidenceService:
         implied = level_for_ratio(ratio, cfg)
         if implied != level:
             raise AssertionError(
-                f"{ctx} 结论自检失败：computed ratio {ratio * 100:.1f}% 的 R1a 定级为 "
+                f"{ctx} 结论自检失败：computed ratio {_pct_display(ratio)} 的 R1a 定级为 "
                 f"「{implied}」，与结论声明的「{level}」不一致（结论模板须由实算生成）"
             )
 
@@ -426,7 +420,11 @@ class EvidenceService:
             ratio = d.get("org_reference_ratio")
             ok = ratio is not None and ratio <= ref_ratio
             display = EvidenceService._ratio_display(ratio) if ratio is not None else "-"
-            mark = f"参考线 {ref_ratio * 100:.1f}% 内" if ok else f"超参考线 {ref_ratio * 100:.1f}%"
+            mark = (
+                f"参考线 {_pct_display(ref_ratio)} 内"
+                if ok
+                else f"超参考线 {_pct_display(ref_ratio)}"
+            )
             return f"{org} {display}（{mark}）", ok
         return f"{org} {balance:.1f} 亿", True
 

@@ -149,7 +149,8 @@ export function pctOf(ratio: number): string {
 // 存储层 group_customer_name 含「（NN）」后缀保证全局唯一（口径包§五 名称纯净化不引入「·」），
 // 展示层把编号拆成独立元素，避免「翔宇电子华北集团（16）」读起来像脚注。
 export function splitGroupSeq(name: string): { base: string; seq: string | null } {
-  const m = /^(.*?)[（(](d{2})[）)]$/.exec(name);
+  // F12：编号后缀「（NN）」样式对齐——(d{2}) 应为 \d{2}（数字），修复编号列不拆分
+  const m = /^(.*?)[（(](\d{2})[）)]$/.exec(name);
   if (m) return { base: m[1], seq: m[2] };
   return { base: name, seq: null };
 }
