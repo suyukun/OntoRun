@@ -923,11 +923,13 @@ def test_f16_ranking_adjacent_display_distinct(client: TestClient) -> None:
 def test_f16_equal_line_wording_touched(client: TestClient) -> None:
     """F16②：证券 5.5% / 资管 8.2% 恰等参考线 = 触达（达线即警），不得称「参考线内」。"""
     reveal = _reveal(client)
-    assert "触达参考线 5.5%（达线即警）" in reveal["conclusion"]
-    assert "触达参考线 8.2%（达线即警）" in reveal["conclusion"]
+    assert "触达参考线 5.5%，达线即警" in reveal["conclusion"]
+    assert "触达参考线 8.2%，达线即警" in reveal["conclusion"]
     assert "参考线 5.5% 内" not in reveal["conclusion"]
     assert "参考线 8.2% 内" not in reveal["conclusion"]
     assert "已触达参考线" in reveal["conclusion"]
+    # F25：不得出现嵌套括号「（触达参考线 5.5%（达线即警））」
+    assert "（触达参考线 5.5%（" not in reveal["conclusion"]
 
 
 def test_f17_note_conditional_on_related_parties(client: TestClient) -> None:
@@ -960,3 +962,41 @@ def test_f17_related_tail_note_conditional(client: TestClient) -> None:
         params={"group_customer_no": "GRP-2026-001516"},
     ).json()["data"]
     assert "本行为纳入隐性关联前的归集口径" not in res["conclusion"]
+
+
+def test_f24_thresholds_include_org_ref_lines(client: TestClient) -> None:
+    """F24：机构级参考线（银行 60 亿/证券 5.5%/资管 8.2%）在 thresholds 可查证出处。"""
+    data = client.get("/risk/thresholds").json()["data"]
+    ids = {p["param_id"] for p in data["detail_rows"]}
+    assert {
+        "CAP_BANK_INTERNAL_LIMIT",
+        "CAP_SECURITIES_REF_LINE",
+        "CAP_AM_REF_LINE",
+    } <= ids, f"thresholds 缺机构参考线参数行: {ids}"
+    org_rows = {
+        p["param_id"]: p for p in data["detail_rows"] if p["param_id"] in (
+            "CAP_BANK_INTERNAL_LIMIT",
+            "CAP_SECURITIES_REF_LINE",
+            "CAP_AM_REF_LINE",
+        )
+    }
+    for pid, row in org_rows.items():
+        assert row["param_source"], f"{pid} 缺出处条款"
+        assert row["param_approver"], f"{pid} 缺审批人"
+    assert "机构级参考线" in data["conclusion"]
+
+
+def test_f25_wording_polish(client: TestClient) -> None:
+    """F25：文案细节包——「该集团」量词、verify-reason 比率不重复、审批链拼接无「。，」。"""
+    vr = client.get(
+        "/risk/evidence/verify-reason",
+        params={"group_customer_no": "GRP-2026-001516"},
+    ).json()["data"]
+    assert "该集团标橙原因" in vr["conclusion"]
+    assert "该行标" not in vr["conclusion"]
+    assert "实算 0.93%（0.93%" not in vr["conclusion"], "比率不应重复出现"
+    ac = client.get(
+        "/risk/evidence/approval-chain",
+        params={"warning_id": "WS-2026-90000002"},
+    ).json()["data"]
+    assert "。，" not in ac["conclusion"], f"审批链结论有拼接残渣: {ac['conclusion'][-120:]}"

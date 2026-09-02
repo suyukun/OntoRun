@@ -121,7 +121,7 @@ PARAM_META: dict[str, dict[str, str]] = {
         "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元）",
-        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+        "netting_rule": "分子扣除 2003 指引第十二条（2010 修订）允许的净额项",
         "version": "v3",
         "update_time": "2026-11-30",
     },
@@ -133,7 +133,7 @@ PARAM_META: dict[str, dict[str, str]] = {
         "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元）",
-        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+        "netting_rule": "分子扣除 2003 指引第十二条（2010 修订）允许的净额项",
         "version": "v3",
         "update_time": "2026-11-30",
     },
@@ -145,7 +145,45 @@ PARAM_META: dict[str, dict[str, str]] = {
         "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
         "numerator_desc": "归集余额（联合授信台账合计数，含表外承诺扣净额项）",
         "denominator_desc": "集团并表资本（800 亿元）",
-        "netting_rule": "分子扣除 2010 修订第十二条允许的净额项",
+        "netting_rule": "分子扣除 2003 指引第十二条（2010 修订）允许的净额项",
+        "version": "v3",
+        "update_time": "2026-11-30",
+    },
+    # F24：机构级参考线三行——此前 thresholds 只回集团层四参，授信岗质疑「证券 5.5%/
+    # 资管 8.2%/银行 60 亿 出处断档」。条目引用与看板/证据链同源，全称统一。
+    PARAM_BANK_INTERNAL_LIMIT: {
+        "param_type_code": "ORG_REF_LINE",
+        "param_value": "60",
+        "param_description": "安平银行行内内部限额（60 亿，绝对额口径，超线即警）",
+        "param_source": "《商业银行大额风险暴露管理办法》（2018）第七/八条 + 安平行内限额口径",
+        "param_approver": "安平银行风险管理部（2025-06-30 审批，版本 v3）",
+        "numerator_desc": "对集团授信余额（绝对额，亿元）",
+        "denominator_desc": "不适用（绝对额限额，无分母）",
+        "netting_rule": "按 2003 指引第十二条（2010 修订）扣净额项",
+        "version": "v3",
+        "update_time": "2026-11-30",
+    },
+    PARAM_SECURITIES_REF_LINE: {
+        "param_type_code": "ORG_REF_LINE",
+        "param_value": "0.055",
+        "param_description": "安平证券参考线内融资占比（5.5%，触线即警）",
+        "param_source": "安平金控内部自设口径（对照证券行业风控指标框架，2025-06-30 审批）",
+        "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
+        "numerator_desc": "对集团融资余额",
+        "denominator_desc": "安平证券参考线分母（400 亿元）",
+        "netting_rule": "按 2003 指引第十二条（2010 修订）扣净额项",
+        "version": "v3",
+        "update_time": "2026-11-30",
+    },
+    PARAM_AM_REF_LINE: {
+        "param_type_code": "ORG_REF_LINE",
+        "param_value": "0.082",
+        "param_description": "安平资产管理参考线内融资占比（8.2%，触线即警）",
+        "param_source": "安平金控内部自设口径（2025-06-30 审批）",
+        "param_approver": "安平金控风险管理部（2025-06-30 审批，版本 v3）",
+        "numerator_desc": "对集团融资余额",
+        "denominator_desc": "安平资产管理参考线分母（200 亿元）",
+        "netting_rule": "按 2003 指引第十二条（2010 修订）扣净额项",
         "version": "v3",
         "update_time": "2026-11-30",
     },
@@ -389,12 +427,15 @@ class EvidenceService:
                 "param_type_code, version, update_time, update_user, "
                 "param_source, param_approver, numerator_desc, denominator_desc, netting_rule "
                 "FROM base.ap_sys_param "
-                "WHERE param_id IN (?,?,?,?)",
+                "WHERE param_id IN (?,?,?,?,?,?,?)",
                 (
                     PARAM_CONCERN_LINE,
                     PARAM_WARN_LINE,
                     PARAM_INTERNAL_LIMIT_RATIO,
                     PARAM_GROUP_CONSOLIDATED,
+                    PARAM_BANK_INTERNAL_LIMIT,
+                    PARAM_SECURITIES_REF_LINE,
+                    PARAM_AM_REF_LINE,
                 ),
             ).fetchall()
             params = []
@@ -423,7 +464,8 @@ class EvidenceService:
             "conclusion": (
                 "R1a 集团层归集集中度三线（安平内部口径，金控办法第三十二/三十三条自设）："
                 "关注线 9%（黄）/ 预警线 10%（橙）/ 内部限额 12%（红，须 >12%）；"
-                "分母 = 集团并表资本 800 亿元。"
+                "分母 = 集团并表资本 800 亿元。机构级参考线：安平银行行内限额 60 亿（绝对额）、"
+                "安平证券 5.5%、安平资产管理 8.2%（触线即警），出处见各参数行。"
             ),
             "basis_tables": ["base.ap_sys_param"],
             "rules_hits": [
@@ -487,7 +529,7 @@ class EvidenceService:
         if org == "安平银行":
             limit_yi = cap[PARAM_BANK_INTERNAL_LIMIT]
             if abs(balance - limit_yi) <= tol:
-                mark = f"触达行内限额 {limit_yi:.0f} 亿（达线即警）"
+                mark = f"触达行内限额 {limit_yi:.0f} 亿，达线即警"
                 status = "touched"
             elif balance < limit_yi:
                 mark = "行内限额内"
@@ -515,7 +557,7 @@ class EvidenceService:
                     "over",
                 )
             if abs(ratio - ref_ratio) <= tol:
-                mark = f"触达参考线 {_pct_display(ref_ratio)}（达线即警）"
+                mark = f"触达参考线 {_pct_display(ref_ratio)}，达线即警"
                 status = "touched"
             elif ratio < ref_ratio:
                 mark = f"参考线 {_pct_display(ref_ratio)} 内"
@@ -938,20 +980,20 @@ class EvidenceService:
                     f"真实触发 = 「{reason_text}」（行为/内控/模型评分类硬规则命中）"
                 )
             conclusion = (
-                f"该行标{color}原因是非集中度维度：{group} 集中度实算 "
-                f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
+                f"该集团标{color}原因是非集中度维度：集中度实算比对 "
+                f"{compare}（R1a 定级「{conc_level}」），"
                 f"与集中度阈值无关；{trigger}。"
             )
         elif sig_level in ("红", "橙"):
             conclusion = (
-                f"该行标{sig_level}原因是集中度维度：{group} 集中度实算 "
-                f"{self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」），"
+                f"该集团标{sig_level}原因是集中度维度：集中度实算比对 "
+                f"{compare}（R1a 定级「{conc_level}」），"
                 f"预警信号 = 「{reason_text}」。"
             )
         else:
             conclusion = (
                 f"{group} 当前无红/橙预警信号（最新信号等级 = {sig_level or '无'}）；"
-                f"集中度实算 {self._ratio_display(ratio)}（{compare}，R1a 定级「{conc_level}」）。"
+                f"集中度实算比对 {compare}（R1a 定级「{conc_level}」）。"
                 "用户所指标红行若无对应信号，请核对集团编号与看板列。"
             )
         rules_hits = [
@@ -1084,7 +1126,7 @@ class EvidenceService:
             o0 = order_rows[0]["order"]
             o_status = o0["approve_order_status"]
             if o_status == "REJECTED":
-                opinion = (o0.get("opinion_description") or "").strip()
+                opinion = (o0.get("opinion_description") or "").strip().rstrip("。，；,;")
                 chain_txt = (
                     f"审批单 {o0['approve_order_id']} 状态 = REJECTED（已驳回"
                     + (f"，意见：{opinion}" if opinion else "")
