@@ -803,8 +803,9 @@ def test_agent_chat_risk_query_evidence(tmp_path, monkeypatch) -> None:
 def test_verify_reason_non_concentration_dimension(client: TestClient) -> None:
     """质疑实查：低集中度却标红的行 → warning_dimension=non_concentration（R2-P0-A/R2-P1-A）。
 
-    华信建设西南集团集中度实算 6.2%（< 关注线 9%，R1a 定级「无」）却挂红——
+    华信建设西南集团集中度实算 0.41%（< 关注线 9%，R1a 定级「无」）却挂红——
     真实原因 = 非集中度维度（资质缺失异常/模型评分 88），不得套集中度逻辑错答。
+    （F26 勘误：早期材料误写 6.2%，实算以 0.41% 为准——单一事实来源。）
     """
     data = client.get(
         "/risk/evidence/verify-reason",
@@ -857,7 +858,7 @@ def test_agent_challenge_routes_to_verify_reason(tmp_path, monkeypatch) -> None:
             ChatResponse(
                 content=(
                     "让我先理清用户的问题。该行标红原因是非集中度维度"
-                    "（华信建设西南集团集中度实算 6.2%，R1a 定级「无」），"
+                    "（华信建设西南集团集中度实算 0.41%，R1a 定级「无」），"
                     "真实触发是资质缺失异常/模型评分 88，见证据链。"
                 )
             ),
@@ -871,7 +872,7 @@ def test_agent_challenge_routes_to_verify_reason(tmp_path, monkeypatch) -> None:
     with TestClient(app) as c:
         res = c.post(
             "/agent/risk/chat",
-            json={"message": "华信建设西南集团才 6.2% 凭什么挂红？"},
+            json={"message": "华信建设西南集团才 0.41% 凭什么挂红？"},
         )
         assert res.status_code == 200, res.text
         body = res.json()
