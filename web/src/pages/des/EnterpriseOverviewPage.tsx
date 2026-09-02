@@ -152,10 +152,10 @@ export default function EnterpriseOverviewPage() {
 
         {/* 概览卡区（数值全部来自端点） */}
         <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-          <Col xs={8} md={4}><Card size="small"><Statistic title="总库数" value={overview?.totals.databases ?? null} loading={loading} /></Card></Col>
-          <Col xs={8} md={4}><Card size="small"><Statistic title="总表数" value={overview?.totals.tables ?? null} loading={loading} /></Card></Col>
-          <Col xs={8} md={4}><Card size="small"><Statistic title="实时总行数" value={overview?.totals.live_rows ?? null} loading={loading} /></Card></Col>
-          <Col xs={8} md={4}><Card size="small"><Statistic title="seed" value={ent?.seed ?? null} formatter={(v) => String(v ?? '—')} loading={loading} /></Card></Col>
+          <Col xs={8} md={4}><Card size="small"><Statistic title="总库数" value={overview?.totals.databases ?? '—'} loading={loading} /></Card></Col>
+          <Col xs={8} md={4}><Card size="small"><Statistic title="总表数" value={overview?.totals.tables ?? '—'} loading={loading} /></Card></Col>
+          <Col xs={8} md={4}><Card size="small"><Statistic title="实时总行数" value={overview?.totals.live_rows ?? '—'} loading={loading} /></Card></Col>
+          <Col xs={8} md={4}><Card size="small"><Statistic title="seed" value={ent?.seed ?? '—'} formatter={(v) => String(v ?? '—')} loading={loading} /></Card></Col>
           <Col xs={8} md={4}><Card size="small"><Statistic title="数据版本" value={ent?.data_version ?? '—'} loading={loading} /></Card></Col>
           <Col xs={8} md={4}>
             <Card size="small">

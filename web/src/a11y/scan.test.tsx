@@ -14,7 +14,7 @@ import WorkbenchPage from '../risk/WorkbenchPage';
 import EnterpriseOverviewPage from '../pages/des/EnterpriseOverviewPage';
 import { miniSnapshot } from '../risk/testFixtures';
 
-type AxeResult = Awaited<ReturnType<typeof axe.run>>['violations'][number];
+type AxeResult = axe.AxeResults['violations'][number];
 
 const mockFetch = vi.fn();
 (globalThis as typeof globalThis & { fetch: typeof mockFetch }).fetch = mockFetch;
@@ -66,13 +66,14 @@ interface ScanOutcome {
 async function renderAndScan(ui: ReactElement, settle: () => Promise<unknown>): Promise<ScanOutcome> {
   const { container } = render(<MemoryRouter initialEntries={['/des']}>{ui}</MemoryRouter>);
   await settle();
-  const prev = globalThis.IS_REACT_ACT_ENVIRONMENT;
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  let res: Awaited<ReturnType<typeof axe.run>>;
+  const actEnv = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const prev = actEnv.IS_REACT_ACT_ENVIRONMENT;
+  actEnv.IS_REACT_ACT_ENVIRONMENT = true;
+  let res: axe.AxeResults;
   try {
-    res = await act(async () => axe.run(container, { resultTypes: ['violations', 'incomplete'] }));
+    res = await act(async (): Promise<axe.AxeResults> => axe.run(container, { resultTypes: ['violations', 'incomplete'] }));
   } finally {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = prev;
+    actEnv.IS_REACT_ACT_ENVIRONMENT = prev;
   }
   return {
     blockers: res.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious'),

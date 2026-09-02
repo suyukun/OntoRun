@@ -5,7 +5,7 @@ import '../i18n';
 // act() 环境：React 19 仅在 IS_REACT_ACT_ENVIRONMENT === true 时开启 act 语义与"未包 act"告警。
 // RTL 在 render/fireEvent/waitFor 前后已自行开关该标志，这里显式声明一次作为正确基线
 // （vitest+jsdom 下应为 true，保证 act 生效；测试必须 await 异步更新，见 riskData 快照用例）。
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Mock window.matchMedia for Ant Design (jsdom doesn't support it)
 Object.defineProperty(window, 'matchMedia', {
