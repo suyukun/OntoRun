@@ -279,8 +279,9 @@ def test_f13_detail_is_internal_marker(client: TestClient) -> None:
         assert d["is_internal"] is False
         assert d["internal_balance_yi"] == 0.0
         assert d["external_balance_yi"] == d["balance_yi"]
-    assert "抵销后外部净敞口" in reveal["conclusion"], "结论应带抵销勾稽说明"
-    assert "不可直接对比" in reveal["r2_levels"]["note"]
+    # F27：勾稽对账数字化——外部 + 内部抵销 = 明细合计 = 台账归集
+    assert "勾稽对账" in reveal["conclusion"], "结论应带三数对账"
+    assert "三数对账" in reveal["r2_levels"]["note"]
 
     up = _upgrade(client)
     assert up["detail_rows"], "天晟应含隐性关联方明细"

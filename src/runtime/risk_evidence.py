@@ -199,8 +199,8 @@ def _pct_display(ratio: float) -> str:
 
 # F13 勾稽说明（口径包§一 内部抵销注记）：明细=单家口径，归集=并表抵销后口径
 RECONCILIATION_NOTE = (
-    "成员间交叉授信/内部融资已按并表口径抵销，归集数为抵销后外部净敞口；"
-    "明细为单家口径（各附属机构外部融资逐家加总，未抵销），二者不可直接对比"
+    "成员间交叉授信/内部融资已按并表口径抵销；"
+    "明细外部合计 + 内部抵销 = 明细合计 = 台账归集数（三数对账，差异为零即勾稽成立）"
 )
 
 
@@ -681,12 +681,17 @@ class EvidenceService:
         # （post 分子 > pre 分子）时追加，无关联集团 pre=post 恒等不再空挂该尾注
         has_related = post.total_yi - pre.total_yi > 1e-9
         caliber_note = "（本行为纳入隐性关联前的归集口径）" if has_related else ""
+        # F27：勾稽对账数字化——外部合计 + 内部抵销 = 明细合计 = 台账归集（三数对账）
+        ext_sum = sum(d["external_balance_yi"] for d in detail)
+        int_sum = sum(d["internal_balance_yi"] for d in detail)
+        bal_sum = sum(d["balance_yi"] for d in detail)
         conclusion = (
             f"{head}；归集实算 {pre.total_yi:.1f} 亿元 ÷ 集团并表资本 "
             f"{group_cap:.0f} 亿元 = {compare_pre} → R1a 定级「{pre.level}」"
             f"{caliber_note}"
             + self._signal_tail(signals, "橙")
-            + f"；勾稽说明：{RECONCILIATION_NOTE}。"
+            + f"；勾稽对账：明细外部合计 {ext_sum:.1f} 亿 + 内部抵销 {int_sum:.1f} 亿"
+            f" = 明细合计 {bal_sum:.1f} 亿 = 台账归集；{RECONCILIATION_NOTE}。"
         )
         # F7b：证据链显式给出 pre_R2 / post_R2 两行 + 「纳入隐性关联前后」说明
         r2_levels = {

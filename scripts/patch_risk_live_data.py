@@ -793,6 +793,9 @@ def patch_group_ledger_reconciliation(conn: sqlite3.Connection) -> None:
             row = dict(base_row)
             row["project_id"] = pid
             row["customer_name"] = _F20_INTERNAL_COUNTERPARTY
+            # F27：org_name 独立——沿用模板 org 会被读侧 GROUP BY org_name 并组，
+            # 内部抵销行不可见（第八轮授信岗实证：0.99 亿藏进安平消费金融组）
+            row["org_name"] = "安平商业保理"
             row["business_balance"] = internal_wan
             row["risk_exposure"] = internal_wan
             row["limit_value"] = internal_wan
