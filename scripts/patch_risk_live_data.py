@@ -531,6 +531,128 @@ def patch_push_columns_cleanup(conn: sqlite3.Connection) -> None:
         print(f"  [F14] 推送列「敞口超限」残留剥离（{total} 行）")
 
 
+def _reason_stem(reason: str) -> str:
+    """F19：从事由文案剥离「，模型评分 N」与「，触发X色预警」尾巴，得事由词干。
+
+    跨行只搬事由类别、不搬评分数字（数字是各行独立实算，搬即编造）。
+    """
+    import re
+
+    s = re.sub(r"，模型评分\s*\d+", "", reason)
+    s = re.sub(r"，触发[红橙黄]色预警.*$", "", s)
+    return s.strip("，, ")
+
+
+def patch_signal_reason_dimension_fix(conn: sqlite3.Connection) -> None:
+    """F19：非集中度维度信号的「集团集中度指标异动」模板文案改写为真实触发语气。
+
+    F8/F14 两轮清洗把「敞口超限 N%」统一替换为模板「集团集中度指标异动」，但该
+    模板被贴到了实算集中度 <9% 关注线的非集中度维度集团信号上（000098 实算
+    0.41%、001516 实算 0.93%），与 verify-reason 结论「与集中度阈值无关」同屏
+    自相矛盾（第七轮复测 P1 实证）。
+
+    口径（07 方案 §四 定稿）：
+    - 台账实算 ≥9% 的集团仅天晟/瑞华两组，其信号为完整 R1a 计算句、不含模板，
+      故全部模板行都属于误标、整行改写（无分桶）；
+    - 改写 = 同集团姊妹信号（warn_reason 不含「集中度」）最高频文案的事由词干
+      + 本行原等级短语；无姊妹集团兜底「综合指标异动」；
+    - push_warn_reason 与 warn_reason 同值同步；ap_warning_push 经 warning_id
+      关联；ap_warn_derive_sub_push 经 customer_id → ap_customer 关联集团；
+    - 顺带收口「数据异常异常」拼接残留（push 三列 637 行，历史补丁只修了
+      warn_reason 列）；
+    - 幂等：改写后行不再含模板，重复执行零变更。
+    ⚠️ 本函数不注册进 main()——活库执行需 Jack 对 07 方案拍板后手动调用。
+    """
+    import re
+
+    template = "集团集中度指标异动"
+    stem_cache: dict[str, str] = {}
+    fallback = "综合指标异动"
+
+    def _group_stem(gno: str | None) -> str:
+        if not gno:
+            return fallback
+        if gno in stem_cache:
+            return stem_cache[gno]
+        row = conn.execute(
+            "SELECT warn_reason, COUNT(*) n FROM ap_warning_signal "
+            "WHERE group_customer_no=? AND warn_reason NOT LIKE '%集中度%' "
+            "GROUP BY warn_reason ORDER BY n DESC LIMIT 1",
+            (gno,),
+        ).fetchone()
+        stem = _reason_stem(row["warn_reason"]) if row and row["warn_reason"] else fallback
+        stem_cache[gno] = stem or fallback
+        return stem_cache[gno]
+
+    def _rewrite(old: str, stem: str) -> str:
+        m = re.search(r"触发[红橙黄]色预警", old or "")
+        tail = m.group(0) if m else "触发预警（触发事由见处置明细）"
+        return f"{stem}，{tail}"
+
+    # 1) ap_warning_signal：warn_reason 与 push_warn_reason 同值改写
+    rows = conn.execute(
+        "SELECT signal_id AS pk, group_customer_no AS gno, warn_level, "
+        "warn_reason AS v FROM ap_warning_signal "
+        "WHERE warn_reason LIKE ?",
+        (template + "%",),
+    ).fetchall()
+    for r in rows:
+        new = _rewrite(r["v"], _group_stem(r["gno"]))
+        conn.execute(
+            "UPDATE ap_warning_signal SET warn_reason=?, push_warn_reason=? "
+            "WHERE signal_id=?",
+            (new, new, r["pk"]),
+        )
+    print(f"  [F19] 信号事由列模板改写 {len(rows)} 行")
+
+    # 2) ap_warning_push：经 warning_id 关联信号，取改写后事由
+    rows = conn.execute(
+        "SELECT p.warning_push_id AS pk, s.warn_reason AS nr "
+        "FROM ap_warning_push p JOIN ap_warning_signal s "
+        "ON p.warning_id = s.warning_id "
+        "WHERE p.push_warn_reason LIKE ?",
+        (template + "%",),
+    ).fetchall()
+    for r in rows:
+        conn.execute(
+            "UPDATE ap_warning_push SET push_warn_reason=? WHERE warning_push_id=?",
+            (r["nr"], r["pk"]),
+        )
+    print(f"  [F19] 推送表经 warning_id 关联改写 {len(rows)} 行")
+
+    # 3) ap_warn_derive_sub_push：经 customer_id → ap_customer 关联集团
+    rows = conn.execute(
+        "SELECT d.derive_sub_push_id AS pk, c.group_customer_no AS gno, "
+        "d.warn_reason_updated AS v FROM ap_warn_derive_sub_push d "
+        "JOIN customer.ap_customer c ON d.customer_id = c.customer_id "
+        "WHERE d.warn_reason_updated LIKE ?",
+        (template + "%",),
+    ).fetchall()
+    for r in rows:
+        new = _rewrite(r["v"], _group_stem(r["gno"]))
+        conn.execute(
+            "UPDATE ap_warn_derive_sub_push SET warn_reason_updated=? "
+            "WHERE derive_sub_push_id=?",
+            (new, r["pk"]),
+        )
+    print(f"  [F19] 衍生推送表经 customer_id 关联改写 {len(rows)} 行")
+
+    # 4) 「数据异常异常」拼接残留收口（三列 REPLACE，幂等）
+    dup_total = 0
+    for table, col in (
+        ("ap_warning_signal", "push_warn_reason"),
+        ("ap_warning_push", "push_warn_reason"),
+        ("ap_warn_derive_sub_push", "warn_reason_updated"),
+    ):
+        cur = conn.execute(
+            f"UPDATE {table} SET {col}=REPLACE({col}, '数据异常异常', '数据异常') "
+            f"WHERE {col} LIKE '%数据异常异常%'"
+        )
+        dup_total += cur.rowcount
+    if dup_total:
+        print(f"  [F19] 「数据异常异常」拼接残留收口 {dup_total} 行")
+
+
 def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
     """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
 
