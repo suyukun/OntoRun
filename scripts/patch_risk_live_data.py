@@ -653,6 +653,186 @@ def patch_signal_reason_dimension_fix(conn: sqlite3.Connection) -> None:
         print(f"  [F19] 「数据异常异常」拼接残留收口 {dup_total} 行")
 
 
+# F20/F21：目标组（前十大非道具背景 + 质疑道具）——target 为台账目标占比（占 800 亿）。
+# None = 台账不动（质疑道具与主链），仅回填明细勾稽。
+_F20_TARGETS: tuple[tuple[str, float | None], ...] = (
+    ("GRP-2026-003708", 0.041),  # 翔宇电子华北（16）
+    ("GRP-2026-004743", 0.032),  # 盛世文旅沿海（23）
+    ("GRP-2026-001234", 0.050),  # 东方商贸华南（07）——明细 0 行，需插行
+    ("GRP-2026-001968", 0.059),  # 泰和能源西部（06）
+    ("GRP-2026-006914", 0.068),  # 正大纺织中原（28）
+    ("GRP-2026-005224", 0.046),  # 远航物流西北（19）
+    ("GRP-2026-004681", 0.038),  # 瑞丰食品沿海（25）
+    ("GRP-2026-001516", None),   # 质疑道具：台账不动，仅回填勾稽
+    ("GRP-2026-000098", None),   # 质疑道具：同上
+)
+_F20_INTERNAL_RATIO = 0.30  # 内部交叉授信占归集数比例（07 方案拍板点①）
+_F20_INTERNAL_COUNTERPARTY = "安平商业保理有限公司"
+
+
+def patch_group_ledger_reconciliation(conn: sqlite3.Connection) -> None:
+    """F20+F21：背景集团台账-明细勾稽重锚 + 前十大分布补腰（联动，等拍板执行）。
+
+    根因（第七轮实证）：生成器两表独立随机——台账（ap_concentration_limit）与
+    明细（ap_subsidiary_credit_detail）从不互引，背景集团全部不勾稽（18 抽 3 中，
+    000098 明细 36.53 亿 vs 台账 3.30 亿方向都反），且 001234 明细 0 行。
+
+    口径（07 方案）：
+    - 单一事实源 = 台账。目标组台账缩放到目标占比（F21 补腰，避开 9/10/12 三线
+      ±0.3pp）；质疑道具（001516/000098）台账不动；
+    - 明细回填：非内部行等比缩放至 Σ = S×(1−内部占比)；每组补 1 行内部交叉授信
+      （customer_name=安平商业保理，命中 F13 读侧 LIKE '安平%' 判定），余额
+      = S×内部占比——抵销叙事从此有数可勾；
+    - 001234 明细 0 行：借主链模板行插 3 行外部机构明细 + 1 行内部行；
+    - 主链（天晟/瑞华）零触碰；F23 账龄另函数；
+    - 幂等：内部行按固定 project_id 定位（存在即更新），缩放重复执行因子=1。
+    ⚠️ 不注册进 main()——活库执行需 Jack 对 07 方案拍板后手动调用。
+    """
+    # JOIN 键索引（cert_no/group_customer_no 无索引时每组查询全表扫描，分钟级卡死；
+    # schema 前缀在索引名上——SQLite 的 ON 子句只接受裸表名）
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS customer.idx_ascd_cert_no ON ap_subsidiary_credit_detail(cert_no)",
+        "CREATE INDEX IF NOT EXISTS customer.idx_ascd_project ON ap_subsidiary_credit_detail(project_id)",
+        "CREATE INDEX IF NOT EXISTS customer.idx_cust_cert ON ap_customer(cert_no)",
+        "CREATE INDEX IF NOT EXISTS customer.idx_cust_gno ON ap_customer(group_customer_no)",
+        "CREATE INDEX IF NOT EXISTS customer.idx_cust_cno ON ap_customer(customer_no)",
+    ):
+        conn.execute(ddl)
+    conn.commit()
+    for gno, target in _F20_TARGETS:
+        ledger = conn.execute(
+            "SELECT COALESCE(SUM(cl.concentration_limit),0) AS s_wan "
+            "FROM concentration.ap_concentration_limit cl "
+            "JOIN customer.ap_customer c ON c.customer_no = cl.customer_no "
+            "WHERE c.group_customer_no=?",
+            (gno,),
+        ).fetchone()["s_wan"]
+        s_yi = ledger / 10000.0
+        if target is not None:
+            s_yi_new = round(target * 800.0, 2)
+            if ledger > 0 and abs(s_yi_new - s_yi) > 0.005:
+                factor = (s_yi_new * 10000.0) / ledger
+                conn.execute(
+                    "UPDATE concentration.ap_concentration_limit SET concentration_limit = "
+                    "CAST(concentration_limit * ? AS REAL) WHERE customer_no IN "
+                    "(SELECT customer_no FROM customer.ap_customer WHERE group_customer_no=?)",
+                    (factor, gno),
+                )
+            s_yi = s_yi_new
+        if s_yi <= 0:
+            print(f"  [F20] {gno} 无台账，跳过")
+            continue
+
+        details = conn.execute(
+            "SELECT s.rowid AS rid, s.business_balance AS bal, s.customer_name AS cname "
+            "FROM customer.ap_subsidiary_credit_detail s "
+            "JOIN customer.ap_customer c ON s.cert_no = c.cert_no "
+            "WHERE c.group_customer_no=? AND s.customer_name NOT LIKE '安平%'",
+            (gno,),
+        ).fetchall()
+        cur_ext = sum(r["bal"] for r in details) / 10000.0
+        internal_yi = round(s_yi * _F20_INTERNAL_RATIO, 2)
+        ext_target = s_yi - internal_yi
+
+        # 非内部行等比缩放至 Σexternal = S×(1−内部占比)
+        if details and cur_ext > 0:
+            factor = ext_target / cur_ext
+            if abs(factor - 1.0) > 1e-6:
+                for r in details:
+                    conn.execute(
+                        "UPDATE customer.ap_subsidiary_credit_detail SET "
+                        "business_balance=CAST(business_balance * ? AS REAL), "
+                        "risk_exposure=CAST(risk_exposure * ? AS REAL), "
+                        "limit_value=CAST(limit_value * ? AS REAL) WHERE rowid=?",
+                        (factor, factor, factor, r["rid"]),
+                    )
+        elif details and cur_ext == 0:
+            even = round(ext_target * 10000.0 / len(details), 2)
+            for r in details:
+                conn.execute(
+                    "UPDATE customer.ap_subsidiary_credit_detail SET business_balance=? "
+                    "WHERE rowid=?",
+                    (even, r["rid"]),
+                )
+
+        # 内部交叉授信行（固定 project_id 幂等定位）
+        pid = f"SC-2026-F20I-{gno[-6:]}"
+        # 模板行 cert_no 必须取本集团成员（cert_no 是读侧 JOIN 归组键）；
+        # 集团成员在明细表无任何行时（如 001234）借他组行结构 + 本集团成员 cert_no
+        member = conn.execute(
+            "SELECT cert_no, customer_name FROM customer.ap_customer "
+            "WHERE group_customer_no=? AND cert_no IS NOT NULL LIMIT 1",
+            (gno,),
+        ).fetchone()
+        if details:
+            base_row = conn.execute(
+                "SELECT * FROM customer.ap_subsidiary_credit_detail WHERE rowid=?",
+                (details[0]["rid"],),
+            ).fetchone()
+        elif member:
+            base_row = dict(
+                conn.execute(
+                    "SELECT * FROM customer.ap_subsidiary_credit_detail LIMIT 1"
+                ).fetchone()
+            )
+            base_row["cert_no"] = member["cert_no"]
+            base_row["customer_name"] = member["customer_name"]
+        else:
+            base_row = None
+        internal_wan = round(internal_yi * 10000.0, 2)
+        existing = conn.execute(
+            "SELECT 1 FROM customer.ap_subsidiary_credit_detail WHERE project_id=?", (pid,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE customer.ap_subsidiary_credit_detail SET business_balance=? "
+                "WHERE project_id=?",
+                (internal_wan, pid),
+            )
+        elif base_row is not None:
+            row = dict(base_row)
+            row["project_id"] = pid
+            row["customer_name"] = _F20_INTERNAL_COUNTERPARTY
+            row["business_balance"] = internal_wan
+            row["risk_exposure"] = internal_wan
+            row["limit_value"] = internal_wan
+            row["project_name"] = f"集团内部交叉授信（{_F20_INTERNAL_COUNTERPARTY}）"
+            cols = ", ".join(row.keys())
+            conn.execute(
+                f"INSERT INTO customer.ap_subsidiary_credit_detail ({cols}) "
+                f"VALUES ({', '.join('?' * len(row))})",
+                list(row.values()),
+            )
+        # F20②：001234 类 0 行集团——按目标 Σ 拆 3 行外部明细（借主链模板）
+        if not details and base_row is not None:
+            n_ext = 3
+            each_wan = round(ext_target * 10000.0 / n_ext, 2)
+            for org, i in zip(("安平银行", "安平证券", "安平资产管理"), range(n_ext)):
+                row = dict(base_row)
+                row["project_id"] = f"SC-2026-F20E-{gno[-6:]}-{i + 1}"
+                row["org_name"] = org
+                row["business_balance"] = each_wan
+                row["risk_exposure"] = each_wan
+                row["limit_value"] = each_wan
+                row["project_name"] = f"{gname_or_fallback(conn, gno)}{org}授信项目"
+                cols = ", ".join(row.keys())
+                conn.execute(
+                    f"INSERT INTO customer.ap_subsidiary_credit_detail ({cols}) "
+                    f"VALUES ({', '.join('?' * len(row))})",
+                    list(row.values()),
+                )
+            print(f"  [F20] {gno} 明细 0 行 → 插 {n_ext} 行外部明细（Σ={ext_target:.2f} 亿）")
+    print("  [F20/F21] 勾稽重锚完成（副本验证后活库执行仍需拍板）")
+
+
+def gname_or_fallback(conn: sqlite3.Connection, gno: str) -> str:
+    row = conn.execute(
+        "SELECT group_customer_name FROM customer.ap_customer WHERE group_customer_no=? LIMIT 1",
+        (gno,),
+    ).fetchone()
+    return row["group_customer_name"] if row else gno
+
+
 def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
     """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
 
