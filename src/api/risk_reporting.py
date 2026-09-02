@@ -40,6 +40,7 @@ from src.runtime.risk_rules import (
     concentration_ledger_aggregation_yi,
     evaluate_group_concentration,
     pct_display,
+    pct_display_precise,
 )
 
 # ---------------------------------------------------------------------------
@@ -272,7 +273,9 @@ class _ReportService:
             own_yi = round(gc.own_balance_yi, 4)
             hidden_yi = round(gc.related_balance_yi, 4)
             total_yi = round(gc.total_yi, 4)
-            ratio = round(gc.ratio, 4)
+            # F16①：保留 6 位小数（原 round4 会把 rank9 0.9044% / rank10 0.8962%
+            # 压成同值 0.009，排名并列且展示无法区分）；展示走 pct_display_precise
+            ratio = round(gc.ratio, 6)
             conc_level = gc.level
             sig = conn.execute(
                 "SELECT signal_id, warn_level, signal_status, warn_reason "
@@ -302,6 +305,7 @@ class _ReportService:
                 "hidden_related_balance_yi": hidden_yi,
                 "consolidated_balance_yi": total_yi,
                 "concentration_ratio": ratio,
+                "concentration_ratio_display": pct_display_precise(ratio),
                 "concentration_level": conc_level,
                 "latest_warn_level": sig_level,
                 "latest_signal_status": sig["signal_status"] if sig else None,
@@ -317,6 +321,7 @@ class _ReportService:
                         "group_customer_no": gno,
                         "group_customer_name": gname,
                         "concentration_ratio": ratio,
+                        "concentration_ratio_display": pct_display_precise(ratio),
                         "signal_id": sig["signal_id"],
                         "warn_level": sig_level,
                         "signal_status": sig["signal_status"],

@@ -904,3 +904,59 @@ def test_agent_chat_strips_chain_of_thought(tmp_path, monkeypatch) -> None:
         assert not reply.startswith("让我先理清")
         assert reply.startswith("天晟集团")
 
+
+# ---------------------------------------------------------------------------
+# F16：相邻排名精度区分 + 等线判定措辞；F17：R2 note 按实际关联方条件输出
+# （05 清单第六轮复测残留：rank9/10 同显 0.9%、等线称「内」与 ≥ 触发规则矛盾、
+#   note 跨组硬编码泄漏恒昌文案）
+# ---------------------------------------------------------------------------
+
+
+def test_f16_ranking_adjacent_display_distinct(client: TestClient) -> None:
+    """F16①：前十大排名展示值两两可区分，rank9/rank10 不再同显 0.9%。"""
+    ranking = _dash_ranking(client)
+    displays = [g["concentration_ratio_display"] for g in ranking]
+    assert len(displays) == len(set(displays)), f"排名展示值有并列: {displays}"
+    assert displays[8] == "0.9044%" and displays[9] == "0.8962%"
+
+
+def test_f16_equal_line_wording_touched(client: TestClient) -> None:
+    """F16②：证券 5.5% / 资管 8.2% 恰等参考线 = 触达（达线即警），不得称「参考线内」。"""
+    reveal = _reveal(client)
+    assert "触达参考线 5.5%（达线即警）" in reveal["conclusion"]
+    assert "触达参考线 8.2%（达线即警）" in reveal["conclusion"]
+    assert "参考线 5.5% 内" not in reveal["conclusion"]
+    assert "参考线 8.2% 内" not in reveal["conclusion"]
+    assert "已触达参考线" in reveal["conclusion"]
+
+
+def test_f17_note_conditional_on_related_parties(client: TestClient) -> None:
+    """F17：note 按实识别关联方输出——天晟带恒昌；无关联集团（翔宇东北 05）不泄漏恒昌文案。"""
+    assert "恒昌贸易" in _reveal(client)["r2_levels"]["note"]
+    assert "恒昌贸易" in _upgrade(client)["r2_levels"]["note"]
+    res = client.get(
+        "/risk/evidence/group-reveal",
+        params={"group_customer_no": "GRP-2026-001516"},
+    )
+    assert res.status_code == 200, res.text
+    rl = res.json()["data"]["r2_levels"]
+    assert rl["pre_r2"]["ratio_display"] == "0.93%"
+    assert rl["post_r2"]["ratio_display"] == "0.93%"
+    assert "恒昌贸易" not in rl["note"]
+    assert "无隐性关联纳入" in rl["note"]
+    up = client.get(
+        "/risk/evidence/related-upgrade",
+        params={"group_customer_no": "GRP-2026-001516"},
+    ).json()["data"]
+    assert "恒昌贸易" not in up["r2_levels"]["note"]
+    assert "无隐性关联纳入" in up["r2_levels"]["note"]
+
+
+def test_f17_related_tail_note_conditional(client: TestClient) -> None:
+    """F17：conclusion「纳入隐性关联前口径」尾注仅在确有纳入时追加。"""
+    assert "本行为纳入隐性关联前的归集口径" in _reveal(client)["conclusion"]
+    res = client.get(
+        "/risk/evidence/group-reveal",
+        params={"group_customer_no": "GRP-2026-001516"},
+    ).json()["data"]
+    assert "本行为纳入隐性关联前的归集口径" not in res["conclusion"]

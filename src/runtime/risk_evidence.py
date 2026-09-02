@@ -165,6 +165,27 @@ RECONCILIATION_NOTE = (
     "明细为单家口径（各附属机构外部融资逐家加总，未抵销），二者不可直接对比"
 )
 
+
+def _r2_levels_note(related_names: list[str]) -> str:
+    """F17：R2 两级口径说明按实际关联方条件输出。
+
+    修复前 note 硬编码「纳入隐性关联（恒昌贸易）前后」，无隐性关联的集团
+    pre=post 恒等仍写该文案（跨组硬编码泄漏）；现按实识别到的关联方名单
+    生成，无关联集团输出中性说明。
+    """
+    if related_names:
+        names = "、".join(related_names)
+        head_txt = (
+            f"纳入隐性关联（{names}）前后的归集口径对比；"
+            "看板/报送口径为纳入隐性关联后（post_R2）；"
+        )
+    else:
+        head_txt = (
+            "该集团无隐性关联纳入，pre_R2 与 post_R2 口径一致；"
+            "看板/报送口径为 post_R2；"
+        )
+    return head_txt + RECONCILIATION_NOTE
+
 # F15 审计展示 in-universe（WORM 不可改原行，仅展示层映射机码 → 业务文案）
 _AUDIT_ACTOR_AI = "AI 智能体（风险预警助手）"
 _AUDIT_ACTOR_HUMAN = "风险管理部人工"
@@ -449,21 +470,32 @@ class EvidenceService:
     @staticmethod
     def _org_single_safety(
         d: dict[str, Any], cap: dict[str, float]
-    ) -> tuple[str, bool]:
-        """单家附属机构是否在其参考线内（实算），返回 (单家描述, 是否安全)。
+    ) -> tuple[str, bool, str]:
+        """单家附属机构是否在其参考线内（实算），返回 (单家描述, 是否安全, 状态)。
 
         F1/F3 修复：逐家安全断言按各自参考线实算——安平银行对行内限额（绝对额 60 亿）、
         安平证券/资管对参考线内融资占比（5.5% / 8.2%）；无参考线机构不参与「单看均安全」
         断言（仅列余额）。杜绝「银行 12.5%，低于行内限额 60 亿」类算术矛盾（75.2 亿
         实超 60 亿却被模板写死「低于」）。
+
+        F16②：触发规则为「≥ 参考线即警」，恰等于参考线 = 触达 = 不得称「参考线内」，
+        措辞统一为「触达参考线 X%（达线即警）」；状态 ∈ ok / touched / over。
         """
         org = d["org_name"]
         balance = d["balance_yi"]
+        tol = 1e-9
         if org == "安平银行":
             limit_yi = cap[PARAM_BANK_INTERNAL_LIMIT]
-            ok = balance <= limit_yi
-            mark = "行内限额内" if ok else f"超行内限额 {limit_yi:.0f} 亿"
-            return f"{org} {balance:.1f} 亿（{mark}）", ok
+            if abs(balance - limit_yi) <= tol:
+                mark = f"触达行内限额 {limit_yi:.0f} 亿（达线即警）"
+                status = "touched"
+            elif balance < limit_yi:
+                mark = "行内限额内"
+                status = "ok"
+            else:
+                mark = f"超行内限额 {limit_yi:.0f} 亿"
+                status = "over"
+            return f"{org} {balance:.1f} 亿（{mark}）", status == "ok", status
         denom = _ORG_REFERENCE_DENOM.get(org)
         if denom in (PARAM_SECURITIES_DENOM, PARAM_AM_DENOM):
             line_id = (
@@ -473,15 +505,26 @@ class EvidenceService:
             )
             ref_ratio = cap[line_id]
             ratio = d.get("org_reference_ratio")
-            ok = ratio is not None and ratio <= ref_ratio
-            display = EvidenceService._ratio_display(ratio) if ratio is not None else "-"
-            mark = (
-                f"参考线 {_pct_display(ref_ratio)} 内"
-                if ok
-                else f"超参考线 {_pct_display(ref_ratio)}"
+            display = (
+                EvidenceService._ratio_display(ratio) if ratio is not None else "-"
             )
-            return f"{org} {display}（{mark}）", ok
-        return f"{org} {balance:.1f} 亿", True
+            if ratio is None:
+                return (
+                    f"{org} {display}（参考线 {_pct_display(ref_ratio)} 未实算）",
+                    False,
+                    "over",
+                )
+            if abs(ratio - ref_ratio) <= tol:
+                mark = f"触达参考线 {_pct_display(ref_ratio)}（达线即警）"
+                status = "touched"
+            elif ratio < ref_ratio:
+                mark = f"参考线 {_pct_display(ref_ratio)} 内"
+                status = "ok"
+            else:
+                mark = f"超参考线 {_pct_display(ref_ratio)}"
+                status = "over"
+            return f"{org} {display}（{mark}）", status == "ok", status
+        return f"{org} {balance:.1f} 亿", True, "ok"
 
     # ---- 第 1 幕：揭示（逐家单看都安全 → 归集 10.8% 橙）----
 
@@ -570,26 +613,36 @@ class EvidenceService:
         # 不再写死「银行 …低于行内限额 60 亿」（非道具组无 ratio_display 曾致 KeyError 500；
         # 瑞华 75.2 亿单挂安平银行实超 60 亿却断言「均安全」系算术矛盾）。
         all_safe = True
+        any_touched = False
+        any_over = False
         if detail:
             org_parts: list[str] = []
             for item in detail:
-                txt, ok = self._org_single_safety(item, cap)
+                txt, ok, status = self._org_single_safety(item, cap)
                 org_parts.append(txt)
-                if "reference_denom_yi" in item and not ok:
-                    all_safe = False
+                if "reference_denom_yi" in item:
+                    if not ok:
+                        all_safe = False
+                    any_touched = any_touched or status == "touched"
+                    any_over = any_over or status == "over"
             safety = "；".join(org_parts)
-            head = (
-                f"{group} 逐家附属机构单看均安全（{safety}）"
-                if all_safe
-                else f"{group} 逐家附属机构单看已有超参考线（{safety}）"
-            )
+            # F16②：三态措辞——均安全 / 已触达参考线（达线即警）/ 已有超参考线
+            if any_over:
+                head = f"{group} 逐家附属机构单看已有超参考线（{safety}）"
+            elif any_touched:
+                head = f"{group} 逐家附属机构单看已触达参考线（达线即警）（{safety}）"
+            else:
+                head = f"{group} 逐家附属机构单看均安全（{safety}）"
         else:
             head = f"{group} 集中度台账归集（无逐家明细行）"
-        # F7b：第 1 幕结论标注「本行为纳入隐性关联前的归集口径」（pre_R2）
+        # F7b + F17：第 1 幕结论标注「纳入隐性关联前口径」——仅在确有隐性关联纳入
+        # （post 分子 > pre 分子）时追加，无关联集团 pre=post 恒等不再空挂该尾注
+        has_related = post.total_yi - pre.total_yi > 1e-9
+        caliber_note = "（本行为纳入隐性关联前的归集口径）" if has_related else ""
         conclusion = (
             f"{head}；归集实算 {pre.total_yi:.1f} 亿元 ÷ 集团并表资本 "
             f"{group_cap:.0f} 亿元 = {compare_pre} → R1a 定级「{pre.level}」"
-            f"（本行为纳入隐性关联前的归集口径）"
+            f"{caliber_note}"
             + self._signal_tail(signals, "橙")
             + f"；勾稽说明：{RECONCILIATION_NOTE}。"
         )
@@ -611,11 +664,7 @@ class EvidenceService:
                 "ratio_display": self._ratio_display(post.ratio),
                 "level": post.level,
             },
-            "note": (
-                "纳入隐性关联（恒昌贸易）前后的归集口径对比；"
-                "看板/报送口径为纳入隐性关联后（post_R2）；"
-                + RECONCILIATION_NOTE
-            ),
+            "note": _r2_levels_note([p.customer_name for p in post.related_parties]),
         }
         return {
             "intent": "act1_group_reveal",
@@ -769,11 +818,7 @@ class EvidenceService:
                 "ratio_display": self._ratio_display(r2.ratio),
                 "level": r2.level,
             },
-            "note": (
-                "纳入隐性关联（恒昌贸易）前后的归集口径对比；"
-                "看板/报送口径为纳入隐性关联后（post_R2）；"
-                + RECONCILIATION_NOTE
-            ),
+            "note": _r2_levels_note([d["customer_name"] for d in detail]),
         }
         return {
             "intent": "act2_related_upgrade",

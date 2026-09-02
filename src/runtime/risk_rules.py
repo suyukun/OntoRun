@@ -61,6 +61,17 @@ def pct_display(ratio: float) -> str:
     return f"{x:.2f}%"
 
 
+def pct_display_precise(ratio: float) -> str:
+    """排名场景精确展示（F16① 全链单一实现族）：4 位小数区分相邻名次，尾部零不冗余。
+
+    看板两位小数会把 rank9（0.9044%）/rank10（0.8962%）压成同显 0.9%，
+    排名列使用本函数保留区分度；与 pct_display 同模块维护，不另起实现。
+    """
+    x = round(ratio * 100, 4)
+    body = f"{x:.4f}".rstrip("0").rstrip(".")
+    return f"{body}%"
+
+
 # R2 三线索关键词（口径包§七：股权代持线索/交叉担保链/资金往来异动）
 _CLUE_KEYWORDS: tuple[str, ...] = ("股权代持", "交叉担保", "资金往来")
 
