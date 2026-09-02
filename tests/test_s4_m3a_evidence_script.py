@@ -356,12 +356,13 @@ def test_f14_push_columns_cleanup() -> None:
                 f"SELECT COUNT(*) n FROM {table} WHERE {col} LIKE '%敞口超限%'"
             ).fetchone()[0]
             assert n == 0, f"F14 残留未清: {table}.{col} 仍有 {n} 行「敞口超限」"
-        # 样本已统一为监测语气
-        row = conn.execute(
-            "SELECT push_warn_reason FROM ap_warning_signal "
-            "WHERE push_warn_reason LIKE '集团集中度%' LIMIT 1"
-        ).fetchone()
-        assert row and "指标异动" in row[0]
+        # F19：F14 的中间态模板「集团集中度指标异动」已被维度改写取代——
+        # 非集中度维度集团换真实触发语气，模板残留必须为 0
+        n = conn.execute(
+            "SELECT COUNT(*) FROM ap_warning_signal "
+            "WHERE push_warn_reason LIKE '集团集中度指标异动%'"
+        ).fetchone()[0]
+        assert n == 0, f"F19 后模板残留 {n} 行"
     finally:
         conn.close()
 
