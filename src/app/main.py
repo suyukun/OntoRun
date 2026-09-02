@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +111,29 @@ _FOLLOWUP_KEYWORDS: tuple[str, ...] = (
 def _is_followup_question(message: str) -> bool:
     """判定是否为对上一轮答案的来源/真伪/分母追问（P1-1）。"""
     return any(k in message for k in _FOLLOWUP_KEYWORDS)
+
+
+# F22②：质疑类消息识别 + 对象定位判定（新会话无上下文时先反问，不裸答）
+_CHALLENGE_HINT_RE = re.compile(r"凭什么|为什么标|为何标|标红原因|标橙原因|质疑|复核实查")
+_OBJECT_ID_RE = re.compile(r"\b(?:GRP|WS|SGN|CL)-\d{4}-\d+")
+_GROUP_NAME_STEMS = (
+    "天晟",
+    "瑞华",
+    "翔宇",
+    "盛世",
+    "东方商贸",
+    "泰和",
+    "正大",
+    "远航",
+    "瑞丰",
+    "华信",
+    "恒昌",
+)
+
+
+def _group_name_hit(message: str) -> bool:
+    """消息中是否含任一道具集团名词干（质疑已定位对象则不反问）。"""
+    return any(stem in message for stem in _GROUP_NAME_STEMS)
 
 
 def _with_evidence_context(message: str, evidence: dict) -> str:
@@ -633,12 +657,35 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             )
         session_id = body.session_id
         state = risk_sessions.get(session_id, owner=actor) if session_id else None
+        is_new_session = state is None
         if state is None:
             agent = _get_agent()
             session_id = risk_sessions.create(agent, owner=actor)
             state = risk_sessions.get(session_id, owner=actor)
         else:
             agent = state.agent
+
+        # F22②：新会话直接质疑且未定位对象 → 反问定位，不裸答（不经 LLM）。
+        # 第七轮复测实证：无 session 重开问「凭什么标红」时模型独白直出并幻觉
+        # 引用不存在的数据；有会话时同一质疑走 risk_verify_reason 实查闭环。
+        # 产品口径：质疑必须先有对象——无对象则澄清反问（规则层，零幻觉面）。
+        message_early = body.message
+        if (
+            is_new_session
+            and _CHALLENGE_HINT_RE.search(message_early)
+            and not (_OBJECT_ID_RE.search(message_early) or _group_name_hit(message_early))
+        ):
+            return ChatResponse(
+                session_id=session_id,
+                reply=(
+                    "您的质疑需要先定位对象：请提供集团编号（GRP-…）、预警编号"
+                    "（WS-…）或集团名称，我将调取证据链实查该集团标红/标橙的"
+                    "真实原因维度（集中度实算比对 / 非集中度触发事由），凭实回答。"
+                ),
+                need_confirm=None,
+                outcome=None,
+                evidence=None,
+            )
 
         # P1-1 会话上下文：追问来源/真伪/分母时，注入最近一次证据链载荷（不反问主体）
         message = body.message
@@ -789,29 +836,52 @@ def register_risk_agent_routes(app: FastAPI) -> None:
         outcome: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        view: str = "business",
     ):
         """风险审计聚合（F11）：/audit 一键调档改指风险审计库 s3_risk_ontology.db。
 
         检查组「一键调档」落点：聚合风险动作全程审计（approve_disposal / confirm_warning /
         adjust_warning_level / submit_disposal …，WORM 哈希链全绿），与 approval-chain 的
         audit_trail 同库同源；不再读 S1 零售审计库（total=0 空账）。
+
+        F18：默认 view=business（演示视图）——开发冒烟痕行（request_id 为空或 smoke-*
+        前缀，第七轮复测实证 55 条中 50 条）折叠为 migrated_records 计数，不进默认列表；
+        view=all 全量透明保留（WORM 原行任何视图都不改，哈希链不碰）。
         """
         from src.runtime.audit import AuditLog
         from src.runtime.risk_db import RiskStore
         from src.runtime.risk_evidence import audit_display_item
 
         audit = AuditLog(RiskStore())
-        items, total = audit.query(
-            action=action, outcome=outcome, page=page, page_size=page_size
+        # 小数据量（演示库 <100 行）全量拉取后内存过滤分页，保证 total 与过滤口径一致
+        items, _total = audit.query(
+            action=action, outcome=outcome, page=1, page_size=10000
         )
         # F15：审计展示 in-universe——actor/actor_detail 开发期机码（llm:DeepSeekProvider、
         # confirmed_call:call_00_…）→ 业务文案；WORM 原行不改，仅展示层映射。
         display = [audit_display_item(dict(it)) for it in items]
+        business = [
+            it for it in display
+            if (it.get("request_id") or "").strip()
+            and not (it.get("request_id") or "").startswith("smoke-")
+        ]
+        migrated = len(display) - len(business)
+        if view == "all":
+            business = display
+            migrated = 0
+        limit = max(1, min(page_size, 100))
+        offset = max(0, (page - 1) * limit)
+        page_items = business[offset : offset + limit]
         return JSONResponse(
             content={
                 "request_id": "",
                 "outcome": "ok",
-                "data": {"items": display, "total": total},
+                "data": {
+                    "items": page_items,
+                    "total": len(business),
+                    "view": view,
+                    "migrated_records": migrated,
+                },
                 "error": None,
             }
         )

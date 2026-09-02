@@ -304,7 +304,12 @@ def test_f15_audit_in_universe(client: TestClient) -> None:
     data = client.get("/risk/audit").json()["data"]
     items = data["items"]
     assert items, "审计应非空"
-    assert data["total"] == 55  # F11 哈希链总数保持
+    # F18：默认 business 视图——55 条中 50 条开发冒烟痕折叠为 migrated_records，
+    # 业务行 5 条（req_* 4 条 + REJ-2026-90000002 预置驳回）
+    assert data["total"] == 5
+    assert data["migrated_records"] == 50
+    all_view = client.get("/risk/audit", params={"view": "all"}).json()["data"]
+    assert all_view["total"] == 55, "view=all 应全量透明保留（WORM 不动）"
     machine = [
         it
         for it in items
@@ -1000,3 +1005,69 @@ def test_f25_wording_polish(client: TestClient) -> None:
         params={"warning_id": "WS-2026-90000002"},
     ).json()["data"]
     assert "。，" not in ac["conclusion"], f"审批链结论有拼接残渣: {ac['conclusion'][-120:]}"
+
+
+# ---------------------------------------------------------------------------
+# F18：审计演示视图（business 默认过滤开发痕，view=all 全量透明）
+# F22：chat 出口兜底（独白全文剥离 + 新会话质疑反问定位）
+# ---------------------------------------------------------------------------
+
+
+def test_f18_audit_business_view_filters_smoke(client: TestClient) -> None:
+    """F18：business 视图无 smoke-*/空 request_id 行；view=all 全量保留（WORM 不动）。"""
+    biz = client.get("/risk/audit").json()["data"]
+    assert biz["view"] == "business"
+    for it in biz["items"]:
+        rid = (it.get("request_id") or "").strip()
+        assert rid and not rid.startswith("smoke-"), f"演示视图泄漏开发痕: {it}"
+    allv = client.get("/risk/audit", params={"view": "all", "page_size": 100}).json()[
+        "data"
+    ]
+    assert allv["total"] == 55 and allv["migrated_records"] == 0
+    # action 过滤与视图叠加：approve_disposal 业务行仅预置驳回 1 条
+    appr = client.get(
+        "/risk/audit", params={"action": "approve_disposal"}
+    ).json()["data"]
+    assert appr["total"] == 1
+    assert appr["items"][0]["request_id"] == "REJ-2026-90000002"
+
+
+def test_f22_strip_chain_of_thought_fulltext() -> None:
+    """F22①：独白剥离扩全文——中后部独白句删除，含「您/请」的对话句保留。"""
+    from src.agent.risk_agent import strip_chain_of_thought
+
+    reply = (
+        "天晟集团归集 86.4 亿元 ÷ 800 亿元 = 10.8%，触发橙色预警。"
+        "我应该查询该集团的信号明细。让我先理清用户的问题。"
+        "经过分析，该集团标红原因见证据链。"
+    )
+    out = strip_chain_of_thought(reply)
+    assert "我应该" not in out and "让我先理清" not in out
+    assert "天晟集团归集" in out and "证据链" in out
+    # 含「您」的句子是澄清正文，绝不误删
+    keep = strip_chain_of_thought("我想先说明，您问的集团编号需要核对。天晟 10.8% 橙。")
+    assert "您问的集团编号" in keep
+    # 全部句子都是独白时保守返回，绝不让回复变空白
+    assert strip_chain_of_thought("让我先理清。我想想。").strip()
+
+
+def test_f22_challenge_without_object_asks_back(
+    tmp_path, monkeypatch
+) -> None:
+    """F22②：新会话直接质疑且未定位对象 → 规则层反问定位（不经 LLM，零幻觉面）。"""
+    from src.agent.provider import MockProvider
+
+    mock = MockProvider(responses=[])  # 反问路径不应触达 LLM
+    monkeypatch.setattr("src.agent.provider.get_provider", lambda name=None: mock)
+
+    from src.app.main import create_risk_agent_app
+
+    app = create_risk_agent_app()
+    with TestClient(app) as c:
+        res = c.post("/agent/risk/chat", json={"message": "凭什么把它标红？"})
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert "定位对象" in body["reply"], f"应反问定位: {body['reply'][:80]}"
+        assert body["evidence"] is None
+        # 已定位对象（带集团名）的正常提问不受影响——走 LLM 编排（此处 mock 无响应即报错，
+        # 反问路径不触发即视为通过；编排链路已有独立测试覆盖）

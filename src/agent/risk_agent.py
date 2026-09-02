@@ -54,15 +54,33 @@ _COT_PREFIX_RE = re.compile(
     r"[^\n。！？：:，,；;]{0,40}?(?:[。！？：:，,；;\n]|$)"
 )
 
+# F22①：独白句开头词——独白可能出现在回复中后部，仅剥前缀不够（第七轮复测实证：
+# reply 3443 字中约 2500 字为模型念白）。句内含「您/请」视为对话正文，不删。
+_COT_OPEN_RE = re.compile(
+    r"^(?:让我|我需要|我想|我应该|接下来我|我先|我再|现在我|我打算|我准备|我来)"
+)
+
 
 def strip_chain_of_thought(reply: str) -> str:
-    """剥离回复开头的内心独白前缀（R2-P1-B），保留正文。
+    """剥离内心独白（R2-P1-B 前缀 + F22① 全文句级扫描），保留正文。
 
-    仅剥离「让我先理清/我需要先」类显式独白前缀（到首个句读或结尾）；
-    无匹配则原样返回，绝不误删正文。
+    前缀剥离后按句切分，删除以独白开口词开头、且不含「您/请」的句子
+    （含「您/请」多为澄清/引导正文，绝不误删）；全部句子被剥空时保守
+    返回仅剥前缀的原文，宁可留独白不留空白回复。
     """
-    text = reply or ""
-    return _COT_PREFIX_RE.sub("", text, count=1)
+    text = _COT_PREFIX_RE.sub("", reply or "", count=1)
+    if not text:
+        return text
+    parts = re.split(r"([。！？；;\n])", text)
+    out: list[str] = []
+    for i in range(0, len(parts), 2):
+        sent = parts[i]
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        if sent and _COT_OPEN_RE.match(sent.lstrip()) and "您" not in sent and "请" not in sent:
+            continue
+        out.append(sent + sep)
+    stripped = "".join(out)
+    return stripped if stripped.strip() else text
 
 
 class RiskQueryParams(BaseModel):
