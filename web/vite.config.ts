@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // qianxing: motion is a transitive dep of @lobehub/ui, invisible to the dep scanner; prebundle it to avoid 504 blank screen
+  optimizeDeps: {
+    include: ['motion', 'motion/react', '@ant-design/x', '@lobehub/ui', 'echarts'],
+  },
   server: {
     port: 5173,
     proxy: {

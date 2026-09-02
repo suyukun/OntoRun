@@ -265,8 +265,11 @@ function RiskShell() {
   );
 }
 
+import ProtoRoutes from './proto';
+
 function AppRoutes() {
   const location = useLocation();
+  if (location.pathname.startsWith('/proto')) return <ProtoRoutes />;
   const isRisk =
     location.pathname === '/' ||
     location.pathname.startsWith('/risk') ||
