@@ -287,14 +287,14 @@ def test_f13_detail_is_internal_marker(client: TestClient) -> None:
     assert up["detail_rows"], "天晟应含隐性关联方明细"
     for d in up["detail_rows"]:
         assert d["is_internal"] is False, "恒昌等隐性关联方为外部一致行动人（外部敞口）"
-    assert "抵销后外部净敞口" in up["conclusion"]
+    assert "三数对账" in up["conclusion"]
 
     draft = client.get(
         "/risk/reporting/draft", params={"group_customer_no": TIANSHENG_NO}
     ).json()["data"]
     for b in draft["breakdown"]:
         assert "is_internal" in b, f"报送 breakdown 缺 is_internal: {b['org_name']}"
-    assert "抵销后外部净敞口" in draft["consolidated_exposure"]["caliber_note"]
+    assert "三数对账" in draft["consolidated_exposure"]["caliber_note"]
 
 
 def test_f15_audit_in_universe(client: TestClient) -> None:
