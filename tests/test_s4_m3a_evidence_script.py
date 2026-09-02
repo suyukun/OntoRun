@@ -207,8 +207,9 @@ def test_f7_rank5_group_reveal_same_source(client: TestClient) -> None:
     )
     assert res.status_code == 200, res.text
     comp = res.json()["data"]["rules_hits"][0]["computed"]
-    assert comp["numerator_yi"] == pytest.approx(8.13, abs=1e-2)
-    assert comp["ratio_display"] == "1.02%"
+    # F20/F21：001234 台账重锚至 5.0%（40 亿，腰部分布带）
+    assert comp["numerator_yi"] == pytest.approx(40.0, abs=1e-2)
+    assert comp["ratio_display"] == "5.0%"
     assert comp["level"] == "无"
     # 与看板同源：看板排名含该集团，ratio 一致
     entry = next(
@@ -923,7 +924,8 @@ def test_f16_ranking_adjacent_display_distinct(client: TestClient) -> None:
     ranking = _dash_ranking(client)
     displays = [g["concentration_ratio_display"] for g in ranking]
     assert len(displays) == len(set(displays)), f"排名展示值有并列: {displays}"
-    assert displays[8] == "0.9044%" and displays[9] == "0.8962%"
+    # F20/F21 补腰后：rank9 盛世 3.2%、rank10 翔宇东北 0.9332%（仍两两可区分）
+    assert displays[8] == "3.2%" and displays[9] == "0.9332%"
 
 
 def test_f16_equal_line_wording_touched(client: TestClient) -> None:
