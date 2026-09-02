@@ -833,6 +833,80 @@ def gname_or_fallback(conn: sqlite3.Connection, gno: str) -> str:
     return row["group_customer_name"] if row else gno
 
 
+_F23_DISCIPLINE_DAYS = {"红": 7, "橙": 30, "黄": 90}  # 处置纪律上限（红立即报告/橙按月催办）
+
+
+def patch_overdue_date_compliance(conn: sqlite3.Connection) -> None:
+    """F23：账龄/处置时长合规化（数据时钟 2026-12-31 为锚，道具链排除）。
+
+    第七轮复测实证：avg_open_age_days 359–374 天（数学上限 364——生成器把
+    signal_generate_date 随机铺到 2025 年，与 SGN-2026-* 编号矛盾）；处置时长
+    avg 120 天、min −670 天（倒挂）/max 707 天，与「红色立即报告、按月催办」
+    纪律冲突。修法：
+    - 生成日期年份归一 2025→2026（保持月日，分布自然；道具组 GRP-2026-900% 排除），
+      同步 update_time / signal_update_date 单调（P0-3 口径）；
+    - 已处置行 operate_time 按等级纪律重排（红 ≤7 / 橙 ≤30 / 黄 ≤90 天，偏移由
+      rowid 派生——种子固定幂等）；负值（倒挂）行一并归位；
+    - 明细表逾期天数 >364 钳到 364（业务时钟上限）；
+    - 道具处置行（WD-2026-9000xx / 天晟瑞华链）零触碰。
+    幂等：年份归一后无 2025 行；纪律重排后时长全部 ≤ 上限。
+    ⚠️ 不注册进 main()——活库执行需 Jack 对 07 方案拍板后手动调用。
+    """
+    # 1) 生成日期年份归一（2025→2026，道具组排除）
+    cur = conn.execute(
+        "UPDATE ap_warning_signal SET signal_generate_date='2026'||substr(signal_generate_date,5) "
+        "WHERE substr(signal_generate_date,1,4)='2025' "
+        "AND group_customer_no NOT LIKE 'GRP-2026-900%'"
+    )
+    if cur.rowcount:
+        print(f"  [F23] signal_generate_date 2025→2026 归一（{cur.rowcount} 行）")
+    # 单调同步（P0-3 口径）：generate 晚于 update 的行对齐
+    for col in ("update_time", "signal_update_date"):
+        conn.execute(
+            f"UPDATE ap_warning_signal SET {col}=signal_generate_date "
+            f"WHERE {col} IS NOT NULL AND {col} < signal_generate_date "
+            "AND group_customer_no NOT LIKE 'GRP-2026-900%'"
+        )
+
+    # 2) 已处置行 operate_time 按等级纪律重排（道具链排除；负值/超限一并归位）
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    rows = conn.execute(
+        "SELECT d.disposal_id AS pk, s.warn_level AS lvl, "
+        "s.signal_generate_date AS gen, "
+        "CAST(julianday(d.operate_time) - julianday(s.signal_generate_date) AS INT) AS days "
+        "FROM ap_warning_disposal d JOIN ap_warning_signal s "
+        "ON d.warning_id = s.warning_id "
+        "WHERE d.disposal_status='已处置' AND d.operate_time IS NOT NULL "
+        "AND s.signal_generate_date IS NOT NULL "
+        "AND s.group_customer_no NOT LIKE 'GRP-2026-900%'"
+    ).fetchall()
+    n = 0
+    for r in rows:
+        cap = _F23_DISCIPLINE_DAYS.get(r["lvl"], 90)
+        if r["days"] is None or (0 <= r["days"] <= cap):
+            continue
+        offset = (sum(ord(ch) for ch in r["pk"]) % max(cap - 1, 1)) + 1
+        gen = _date.fromisoformat(r["gen"][:10])
+        conn.execute(
+            "UPDATE ap_warning_disposal SET operate_time=? WHERE disposal_id=?",
+            ((gen + _td(days=offset)).isoformat(), r["pk"]),
+        )
+        n += 1
+    if n:
+        print(f"  [F23] 已处置 operate_time 按纪律重排（{n} 行；红≤7/橙≤30/黄≤90 天）")
+
+    # 3) 明细表逾期天数钳业务时钟上限
+    for col in ("principal_overdue_days", "interest_overdue_days"):
+        cur = conn.execute(
+            f"UPDATE customer.ap_subsidiary_credit_detail SET {col}=364 "
+            f"WHERE {col} > 364"
+        )
+        if cur.rowcount:
+            print(f"  [F23] 明细 {col} 钳至 ≤364（{cur.rowcount} 行）")
+
+
 def patch_sys_param_in_universe(conn: sqlite3.Connection) -> None:
     """P0-文案（根因二）：ap_sys_param 内部记号 → in-universe 文案。
 
