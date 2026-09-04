@@ -1,7 +1,7 @@
 // 对话引擎 —— 本地 state + 固定剧本流式模拟（无后端；docs/chat-ux-spec-v1.md §7.2/§8）
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SESSIONS } from '../proto/fakeData';
-import { FULL_SEED_QUESTION, SCRIPTS, TOOL_STEPS_VIEW, matchScript, type AiScript } from './scriptData';
+import { FULL_SEED_QUESTION, SCRIPTS, TOOL_STEPS_VIEW, matchScript, matchScriptInContext, type AiScript } from './scriptData';
 
 // —— 时序常量（spec §5.4/§5.5/§8.1/§8.2）——
 const THINK_SKELETON_MS = 800; // >800ms 出骨架（§8.2）
@@ -226,7 +226,12 @@ export function useChatEngine() {
       if (!text || generatingRef.current[sessionKey]) return; // 生成中 Enter 不发送（§7.2）
       const userMsg: ChatMessage = { id: nextId(), role: 'user', text, time: hhmm(), status: 'done', blocks: [], attempt };
       patchSession(sessionKey, (s) => ({ ...s, messages: [...s.messages, userMsg] }));
-      const script = matchScript(text);
+      // 多轮上下文（批 2）：按本会话最近一条 AI 剧本解析追问（如触达 → 分母），否则走基础路由
+      const lastAiScriptId = sessionsRef.current
+        .find((x) => x.key === sessionKey)
+        ?.messages.filter((m) => m.role === 'ai')
+        .at(-1)?.scriptId;
+      const script = matchScriptInContext(text, lastAiScriptId);
       const errorMode = script.id === 'fallback' && attempt === 1;
       runScript(sessionKey, text, script, attempt, errorMode);
     },

@@ -58,6 +58,9 @@ const TEXT_OVERVIEW =
   '**天晟集团当前存在 1 项橙色预警（R1a · 归集集中度）。** 归集集中度 **10.8%** ≥ 预警线 **10%**；三家机构单家占比均在参考线之内，风险集中在归集维度。明细如下：';
 const TEXT_FORMULA =
   '归集集中度 = 归集敞口 ÷ 并表资本 = **86.4 亿** ÷ **800 亿** = **10.8%**，达到 `CAP_WARN_LINE` = **10%** → 触发 R1a 橙色预警。\n\n分母为集团并表资本 **800 亿**（`CAP_GROUP_CONSOLIDATED`），统计周期 T-1 日终；计算依据可在「证据链」逐步核对。';
+// 追问链①应答（批 2 多轮）：上一轮 reached → 本轮问分母/算法，回答复用前轮机构与数字；数字与 formula 剧本同源
+const TEXT_FORMULA_CTX =
+  '接着刚才的触达情况说：证券 **5.5%**、资管 **8.2%** 触达的是各自参考线（R1b · 关注级），不涉及预警分母；R1a 预警比的是归集维度——归集集中度 = 归集敞口 **86.4 亿** ÷ 并表资本 **800 亿** = **10.8%**，达到 `CAP_WARN_LINE` = **10%** → 橙色预警。分母即集团并表资本 **800 亿**（`CAP_GROUP_CONSOLIDATED`），统计周期 T-1 日终，可在「证据链」逐步核对。';
 const TEXT_CHART =
   '各机构占比与预警线对比如下：**归集 10.8%** 超过预警线 **10%**（橙色柱）；银行 **8.0%** 在行内限额内，证券、资管触达参考线，以黄色标出。';
 const TEXT_REPORT =
@@ -79,6 +82,7 @@ export const SCRIPTS: Record<string, AiScript> = {
   reached: { id: 'reached', thinkMs: 1200, blocks: [{ type: 'tools' }, { type: 'text', md: TEXT_REACHED }, { type: 'table' }] },
   reveal: { id: 'reveal', thinkMs: 1400, blocks: [{ type: 'tools' }, { type: 'text', md: REVEAL_TEXT }] },
   formula: { id: 'formula', thinkMs: 1400, blocks: [{ type: 'tools' }, { type: 'text', md: TEXT_FORMULA }] },
+  formulaCtx: { id: 'formulaCtx', thinkMs: 1200, blocks: [{ type: 'tools' }, { type: 'text', md: TEXT_FORMULA_CTX }] },
   chart: { id: 'chart', thinkMs: 1200, blocks: [{ type: 'tools' }, { type: 'text', md: TEXT_CHART }, { type: 'chart' }] },
   report: { id: 'report', thinkMs: 1200, blocks: [{ type: 'tools' }, { type: 'text', md: TEXT_REPORT }, { type: 'report' }] },
   confirm: { id: 'confirm', thinkMs: 1200, blocks: [{ type: 'tools' }, { type: 'text', md: TEXT_CONFIRM }, { type: 'confirm' }] },
@@ -109,6 +113,16 @@ export function matchScript(question: string): AiScript {
   if (/触达/.test(q)) return SCRIPTS.reached;
   if (/预警|风险|天晟|归集|R1a/.test(q)) return SCRIPTS.overview;
   return SCRIPTS.fallback;
+}
+
+/**
+ * 上下文路由（批 2 多轮）：结合本会话上一轮 AI 剧本解析追问。
+ * 追问链①：上一轮 = reached（机构触达）→ 本轮问分母/算法 → 返回 formulaCtx（复用前轮机构与数字）。
+ * 其余一律退回 matchScript 基础路由（无上下文语义）。
+ */
+export function matchScriptInContext(question: string, lastScriptId?: string): AiScript {
+  if (lastScriptId === 'reached' && matchScript(question).id === 'formula') return SCRIPTS.formulaCtx;
+  return matchScript(question);
 }
 
 // —— 报告卡（§5.4；meta 文案为 spec 定值）——

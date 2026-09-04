@@ -18,7 +18,8 @@ export default function SessionSidebar({ sessions, currentKey, collapsed, overla
   const expandedVisible = overlay || !collapsed;
 
   return (
-    <div
+    <nav
+      aria-label="会话列表"
       style={{
         width: overlay ? 240 : collapsed ? 56 : 240,
         boxSizing: 'border-box',
@@ -77,23 +78,30 @@ export default function SessionSidebar({ sessions, currentKey, collapsed, overla
             const current = s.key === currentKey;
             const gen = generatingKeys.includes(s.key) && !current;
             return (
-              <div
+              <button
+                type="button"
                 key={s.key}
                 className="chat-session-item"
                 onClick={() => onSelect(s.key)}
                 title={s.label}
+                aria-current={current || undefined}
                 style={{
                   position: 'relative',
                   display: 'flex',
                   alignItems: 'center',
+                  width: '100%',
                   height: 36,
                   borderRadius: 6,
                   padding: '0 12px',
                   cursor: 'pointer',
                   fontSize: 13,
                   lineHeight: '20px',
+                  fontFamily: 'inherit',
+                  textAlign: 'left',
+                  border: 0,
                   color: RISK_COLORS.text,
-                  background: current ? RISK_COLORS.panelAlt : 'transparent',
+                  // 非当前项不写内联底色：hover 底 panelAlt 交给 .chat-session-item:hover（§2.3）
+                  background: current ? RISK_COLORS.panelAlt : undefined,
                 }}
               >
                 {current && (
@@ -112,7 +120,7 @@ export default function SessionSidebar({ sessions, currentKey, collapsed, overla
                 ) : (
                   <MoreOutlined className="chat-more" title="更多（演示版未开放）" style={{ fontSize: 16, color: RISK_COLORS.textFaint }} />
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -181,6 +189,6 @@ export default function SessionSidebar({ sessions, currentKey, collapsed, overla
           })}
         </div>
       )}
-    </div>
+    </nav>
   );
 }
