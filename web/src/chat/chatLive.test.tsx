@@ -26,7 +26,7 @@ beforeAll(() => {
       return [];
     }
   }
-  (globalThis as typeof globalThis & { IntersectionObserver?: unknown }).IntersectionObserver ??= IOStub;
+  (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver ??= IOStub;
 });
 
 const REPLY = '归集集中度 **10.8%** 超预警线 **10%**，橙色预警成立。';
@@ -126,7 +126,7 @@ describe('载荷派生纯函数（intent 标签 / 图表序列）', () => {
 describe('live 真实问数契约（批 3）', () => {
   beforeEach(() => {
     setChatModeOverride('live');
-    vi.spyOn(antdMessage, 'info').mockImplementation(() => undefined);
+    vi.spyOn(antdMessage, 'info').mockImplementation(() => undefined as never);
   });
   afterEach(() => {
     setChatModeOverride(null);

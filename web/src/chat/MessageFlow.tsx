@@ -53,7 +53,7 @@ function renderPayload(
     case 'table':
       return wrap(<BlockTable onEvidence={onEvidence} />);
     case 'chart':
-      return wrap(<BlockChart onEvidence={onEvidence} series={message?.chartSeries} />);
+      return wrap(<BlockChart onEvidence={onEvidence} series={message?.chartSeries ?? undefined} />);
     case 'report':
       return wrap(<BlockReport phase={b.reportPhase ?? 'done'} />);
     case 'confirm':

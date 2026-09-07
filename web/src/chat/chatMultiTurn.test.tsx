@@ -26,7 +26,7 @@ beforeAll(() => {
       return [];
     }
   }
-  (globalThis as typeof globalThis & { IntersectionObserver?: unknown }).IntersectionObserver ??= IOStub;
+  (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver ??= IOStub;
 });
 
 function renderChat() {
