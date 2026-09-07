@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { FileSearchOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SafetyOutlined } from '@ant-design/icons';
 import { RISK_COLORS, WARN_TAG_TINTS } from '../risk/riskTheme';
 import { accentAlpha, chatFocusRing, chatFontMono, chatHitRowBg } from './chatTokens';
-import { useChatEngine } from './useChatEngine';
+import { useChatEngine, type ChatMessage } from './useChatEngine';
+import type { EvidenceBlock } from './chatApi';
 import { EVIDENCE } from '../proto/fakeData';
 import SessionSidebar from './SessionSidebar';
 import MessageFlow from './MessageFlow';
@@ -45,8 +46,16 @@ export default function ChatShell() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [auditId, setAuditId] = useState(EVIDENCE.audit);
-  const openEvidence = useCallback(() => {
-    setAuditId(EVIDENCE.audit);
+  const [liveBlocks, setLiveBlocks] = useState<EvidenceBlock[] | undefined>(undefined);
+  const openEvidence = useCallback((m?: ChatMessage) => {
+    // 批 3：live 消息带真实证据载荷；fake 走剧本演示数据
+    if (m?.mode === 'live' && m.evidence?.length) {
+      setLiveBlocks(m.evidence);
+      setAuditId('读实查 · ap_anping 六库');
+    } else {
+      setLiveBlocks(undefined);
+      setAuditId(EVIDENCE.audit);
+    }
     setDrawerOpen(true);
   }, []);
 
@@ -271,7 +280,12 @@ export default function ChatShell() {
             zIndex: 30,
           }}
         >
-          <EvidenceDrawer open={drawerOpen} auditId={auditId} onClose={() => setDrawerOpen(false)} />
+          <EvidenceDrawer
+            open={drawerOpen}
+            auditId={auditId}
+            onClose={() => setDrawerOpen(false)}
+            liveBlocks={liveBlocks}
+          />
         </aside>
       </div>
     </div>

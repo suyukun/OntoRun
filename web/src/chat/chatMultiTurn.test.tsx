@@ -110,7 +110,7 @@ describe('多轮与会话隔离 smoke（组件级，真实计时）', () => {
     await screen.findByText('今天要看什么风险？');
 
     // 生成中出现停止钮，点击打断（§7.2）
-    fireEvent.click(screen.getByText('天晟集团现在有什么风险预警？'));
+    fireEvent.click(screen.getByText('天晟集团有限公司现在有什么风险预警？'));
     fireEvent.click(await screen.findByTitle('停止生成'));
     await waitFor(() => expect(screen.queryByTitle('停止生成')).toBeNull());
 

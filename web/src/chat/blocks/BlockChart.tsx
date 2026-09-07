@@ -7,6 +7,7 @@ import type { EChartsOption } from 'echarts';
 import * as echarts from 'echarts';
 import { TABLE_ROWS } from '../../proto/fakeData';
 import { RISK_COLORS, WARN_TAG_TINTS } from '../../risk/riskTheme';
+import type { ChartSeriesItem } from '../chatApi';
 
 /** 数据色语义映射（§5.3）：达标 #067647 / 触达 #b54708 / 预警 #c2410c / 危急 #b42318 */
 const LEVEL_COLOR: Record<string, string> = {
@@ -16,7 +17,75 @@ const LEVEL_COLOR: Record<string, string> = {
   危急: RISK_COLORS.red,
 };
 
-function buildOption(): EChartsOption {
+/**
+ * live 柱色（批 3）：集团归集柱对照 R1a 三线（9 黄/10 橙/12 红，来自 rules_hits.computed 真实值）；
+ * 机构柱用中性色——载荷未带各机构参考线（org_reference_ratio 是本机构当前占比，非参考线），
+ * 不在前端臆测色语义，达线明细由正文与证据抽屉承载。
+ */
+function liveColor(item: ChartSeriesItem): string {
+  if (item.isGroup) {
+    if (item.ratio > 12) return LEVEL_COLOR['危急'];
+    if (item.ratio >= 10) return LEVEL_COLOR['橙色预警'];
+    if (item.ratio >= 9) return LEVEL_COLOR['触达'];
+    return LEVEL_COLOR['安全'];
+  }
+  return RISK_COLORS.textFaint;
+}
+
+function buildOption(series?: ChartSeriesItem[]): EChartsOption {
+  if (series?.length) {
+    return {
+      animationDuration: 300,
+      animationEasing: 'cubicOut',
+      legend: { show: false },
+      tooltip: {
+        trigger: 'axis',
+        transitionDuration: 0,
+        backgroundColor: '#ffffff',
+        borderWidth: 1,
+        borderColor: RISK_COLORS.borderSoft,
+        borderRadius: 6,
+        extraCssText: 'box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);',
+        textStyle: { color: RISK_COLORS.text, fontSize: 12 },
+        valueFormatter: (v) => `${v}%`,
+      },
+      grid: { left: 40, right: 16, top: 30, bottom: 28 },
+      xAxis: {
+        type: 'category',
+        data: series.map((s) => s.org),
+        axisLabel: { interval: 0, hideOverlap: false, fontSize: 11, color: RISK_COLORS.textFaint },
+        axisLine: { lineStyle: { color: RISK_COLORS.borderSoft } },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { formatter: '{value}%', fontSize: 11, color: RISK_COLORS.textFaint },
+        splitLine: { lineStyle: { color: RISK_COLORS.borderSoft, type: 'solid' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          name: '占比',
+          barWidth: 28,
+          data: series.map((s) => ({ value: s.ratio, itemStyle: { color: liveColor(s) } })),
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: { color: RISK_COLORS.orange, type: 'dashed', width: 1.5 },
+            label: {
+              formatter: '预警线 10%',
+              fontSize: 11,
+              color: RISK_COLORS.orange,
+              backgroundColor: WARN_TAG_TINTS.ORANGE.bg,
+              padding: [2, 6],
+              borderRadius: 4,
+            },
+            data: [{ yAxis: 10 }],
+          },
+        },
+      ],
+    };
+  }
   return {
     animationDuration: 300, // 入场 300ms 仅一次（§5.3）
     animationEasing: 'cubicOut',
@@ -99,9 +168,9 @@ function IconBtn({ title, onClick, children }: { title: string; onClick: () => v
   );
 }
 
-export default function BlockChart({ onEvidence }: { onEvidence: () => void }) {
+export default function BlockChart({ onEvidence, series }: { onEvidence: () => void; series?: ChartSeriesItem[] }) {
   const [zoom, setZoom] = useState(false);
-  const option = useMemo(() => buildOption(), []);
+  const option = useMemo(() => buildOption(series), [series]);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const handleReady = useCallback((c: echarts.ECharts) => {
     chartRef.current = c;

@@ -159,10 +159,10 @@ export interface ChipSpec {
   text: string;
 }
 export const SUGGESTION_CHIPS: ChipSpec[] = [
-  { key: 'c1', icon: 'alert', text: '天晟集团现在有什么风险预警？' },
-  { key: 'c2', icon: 'question', text: '为什么各家机构都安全，归集反而触发橙色预警？' },
+  { key: 'c1', icon: 'alert', text: '天晟集团有限公司现在有什么风险预警？' },
+  { key: 'c2', icon: 'question', text: '天晟集团各家机构单看都安全，为什么归集反而触发橙色预警？' },
   { key: 'c3', icon: 'calc', text: 'R1a 归集集中度怎么算的？分母是什么？' },
-  { key: 'c4', icon: 'chart', text: '画一张各机构占比与预警线的对比图' },
+  { key: 'c4', icon: 'chart', text: '画一张天晟集团各机构占比与预警线的对比图' },
   { key: 'c5', icon: 'report', text: '生成天晟集团风险处置建议报告' },
   { key: 'c6', icon: 'table', text: '天晟集团哪些机构触达参考线？' },
 ];

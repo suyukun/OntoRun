@@ -31,7 +31,12 @@ interface BlockPayload {
   last: boolean;
 }
 
-function renderPayload(payload: BlockPayload, onEvidence: () => void, streaming: boolean): ReactNode {
+function renderPayload(
+  payload: BlockPayload,
+  onEvidence: () => void,
+  streaming: boolean,
+  message?: ChatMessage,
+): ReactNode {
   const b = payload.block;
   const wrap = (node: ReactNode) => (
     <div style={{ paddingLeft: 32 }} className="chat-fade-120">
@@ -40,17 +45,26 @@ function renderPayload(payload: BlockPayload, onEvidence: () => void, streaming:
   );
   switch (b.type) {
     case 'tools':
-      return wrap(<BlockTools phase={b.toolsPhase ?? 'done'} stepStatus={b.stepStatus ?? []} />);
+      return wrap(
+        <BlockTools phase={b.toolsPhase ?? 'done'} stepStatus={b.stepStatus ?? []} stepLabels={b.stepLabels} />,
+      );
     case 'text':
       return wrap(<BlockText md={b.md ?? ''} streaming={streaming && payload.last} />);
     case 'table':
       return wrap(<BlockTable onEvidence={onEvidence} />);
     case 'chart':
-      return wrap(<BlockChart onEvidence={onEvidence} />);
+      return wrap(<BlockChart onEvidence={onEvidence} series={message?.chartSeries} />);
     case 'report':
       return wrap(<BlockReport phase={b.reportPhase ?? 'done'} />);
     case 'confirm':
-      return wrap(<BlockConfirm onEvidence={onEvidence} />);
+      return wrap(
+        <BlockConfirm
+          onEvidence={onEvidence}
+          live={message?.mode === 'live' && message.needConfirm
+            ? { proposal: message.needConfirm.name, arguments: message.needConfirm.arguments }
+            : undefined}
+        />,
+      );
   }
 }
 
@@ -75,7 +89,7 @@ function buildMessageItems(session: ChatSession): BubbleItemType[] {
         key: b.key,
         role: b === message.blocks[0] ? 'ai-head' : 'ai-body',
         content: { block: b, streaming: message.status === 'streaming', last: b === last } satisfies BlockPayload,
-        extraInfo: { time: message.time },
+        extraInfo: { time: message.time, message },
       });
     }
     if (message.status === 'done' && message.blocks.length > 0) {
@@ -219,13 +233,26 @@ export default function MessageFlow({ session, onAsk, onEvidence, onRetry, onReg
       contentRender: (payload: BlockPayload, info) => (
         <div className="chat-fade-80">
           <AiHeader time={String(info.extraInfo?.time ?? '')} />
-          <div style={{ marginTop: 8 }}>{renderPayload(payload, handlers.onEvidence, Boolean(payload.streaming))}</div>
+          <div style={{ marginTop: 8 }}>
+            {renderPayload(
+              payload,
+              handlers.onEvidence,
+              Boolean(payload.streaming),
+              info.extraInfo?.message as ChatMessage | undefined,
+            )}
+          </div>
         </div>
       ),
     },
     'ai-body': {
       ...roles['ai-body'],
-      contentRender: (payload: BlockPayload) => renderPayload(payload, handlers.onEvidence, Boolean(payload.streaming)),
+      contentRender: (payload: BlockPayload, info) =>
+        renderPayload(
+          payload,
+          handlers.onEvidence,
+          Boolean(payload.streaming),
+          info.extraInfo?.message as ChatMessage | undefined,
+        ),
     },
     'ai-thinking': {
       ...roles['ai-thinking'],

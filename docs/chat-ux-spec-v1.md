@@ -239,7 +239,7 @@ Ant Design X 官方提供 Bubble / Sender / Conversations / ThoughtChain / Welco
 - 容器（待确认态）：1px #f2bda1 + 左缘 3px #c2410c + 底 #fff + radius 8。
 - 标题行：AuditOutlined 16 #c2410c +「AI 提议 · 需人工拍板」13px semibold #c2410c + 右侧状态 Tag（待确认 = 橙 tint；已执行 = green；已驳回 = textDim）。
 - 正文：提议 14px/24 text「冻结天晟集团新增授信」；依据行 12.5px textDim「R1a 归集 10.8% ≥ 预警线 10%（处置依据：2023 关联交易办法第二十三条）」+ 尾随「查看依据」accent 链接。
-- 操作区（上距 12）：批准执行（Button primary，accent，loading 600ms 模拟写回）+ 驳回（Button default）+ 审批意见 Input（高 32、宽 240、placeholder「审批意见（可选）」，位于两钮左侧）。提交即双钮 disabled 防重复。
+- 操作区（上距 12）：批准执行（Button primary，accent，loading 600ms 模拟写回）+ 驳回（Button default）。提交即双钮 disabled 防重复。〔v1.1 勘误 2026-09-02：移除原「审批意见 Input」——Jack 裁决双签短期非重点，confirm 收敛为纯拍板动作，不含自由文本输入；原 §5.6 与 §11 验收语义自相矛盾，以本勘误为准。〕
 - **执行后（终态不可逆）**：容器边框退为 borderSoft、标题行变灰「AI 提议 · 已处置」（textDim）；按钮区隐藏，下插状态条（上方 1px borderSoft 分隔）：CheckCircleOutlined 14 +「已执行 · 源库写回 ✓ · 审计 #A-1024 · 操作人 张处长 · 14:32」13px #067647。卡保留在消息流中（追溯可查）。
 - 驳回后：状态条「已驳回 · 退回 AI 重新起草」textDim + 时间；同样保留。
 - 〔假设 2〕单签即达「人拍板」演示意图；若剧本要求上级复核，需追加第二状态段，待口径包确认。
@@ -433,6 +433,14 @@ x 组件映射：Conversations = 左栏列表；Bubble = 用户气泡（variant 
 | 12 | 证据链术语 | 统一用「证据链」，后续随口径包细化再调整 |
 
 其余 9 条（#1、4–11）按本文档默认假设执行。
+
+### 12.2 批 3 交付注记（2026-09，真实问数链路）
+
+- **范围**：读路径问数接线（裁决 #2「问数优先」）。live 模式下回答/证据/图表全部来自 `/agent/risk/chat`（ap_anping 六库实查 + DeepSeek）；写路径不接线——need_confirm 渲染真实提议卡，但拍板按钮明确提示「写回链路后续批次接入」，不伪造执行态。
+- **数据源开关**：默认 fake（剧本演示）。live = URL 加 `?src=live` 或 `VITE_CHAT_DATA_SOURCE=live`；live 模式所有会话空态开场（不预置剧本历史）。
+- **chips 契约盘点结果（裁决 #3 硬约束）**：6 问 4 直答；c2 补「天晟集团」主语（原问后端必反问定位）、c4 改为提问后由前端从揭示载荷 detail_rows 派生真图（后端只读不出图）、c1 用全称「天晟集团有限公司」（同名农业系集团多，短称有定位反问概率）。
+- **载荷映射**：evidence[] → 抽屉五区（结论/basis 表/命中规则/口径分母/明细行引用）；intent → tools 步骤文案；rules_hits[R1a].computed.ratio + detail_rows → 图表派生（org_reference_ratio 是本机构当前占比而非参考线，机构柱用中性色，不臆测色语义）。
+- **已知风险（M5 演示前需数据侧确认）**：同题多跑存在「定位反问」概率（LLM 路由方差），非前端问题；建议数据侧补集团别名表或演示前用 patch 脚本重置到剧本态。
 
 ---
 

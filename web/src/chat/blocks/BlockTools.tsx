@@ -23,7 +23,7 @@ function DescText({ text }: { text: string }) {
   );
 }
 
-function ToggleRow({ done, onToggle }: { done: boolean; onToggle: () => void }) {
+function ToggleRow({ done, onToggle, summary }: { done: boolean; onToggle: () => void; summary: string }) {
   return (
     <button
       className="chat-tools-row"
@@ -46,7 +46,7 @@ function ToggleRow({ done, onToggle }: { done: boolean; onToggle: () => void }) 
       ) : (
         <LoadingOutlined style={{ fontSize: 14, color: RISK_COLORS.accent }} />
       )}
-      <span style={{ fontSize: 13, lineHeight: '20px', color: RISK_COLORS.textDim }}>{done ? TOOLS_SUMMARY : '正在核查…'}</span>
+      <span style={{ fontSize: 13, lineHeight: '20px', color: RISK_COLORS.textDim }}>{done ? summary : '正在核查…'}</span>
       <span style={{ flex: 1 }} />
       {done ? <DownOutlined style={{ fontSize: 12, color: RISK_COLORS.textFaint }} /> : <UpOutlined style={{ fontSize: 12, color: RISK_COLORS.textFaint }} />}
     </button>
@@ -60,10 +60,17 @@ function StepNode({ children }: { children: ReactNode }) {
 export default function BlockTools({
   phase,
   stepStatus,
+  stepLabels,
 }: {
   phase: 'skeleton' | 'running' | 'done';
   stepStatus: ('process' | 'finish')[];
+  /** live（批 3）：真实证据 intent 步骤文案；缺省走剧本演示步骤 */
+  stepLabels?: string[];
 }) {
+  const steps = stepLabels ?? TOOL_STEPS_VIEW.map((s) => s.action);
+  const summary = stepLabels
+    ? `实查 ${steps.length} 项 · 证据链随答返回`
+    : TOOLS_SUMMARY;
   // 展开记忆（§5.5）：进行中默认展开，完成折叠；用户手动切换后以用户为准（单次回答内保持）
   const [override, setOverride] = useState<boolean | null>(null);
   const expanded = override ?? phase !== 'done';
@@ -79,50 +86,37 @@ export default function BlockTools({
   }
 
   if (!expanded) {
-    return <ToggleRow done={phase === 'done'} onToggle={() => setOverride(true)} />;
+    return <ToggleRow done={phase === 'done'} onToggle={() => setOverride(true)} summary={summary} />;
   }
 
   return (
     <div>
-      <ToggleRow done={phase === 'done'} onToggle={() => setOverride(false)} />
+      <ToggleRow done={phase === 'done'} onToggle={() => setOverride(false)} summary={summary} />
       <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {TOOL_STEPS_VIEW.map((s, i) => {
+        {steps.map((label, i) => {
           const st = stepStatus[i];
           if (!st) return null; // 未到达的步骤不渲染（逐步 fade-in，§5.5）
           return (
-            <div key={s.api} className="chat-fade-120" style={{ display: 'flex', gap: 8 }}>
+            <div key={label + i} className="chat-fade-120" style={{ display: 'flex', gap: 8 }}>
               <StepNode>
                 {st === 'finish' ? (
                   <span style={{ width: 6, height: 6, borderRadius: 3, background: RISK_COLORS.green, marginTop: 7 }} />
                 ) : (
                   <LoadingOutlined style={{ fontSize: 14, color: RISK_COLORS.accent }} />
                 )}
-                {i < TOOL_STEPS_VIEW.length - 1 && stepStatus[i + 1] && (
+                {i < steps.length - 1 && stepStatus[i + 1] && (
                   <span style={{ flex: 1, width: 1, background: RISK_COLORS.borderSoft, minHeight: 12, marginTop: 4 }} />
                 )}
               </StepNode>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <code
-                    style={{
-                      fontFamily: chatFontMono,
-                      fontSize: 12.5,
-                      background: RISK_COLORS.panelAlt,
-                      borderRadius: 4,
-                      padding: '1px 6px',
-                      color: RISK_COLORS.text,
-                    }}
-                  >
-                    {s.api}
-                  </code>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{s.action}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: RISK_COLORS.textFaint, fontVariantNumeric: 'tabular-nums' }}>
-                    {s.duration}
-                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
                 </div>
-                <div style={{ marginTop: 2, fontSize: 12.5, lineHeight: '20px', color: RISK_COLORS.textDim }}>
-                  <DescText text={s.desc} />
-                </div>
+                {stepLabels == null && (
+                  <div style={{ marginTop: 2, fontSize: 12.5, lineHeight: '20px', color: RISK_COLORS.textDim }}>
+                    <DescText text={TOOL_STEPS_VIEW[i].desc} />
+                  </div>
+                )}
               </div>
             </div>
           );

@@ -1,6 +1,17 @@
-// 对话引擎 —— 本地 state + 固定剧本流式模拟（无后端；docs/chat-ux-spec-v1.md §7.2/§8）
+// 对话引擎 —— fake=本地剧本流式模拟；live=真实问数（/agent/risk/chat，批 3）
+// 流式/骨架 UX 两模式一致：后端一次性响应由前端本地播放（docs/chat-ux-spec-v1.md §7.2/§8）
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SESSIONS } from '../proto/fakeData';
+import {
+  chartSeriesFromEvidence,
+  intentLabel,
+  resolveChatMode,
+  sendRiskChat,
+  type ChartSeriesItem,
+  type ChatMode,
+  type EvidenceBlock,
+  type NeedConfirm,
+} from './chatApi';
 import { FULL_SEED_QUESTION, SCRIPTS, TOOL_STEPS_VIEW, matchScript, matchScriptInContext, type AiScript } from './scriptData';
 
 // —— 时序常量（spec §5.4/§5.5/§8.1/§8.2）——
@@ -11,6 +22,10 @@ const REPORT_SKELETON_MS = 800; // 报告生成中骨架（§5.4）
 const TOOL_SKELETON_MS = 400; // tools 骨架先行（§5.5）
 const TOOL_STEP_MS = [600, 700, 500]; // 三步合计 1.8s，与 TOOLS_SUMMARY 口径一致
 const ERROR_EXTRA_MS = 500;
+// live 模式时序：真实等待即思考态；载荷到位后快速回放过程与文本
+const LIVE_MIN_THINK_MS = 800; // 骨架最短停留（§8.2）
+const LIVE_TOOL_STEP_MS = 180; // 证据 intent 步骤回放间隔
+const LIVE_TEXT_WAIT_CAP_MS = 6000; // 长回答不阻塞后续块（文本打字机继续）
 
 export type BlockPhase = 'skeleton' | 'running' | 'done';
 
@@ -22,6 +37,8 @@ export interface AiBlockState {
   mdFull?: string;
   toolsPhase?: BlockPhase;
   stepStatus?: ('process' | 'finish')[];
+  /** live：tools 步骤文案（来自真实证据 intent） */
+  stepLabels?: string[];
   reportPhase?: 'skeleton' | 'done';
 }
 
@@ -39,12 +56,19 @@ export interface ChatMessage {
   scriptId?: string;
   /** §8.2 >8s 提示行 */
   thinkingHint?: boolean;
+  /** live：本条回答的数据源模式与真实载荷（证据抽屉/图表/confirm 消费） */
+  mode?: ChatMode;
+  evidence?: EvidenceBlock[];
+  needConfirm?: NeedConfirm;
+  chartSeries?: ChartSeriesItem[] | null;
 }
 
 export interface ChatSession {
   key: string;
   label: string;
   messages: ChatMessage[];
+  /** live：后端会话 id（多轮上下文由后端 RiskAgent 会话承载） */
+  remoteId?: string;
 }
 
 let seq = 0;
@@ -65,22 +89,26 @@ function staticBlock(b: AiScript['blocks'][number]): AiBlockState {
 }
 
 function initialSessions(): ChatSession[] {
+  // live（批 3）：真实问数一律空会话开场（空态 chips），不预置 fake 剧本历史
+  const live = resolveChatMode() === 'live';
   return [
     {
       key: 's1',
       label: SESSIONS[0].label,
-      messages: [
-        { id: nextId(), role: 'user', text: FULL_SEED_QUESTION, time: hhmm(), status: 'done', blocks: [], attempt: 1 },
-        {
-          id: nextId(),
-          role: 'ai',
-          time: hhmm(),
-          status: 'done',
-          blocks: SCRIPTS.full.blocks.map(staticBlock),
-          attempt: 1,
-          scriptId: 'full',
-        },
-      ],
+      messages: live
+        ? []
+        : [
+            { id: nextId(), role: 'user', text: FULL_SEED_QUESTION, time: hhmm(), status: 'done', blocks: [], attempt: 1 },
+            {
+              id: nextId(),
+              role: 'ai',
+              time: hhmm(),
+              status: 'done',
+              blocks: SCRIPTS.full.blocks.map(staticBlock),
+              attempt: 1,
+              scriptId: 'full',
+            },
+          ],
     },
     { key: 's2', label: SESSIONS[1].label, messages: [] },
     { key: 's3', label: SESSIONS[2].label, messages: [] },
@@ -97,7 +125,7 @@ export function useChatEngine() {
     sessionsRef.current = sessions;
   }, [sessions]);
   const generatingRef = useRef<Record<string, boolean>>({});
-  const genTokens = useRef(new Map<string, { cancelled: boolean }>());
+  const genTokens = useRef(new Map<string, { cancelled: boolean; ac?: AbortController }>());
 
   const bump = () => setVersion((v) => v + 1);
 
@@ -220,12 +248,135 @@ export function useChatEngine() {
     [finishGen, patchMessage, patchSession],
   );
 
+  // —— live（批 3）：真实问数 —— 等待即思考态，载荷到位后回放过程块 + 文本（内容全真）
+  const runLive = useCallback(
+    (sessionKey: string, question: string, attempt: number) => {
+      const msgId = nextId();
+      const ac = new AbortController();
+      const token = { cancelled: false, ac };
+      genTokens.current.set(sessionKey, token);
+      setGen(sessionKey, true);
+      const alive = () => !token.cancelled;
+      const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+      patchSession(sessionKey, (s) => ({
+        ...s,
+        messages: [
+          ...s.messages,
+          { id: msgId, role: 'ai', time: hhmm(), status: 'thinking', blocks: [], question, attempt, mode: 'live' },
+        ],
+      }));
+
+      const pushBlock = (b: AiBlockState) =>
+        patchMessage(sessionKey, msgId, (m) => ({ ...m, blocks: [...m.blocks, b] }));
+      const patchLast = (fn: (b: AiBlockState) => AiBlockState) =>
+        patchMessage(sessionKey, msgId, (m) => ({
+          ...m,
+          blocks: m.blocks.map((b, i) => (i === m.blocks.length - 1 ? fn(b) : b)),
+        }));
+      const hintTimer = setTimeout(() => {
+        if (alive()) patchMessage(sessionKey, msgId, (m) => ({ ...m, thinkingHint: true }));
+      }, THINK_HINT_MS);
+
+      void (async () => {
+        const remoteId = sessionsRef.current.find((x) => x.key === sessionKey)?.remoteId;
+        try {
+          const t0 = sleep(LIVE_MIN_THINK_MS);
+          const res = await sendRiskChat(question, remoteId, ac.signal);
+          await t0;
+          clearTimeout(hintTimer);
+          if (!alive()) return;
+
+          const evidence = res.evidence ?? [];
+          patchSession(sessionKey, (s) => ({
+            ...s,
+            remoteId: res.session_id,
+            messages: s.messages.map((m) =>
+              m.id === msgId
+                ? { ...m, status: 'streaming', evidence, needConfirm: res.need_confirm ?? undefined }
+                : m,
+            ),
+          }));
+
+          // 过程透明（§5.5）：步骤 = 真实证据 intent，快速回放
+          if (evidence.length > 0) {
+            const labels = evidence.slice(0, 6).map((e) => intentLabel(String(e.intent ?? '实查')));
+            pushBlock({ key: nextBlk(), type: 'tools', toolsPhase: 'running', stepStatus: ['process'], stepLabels: labels });
+            for (let i = 0; i < labels.length; i++) {
+              await sleep(LIVE_TOOL_STEP_MS);
+              if (!alive()) return;
+              patchLast((bl) => {
+                const st = [...(bl.stepStatus ?? [])];
+                st[i] = 'finish';
+                if (i + 1 < labels.length) st[i + 1] = 'process';
+                return { ...bl, stepStatus: st };
+              });
+            }
+            patchLast((bl) => ({ ...bl, toolsPhase: 'done' }));
+            await sleep(BLOCK_GAP_MS);
+            if (!alive()) return;
+          }
+
+          // 回答正文（Markdown 全量下发，TypingContent 打字机；等待仅排后续块，长文封顶）
+          patchMessage(sessionKey, msgId, (m) => ({
+            ...m,
+            blocks: [...m.blocks, { key: nextBlk(), type: 'text', md: res.reply, mdFull: res.reply }],
+          }));
+          await sleep(Math.min(res.reply.length * 12, LIVE_TEXT_WAIT_CAP_MS) + 250);
+          if (!alive()) return;
+
+          // c4 类提问且载荷含占比行 → 从真实证据派生图（不手写数字）
+          const wantChart = /画|对比图|图表/.test(question);
+          const series = chartSeriesFromEvidence(evidence);
+          if (wantChart && series) {
+            patchMessage(sessionKey, msgId, (m) => ({ ...m, chartSeries: series }));
+            pushBlock({ key: nextBlk(), type: 'chart' });
+            await sleep(BLOCK_GAP_MS);
+            if (!alive()) return;
+          }
+
+          // 写提议（§5.6）：need_confirm 随答返回 → confirm 卡；批 3 拍板不接写回
+          if (res.need_confirm) {
+            pushBlock({ key: nextBlk(), type: 'confirm' });
+            await sleep(BLOCK_GAP_MS);
+            if (!alive()) return;
+          }
+
+          patchMessage(sessionKey, msgId, (m) => ({ ...m, status: 'done' }));
+          finishGen(sessionKey);
+        } catch (err) {
+          clearTimeout(hintTimer);
+          if (!alive() || (err instanceof DOMException && err.name === 'AbortError')) {
+            // §7.2 停止：打断等待，保留已输出内容
+            patchMessage(sessionKey, msgId, (m) => (m.status === 'thinking' ? { ...m, status: 'done' } : m));
+            finishGen(sessionKey);
+            return;
+          }
+          patchMessage(sessionKey, msgId, (m) => ({
+            ...m,
+            status: 'error',
+            errorReason:
+              err instanceof Error && err.message.startsWith('HTTP')
+                ? '风险问答服务异常，请稍后重试'
+                : '网络异常，无法连接风险问答服务',
+          }));
+          finishGen(sessionKey);
+        }
+      })();
+    },
+    [finishGen, patchMessage, patchSession],
+  );
+
   const sendMessage = useCallback(
     (sessionKey: string, raw: string, attempt = 1) => {
       const text = raw.trim().slice(0, 500);
       if (!text || generatingRef.current[sessionKey]) return; // 生成中 Enter 不发送（§7.2）
       const userMsg: ChatMessage = { id: nextId(), role: 'user', text, time: hhmm(), status: 'done', blocks: [], attempt };
       patchSession(sessionKey, (s) => ({ ...s, messages: [...s.messages, userMsg] }));
+      if (resolveChatMode() === 'live') {
+        runLive(sessionKey, text, attempt);
+        return;
+      }
       // 多轮上下文（批 2）：按本会话最近一条 AI 剧本解析追问（如触达 → 分母），否则走基础路由
       const lastAiScriptId = sessionsRef.current
         .find((x) => x.key === sessionKey)
@@ -235,7 +386,7 @@ export function useChatEngine() {
       const errorMode = script.id === 'fallback' && attempt === 1;
       runScript(sessionKey, text, script, attempt, errorMode);
     },
-    [patchSession, runScript],
+    [patchSession, runLive, runScript],
   );
 
   /** §8.3 重试：移除错误卡并重发原问题（重试后成功） */
@@ -246,10 +397,14 @@ export function useChatEngine() {
       const target = s?.messages.find((m) => m.id === messageId);
       if (!target) return;
       patchSession(sessionKey, (cur) => ({ ...cur, messages: cur.messages.filter((m) => m.id !== messageId) }));
+      if (target.mode === 'live') {
+        runLive(sessionKey, target.question ?? '', target.attempt + 1);
+        return;
+      }
       const script = SCRIPTS[target.scriptId ?? ''] ?? matchScript(target.question ?? '');
       runScript(sessionKey, target.question ?? '', script, target.attempt + 1, false);
     },
-    [patchSession, runScript],
+    [patchSession, runLive, runScript],
   );
 
   /** §4.4 重新生成：重发原问题 */
@@ -270,6 +425,7 @@ export function useChatEngine() {
       const token = genTokens.current.get(sessionKey);
       if (!token) return;
       token.cancelled = true;
+      token.ac?.abort();
       finishGen(sessionKey);
       const s = sessionsRef.current.find((x) => x.key === sessionKey);
       const live = s?.messages.find((m) => m.role === 'ai' && (m.status === 'thinking' || m.status === 'streaming'));

@@ -80,7 +80,9 @@ export function ActionBar({ message, onEvidence, onRegenerate }: { message: Chat
         onClick={onEvidence}
         style={{ background: 'none', border: 0, padding: 0, fontSize: 13, lineHeight: '20px' }}
       >
-        查看证据链 · 审计 {EVIDENCE.audit}
+        {message.mode === 'live'
+          ? `查看证据链 · 证据 ${message.evidence?.length ?? 0} 项`
+          : `查看证据链 · 审计 ${EVIDENCE.audit}`}
       </button>
       <span style={{ flex: 1 }} />
       <button
