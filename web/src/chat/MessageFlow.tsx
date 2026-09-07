@@ -260,7 +260,7 @@ export default function MessageFlow({ session, onAsk, onEvidence, onRetry, onReg
         <div className="chat-fade-80">
           <AiHeader time={String(info.extraInfo?.time ?? '')} />
           <div style={{ marginTop: 8 }}>
-            <ThinkingSkeleton hint={m.thinkingHint} />
+            <ThinkingSkeleton hint={m.thinkingHint} stage={m.thinkingStage} />
           </div>
         </div>
       ),

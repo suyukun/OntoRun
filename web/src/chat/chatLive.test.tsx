@@ -137,6 +137,9 @@ describe('live 真实问数契约（批 3）', () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
     const body2 = JSON.parse(String(fetchFn.mock.calls[1][1]?.body));
     expect(body2.session_id).toBe('sess_test1');
+
+    // 批 3.1：首答后侧栏会话自动以问题命名（真实列表，无 fake 条目）
+    expect(screen.getAllByText('天晟集团有限公司现在有什').length).toBeGreaterThanOrEqual(2);
   }, 60000);
 
   it('证据抽屉渲染真实载荷（basis 表/命中规则/分母/明细行引用）', async () => {

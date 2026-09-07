@@ -30,15 +30,27 @@ export function AiHeader({ time }: { time: string }) {
   );
 }
 
-/** 思考中骨架（§8.2：两行 60%/40%；>8s 追加业务提示行） */
-export function ThinkingSkeleton({ hint }: { hint?: boolean }) {
+/** live 思考阶段文案（批 3.1）：只描述真实进行中的流程，绝不虚构中间结果 */
+const THINK_STAGE_TEXT: Record<number, string> = {
+  1: '正在理解您的问题…',
+  2: '正在检索风险数据（受限语义接口实查）…',
+  3: '正在核对口径与阈值…（复杂问题需多轮实查，可能较久）',
+};
+
+/** 思考中骨架（§8.2：两行 60%/40%；live 按阶段轮换提示，fake >8s 追加业务提示行） */
+export function ThinkingSkeleton({ hint, stage }: { hint?: boolean; stage?: 1 | 2 | 3 }) {
+  const stageText = stage ? THINK_STAGE_TEXT[stage] : hint ? '正在核对口径与阈值…' : null;
   return (
     <div style={{ paddingLeft: 32 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="chat-skel" style={{ width: '60%' }} />
         <div className="chat-skel" style={{ width: '40%' }} />
       </div>
-      {hint && <div style={{ marginTop: 8, fontSize: 12, color: RISK_COLORS.textFaint }}>正在核对口径与阈值…</div>}
+      {stageText && (
+        <div className="chat-fade-120" style={{ marginTop: 8, fontSize: 12, color: RISK_COLORS.textFaint }}>
+          {stageText}
+        </div>
+      )}
     </div>
   );
 }

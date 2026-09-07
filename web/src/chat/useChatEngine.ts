@@ -56,6 +56,8 @@ export interface ChatMessage {
   scriptId?: string;
   /** §8.2 >8s 提示行 */
   thinkingHint?: boolean;
+  /** live：思考阶段（1 理解问题 / 2 检索数据 / 3 核对口径），驱动阶段化提示文案 */
+  thinkingStage?: 1 | 2 | 3;
   /** live：本条回答的数据源模式与真实载荷（证据抽屉/图表/confirm 消费） */
   mode?: ChatMode;
   evidence?: EvidenceBlock[];
@@ -89,15 +91,15 @@ function staticBlock(b: AiScript['blocks'][number]): AiBlockState {
 }
 
 function initialSessions(): ChatSession[] {
-  // live（批 3）：真实问数一律空会话开场（空态 chips），不预置 fake 剧本历史
-  const live = resolveChatMode() === 'live';
+  // live（批 3.1）：会话列表真实化——只出一个空会话，提问后自动命名；不预置 fake 剧本条目
+  if (resolveChatMode() === 'live') {
+    return [{ key: 's1', label: '新对话', messages: [] }];
+  }
   return [
     {
       key: 's1',
       label: SESSIONS[0].label,
-      messages: live
-        ? []
-        : [
+      messages: [
             { id: nextId(), role: 'user', text: FULL_SEED_QUESTION, time: hhmm(), status: 'done', blocks: [], attempt: 1 },
             {
               id: nextId(),
@@ -274,9 +276,16 @@ export function useChatEngine() {
           ...m,
           blocks: m.blocks.map((b, i) => (i === m.blocks.length - 1 ? fn(b) : b)),
         }));
-      const hintTimer = setTimeout(() => {
-        if (alive()) patchMessage(sessionKey, msgId, (m) => ({ ...m, thinkingHint: true }));
-      }, THINK_HINT_MS);
+      // 阶段化思考提示（批 3.1）：只轮换进行时措辞，绝不虚构中间结果
+      const stageTimers = [
+        setTimeout(() => {
+          if (alive()) patchMessage(sessionKey, msgId, (m) => ({ ...m, thinkingStage: 2 }));
+        }, 2500),
+        setTimeout(() => {
+          if (alive()) patchMessage(sessionKey, msgId, (m) => ({ ...m, thinkingStage: 3, thinkingHint: true }));
+        }, THINK_HINT_MS),
+      ];
+      const clearStageTimers = () => stageTimers.forEach(clearTimeout);
 
       void (async () => {
         const remoteId = sessionsRef.current.find((x) => x.key === sessionKey)?.remoteId;
@@ -284,13 +293,18 @@ export function useChatEngine() {
           const t0 = sleep(LIVE_MIN_THINK_MS);
           const res = await sendRiskChat(question, remoteId, ac.signal);
           await t0;
-          clearTimeout(hintTimer);
+          clearStageTimers();
           if (!alive()) return;
+          // 首答自动命名（批 3.1）：'新对话' → 问题前 12 字（真实会话列表）
+          patchSession(sessionKey, (s) => ({
+            ...s,
+            remoteId: res.session_id,
+            label: s.label === '新对话' ? question.slice(0, 12) : s.label,
+          }));
 
           const evidence = res.evidence ?? [];
           patchSession(sessionKey, (s) => ({
             ...s,
-            remoteId: res.session_id,
             messages: s.messages.map((m) =>
               m.id === msgId
                 ? { ...m, status: 'streaming', evidence, needConfirm: res.need_confirm ?? undefined }
@@ -345,7 +359,7 @@ export function useChatEngine() {
           patchMessage(sessionKey, msgId, (m) => ({ ...m, status: 'done' }));
           finishGen(sessionKey);
         } catch (err) {
-          clearTimeout(hintTimer);
+          clearStageTimers();
           if (!alive() || (err instanceof DOMException && err.name === 'AbortError')) {
             // §7.2 停止：打断等待，保留已输出内容
             patchMessage(sessionKey, msgId, (m) => (m.status === 'thinking' ? { ...m, status: 'done' } : m));
