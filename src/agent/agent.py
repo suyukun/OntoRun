@@ -152,13 +152,32 @@ class Agent:
 
     # ---- 对外入口 ----
 
-    def run_turn(self, user_message: str) -> AgentTurn:
-        """一轮对话：用户消息 → LLM → 执行（或提议待确认）→ 回填 → 自然语言回复。"""
+    def run_turn(self, user_message: str, on_event: Any = None) -> AgentTurn:
+        """一轮对话：用户消息 → LLM → 执行（或提议待确认）→ 回填 → 自然语言回复。
+
+        on_event（批 4-② SSE）：可选事件回调 dict（token/tool_start/tool_result），
+        None 时行为与原版完全一致；provider 支持 chat_stream 时用流式取 token。
+        """
         # 新一轮用户消息到来：作废未确认的旧提议（显式双签 API 为准，防误确认）
         self._pending = None
         self._history.append(ChatMessage(role="user", content=user_message))
-        resp = self._provider.chat(self._messages(), self._tools)
-        return self._handle_response(resp)
+        resp = self._llm_call(getattr(self._provider, "chat_stream", None), on_event)
+        return self._handle_response(resp, on_event=on_event)
+
+    def _llm_call(self, stream_chat: Any, on_event: Any) -> ChatResponse:
+        """LLM 往返（批 4-②）：on_event 且 provider 支持 chat_stream 时流式取 token，否则同步 chat。
+
+        run_turn 首轮与 _handle_response 工具追问/终答共用：SSE 下所有 LLM 产出都实时推送。
+        """
+        if on_event is not None and stream_chat is not None:
+            return stream_chat(
+                self._messages(),
+                self._tools,
+                lambda ev, payload: on_event(
+                    {"type": ev, **({"text": payload} if ev == "token" else {})}
+                ),
+            )
+        return self._provider.chat(self._messages(), self._tools)
 
     def confirm_pending(
         self,
@@ -212,7 +231,10 @@ class Agent:
         return [ChatMessage(role="system", content=self._system_prompt), *self._history]
 
     def _handle_response(
-        self, resp: ChatResponse, extra_results: list[ToolResult] | None = None
+        self,
+        resp: ChatResponse,
+        extra_results: list[ToolResult] | None = None,
+        on_event: Any = None,
     ) -> AgentTurn:
         """多轮工具往返（上限 _MAX_TOOL_ROUNDS 防死循环）：执行/提议 → 回填 → 再决策。
 
@@ -234,9 +256,24 @@ class Agent:
             round_results: list[ToolResult] = []
             for call in resp.tool_calls:
                 calls.append(call)
+                if on_event is not None:
+                    on_event({"type": "tool_start", "name": call.name})
                 result = self._execute_tool_call(call)
                 round_results.append(result)
                 results.append(result)
+                if on_event is not None:
+                    outcome = ""
+                    try:
+                        outcome = json.loads(result.content).get("outcome", "")
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                    on_event(
+                        {
+                            "type": "tool_result",
+                            "name": call.name,
+                            "outcome": str(outcome),
+                        }
+                    )
             # OpenAI 兼容约束：tool 结果紧跟 assistant tool_calls 消息
             self._history.append(
                 ChatMessage(role="assistant", content=None, tool_calls=calls)
@@ -247,7 +284,7 @@ class Agent:
                         role="tool", content=r.content, tool_call_id=r.tool_call_id
                     )
                 )
-            resp = self._provider.chat(self._messages(), self._tools)
+            resp = self._llm_call(getattr(self._provider, "chat_stream", None), on_event)
         content = "（工具调用轮次超限，已停止，请重试）"
         self._history.append(ChatMessage(role="assistant", content=content))
         return AgentTurn(reply=content, tool_results=results)

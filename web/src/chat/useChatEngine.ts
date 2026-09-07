@@ -6,11 +6,12 @@ import {
   chartSeriesFromEvidence,
   intentLabel,
   resolveChatMode,
-  sendRiskChat,
+  streamRiskChat,
   type ChartSeriesItem,
   type ChatMode,
   type EvidenceBlock,
   type NeedConfirm,
+  type StreamEvent,
 } from './chatApi';
 import { FULL_SEED_QUESTION, SCRIPTS, TOOL_STEPS_VIEW, matchScript, matchScriptInContext, type AiScript } from './scriptData';
 
@@ -22,10 +23,8 @@ const REPORT_SKELETON_MS = 800; // 报告生成中骨架（§5.4）
 const TOOL_SKELETON_MS = 400; // tools 骨架先行（§5.5）
 const TOOL_STEP_MS = [600, 700, 500]; // 三步合计 1.8s，与 TOOLS_SUMMARY 口径一致
 const ERROR_EXTRA_MS = 500;
-// live 模式时序：真实等待即思考态；载荷到位后快速回放过程与文本
+// live 模式时序：真实等待即思考态；SSE 载荷随事件实时渲染（批 4-②）
 const LIVE_MIN_THINK_MS = 800; // 骨架最短停留（§8.2）
-const LIVE_TOOL_STEP_MS = 180; // 证据 intent 步骤回放间隔
-const LIVE_TEXT_WAIT_CAP_MS = 6000; // 长回答不阻塞后续块（文本打字机继续）
 
 export type BlockPhase = 'skeleton' | 'running' | 'done';
 
@@ -35,6 +34,8 @@ export interface AiBlockState {
   /** text 块已流式输出部分 / 全量 */
   md?: string;
   mdFull?: string;
+  /** live（批 4-②）：后端 SSE 真流式——md 即增量实时渲染，不走路内打字机 */
+  liveStream?: boolean;
   toolsPhase?: BlockPhase;
   stepStatus?: ('process' | 'finish')[];
   /** live：tools 步骤文案（来自真实证据 intent） */
@@ -252,7 +253,7 @@ export function useChatEngine() {
     [finishGen, patchMessage, patchSession],
   );
 
-  // —— live（批 3）：真实问数 —— 等待即思考态，载荷到位后回放过程块 + 文本（内容全真）
+  // —— live（批 3）：真实问数 —— 等待即思考态；SSE（批 4-②）工具/文本块随事件实时直播
   const runLive = useCallback(
     (sessionKey: string, question: string, attempt: number) => {
       const msgId = nextId();
@@ -273,11 +274,17 @@ export function useChatEngine() {
 
       const pushBlock = (b: AiBlockState) =>
         patchMessage(sessionKey, msgId, (m) => ({ ...m, blocks: [...m.blocks, b] }));
-      const patchLast = (fn: (b: AiBlockState) => AiBlockState) =>
+      const patchTools = (fn: (b: AiBlockState) => AiBlockState) =>
         patchMessage(sessionKey, msgId, (m) => ({
           ...m,
-          blocks: m.blocks.map((b, i) => (i === m.blocks.length - 1 ? fn(b) : b)),
+          blocks: m.blocks.map((b) => (b.type === 'tools' ? fn(b) : b)),
         }));
+      const patchText = (fn: (b: AiBlockState) => AiBlockState) =>
+        patchMessage(sessionKey, msgId, (m) => ({
+          ...m,
+          blocks: m.blocks.map((b) => (b.type === 'text' ? fn(b) : b)),
+        }));
+
       // 阶段化思考提示（批 3.1）：只轮换进行时措辞，绝不虚构中间结果
       const stageTimers = [
         setTimeout(() => {
@@ -289,11 +296,55 @@ export function useChatEngine() {
       ];
       const clearStageTimers = () => stageTimers.forEach(clearTimeout);
 
+      // —— SSE 事件消费（批 4-②）：tool_start 直播步骤 / token 增量文本；final 由 streamRiskChat 兑现 ——
+      const toolLabels: string[] = [];
+      let toolsPushed = false;
+      let textPushed = false;
+      let accText = '';
+      let streamed = false;
+      const markStreaming = () => {
+        if (streamed) return;
+        streamed = true;
+        patchMessage(sessionKey, msgId, (m) => (m.status === 'thinking' ? { ...m, status: 'streaming' } : m));
+      };
+      const handleEvent = (ev: StreamEvent) => {
+        if (!alive()) return;
+        if (ev.type === 'tool_start') {
+          markStreaming();
+          if (!toolsPushed) {
+            toolsPushed = true;
+            pushBlock({ key: nextBlk(), type: 'tools', toolsPhase: 'running', stepStatus: [], stepLabels: [] });
+          }
+          toolLabels.push(intentLabel(ev.name));
+          patchTools((bl) => ({
+            ...bl,
+            stepLabels: [...toolLabels],
+            stepStatus: [...(bl.stepStatus ?? []).map((s) => (s === 'process' ? 'finish' : s)), 'process'],
+          }));
+        } else if (ev.type === 'tool_result') {
+          patchTools((bl) => {
+            const st = [...(bl.stepStatus ?? [])];
+            const i = st.indexOf('process');
+            if (i !== -1) st[i] = 'finish';
+            return { ...bl, stepStatus: st };
+          });
+        } else if (ev.type === 'token') {
+          markStreaming();
+          accText += ev.text;
+          if (!textPushed) {
+            textPushed = true;
+            pushBlock({ key: nextBlk(), type: 'text', md: accText, mdFull: accText, liveStream: true });
+          } else {
+            patchText((bl) => ({ ...bl, md: accText, mdFull: accText }));
+          }
+        }
+      };
+
       void (async () => {
         const remoteId = sessionsRef.current.find((x) => x.key === sessionKey)?.remoteId;
         try {
           const t0 = sleep(LIVE_MIN_THINK_MS);
-          const res = await sendRiskChat(question, remoteId, ac.signal);
+          const res = await streamRiskChat(question, remoteId, handleEvent, ac.signal);
           await t0;
           clearStageTimers();
           if (!alive()) return;
@@ -305,41 +356,33 @@ export function useChatEngine() {
           }));
 
           const evidence = res.evidence ?? [];
-          patchSession(sessionKey, (s) => ({
-            ...s,
-            messages: s.messages.map((m) =>
-              m.id === msgId
-                ? { ...m, status: 'streaming', evidence, needConfirm: res.need_confirm ?? undefined }
-                : m,
-            ),
-          }));
-
-          // 过程透明（§5.5）：步骤 = 真实证据 intent，快速回放
-          if (evidence.length > 0) {
-            const labels = evidence.slice(0, 6).map((e) => intentLabel(String(e.intent ?? '实查')));
-            pushBlock({ key: nextBlk(), type: 'tools', toolsPhase: 'running', stepStatus: ['process'], stepLabels: labels });
-            for (let i = 0; i < labels.length; i++) {
-              await sleep(LIVE_TOOL_STEP_MS);
-              if (!alive()) return;
-              patchLast((bl) => {
-                const st = [...(bl.stepStatus ?? [])];
-                st[i] = 'finish';
-                if (i + 1 < labels.length) st[i + 1] = 'process';
-                return { ...bl, stepStatus: st };
-              });
-            }
-            patchLast((bl) => ({ ...bl, toolsPhase: 'done' }));
-            await sleep(BLOCK_GAP_MS);
-            if (!alive()) return;
-          }
-
-          // 回答正文（Markdown 全量下发，TypingContent 打字机；等待仅排后续块，长文封顶）
           patchMessage(sessionKey, msgId, (m) => ({
             ...m,
-            blocks: [...m.blocks, { key: nextBlk(), type: 'text', md: res.reply, mdFull: res.reply }],
+            status: 'streaming',
+            evidence,
+            needConfirm: res.need_confirm ?? undefined,
           }));
-          await sleep(Math.min(res.reply.length * 12, LIVE_TEXT_WAIT_CAP_MS) + 250);
-          if (!alive()) return;
+
+          // 过程透明（§5.5）收尾：流内工具帧已直播；载荷含 intent 而流内无工具帧时补建步骤
+          if (toolsPushed) {
+            patchTools((bl) => {
+              const labels =
+                bl.stepLabels && bl.stepLabels.length > 0
+                  ? bl.stepLabels
+                  : evidence.slice(0, 6).map((e) => intentLabel(String(e.intent ?? '实查')));
+              return { ...bl, stepLabels: labels, stepStatus: labels.map(() => 'finish'), toolsPhase: 'done' };
+            });
+          } else if (evidence.length > 0) {
+            const labels = evidence.slice(0, 6).map((e) => intentLabel(String(e.intent ?? '实查')));
+            pushBlock({ key: nextBlk(), type: 'tools', toolsPhase: 'done', stepStatus: labels.map(() => 'finish'), stepLabels: labels });
+          }
+
+          // 正文收尾：final reply 为权威（与流内 token 不一致时覆盖修正，§8.1）
+          if (textPushed) {
+            patchText((bl) => ({ ...bl, md: res.reply, mdFull: res.reply }));
+          } else if (res.reply) {
+            pushBlock({ key: nextBlk(), type: 'text', md: res.reply, mdFull: res.reply });
+          }
 
           // 画图类提问且载荷含占比行 → 从真实证据派生图（不手写数字）；触发词放宽（批 4-①）
           const wantChart = /画一张|画个|画图|柱状图|饼图|对比图|可视化|图表/.test(question);

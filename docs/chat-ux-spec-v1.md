@@ -442,6 +442,13 @@ x 组件映射：Conversations = 左栏列表；Bubble = 用户气泡（variant 
 - **载荷映射**：evidence[] → 抽屉五区（结论/basis 表/命中规则/口径分母/明细行引用）；intent → tools 步骤文案；rules_hits[R1a].computed.ratio + detail_rows → 图表派生（org_reference_ratio 是本机构当前占比而非参考线，机构柱用中性色，不臆测色语义）。
 - **已知风险（M5 演示前需数据侧确认）**：同题多跑存在「定位反问」概率（LLM 路由方差），非前端问题；建议数据侧补集团别名表或演示前用 patch 脚本重置到剧本态。
 
+### 12.2b 批 4-② SSE 流式注记（2026-09，流式对话链路）
+
+- **端点**：`POST /agent/risk/chat/stream`（SSE，`text/event-stream`）。帧契约：`token {text}` 正文增量 / `tool_start {name}` / `tool_result {name, outcome}` 工具实查直播 / `final {session_id, reply, need_confirm, outcome, evidence}` 终帧（与旧端点响应体同构）/ `error {message}` 编排异常。会话管理、F22②反问定位、P1-1 追问上下文注入与旧端点同源；旧端点 `/agent/risk/chat` 保留（评测/冒烟兼容）。
+- **后端流式**：DeepSeekProvider.chat_stream（stream=True 聚合 tool_calls delta，token 增量实时回调）；Agent._llm_call 在 on_event 存在时对**本轮全部 LLM 调用**（首轮/工具追问/终答）走流式——终答逐字推送而非整包；on_event=None 时行为与原版完全一致（评测/存量调用零改动）。编排在 worker 线程 + queue 中运行，generator 即时 yield（无攒批）。
+- **前端流式**：`streamRiskChat`（fetch reader 解析 SSE 帧，final 兑现完整响应）；`runLive` 消费事件流——tool_start 直播 tools 块步骤、token 增量渲染 text 块（BlockText liveStream 分支，不走路内打字机）、final 兑现 evidence/needConfirm/chartSeries 并覆盖修正 reply。工具帧缺失时按载荷 intent 补建步骤。
+- **实测**（真 DeepSeek，2026-09-07）：事件序 `token→tool→…→final` 正确；首 token 1.0–4.9s（重提示词 + 20 工具 prefill 方差，非代码问题）；工具步骤实时直播；终答逐字流式后 final 帧确认。
+
 ---
 
 *本文档只含设计规格，不含实现代码；所有数值即终值，变更走版本号 v1.x。*

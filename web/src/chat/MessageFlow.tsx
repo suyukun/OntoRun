@@ -49,7 +49,7 @@ function renderPayload(
         <BlockTools phase={b.toolsPhase ?? 'done'} stepStatus={b.stepStatus ?? []} stepLabels={b.stepLabels} />,
       );
     case 'text':
-      return wrap(<BlockText md={b.md ?? ''} streaming={streaming && payload.last} />);
+      return wrap(<BlockText md={b.md ?? ''} streaming={streaming && payload.last} liveStream={b.liveStream} />);
     case 'table':
       return wrap(<BlockTable onEvidence={onEvidence} />);
     case 'chart':

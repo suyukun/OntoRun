@@ -7,10 +7,20 @@ import remarkGfm from 'remark-gfm';
 import { TypingContent } from '@ant-design/x/es/bubble/TypingContent';
 import { RISK_COLORS } from '../../risk/riskTheme';
 
-export default function BlockText({ md, streaming }: { md: string; streaming: boolean }) {
+export default function BlockText({ md, streaming, liveStream }: { md: string; streaming: boolean; liveStream?: boolean }) {
   // revealed 仅在流式分支消费；流式结束直接渲染全量 md（渲染分支派生，无 effect setState）
   const [revealed, setRevealed] = useState('');
   const [typingDone, setTypingDone] = useState(false);
+
+  // live（批 4-②）：后端 SSE 增量——md 本身在增长，直接渲染即直播；done 后走全量分支
+  if (liveStream && streaming) {
+    return (
+      <div className="chat-md chat-streaming">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
+        <span className="chat-cursor" style={{ background: RISK_COLORS.accent }} />
+      </div>
+    );
+  }
 
   if (!streaming) {
     return (

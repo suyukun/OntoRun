@@ -637,13 +637,17 @@ class RiskAgent(Agent):
         )
 
     def _handle_response(
-        self, resp: Any, extra_results: list[ToolResult] | None = None
+        self,
+        resp: Any,
+        extra_results: list[ToolResult] | None = None,
+        on_event: Any = None,
     ) -> Any:
         """编排结束后剥离思维链前缀（R2-P1-B）：内心独白不得上屏。
 
-        在 reply 返回前处理后置剥离（不动 LLM 调用、不改历史回填）。
+        在 reply 返回前处理后置剥离（不动 LLM 调用、不改历史回填）；
+        批 4-②：on_event 透传基类（SSE 工具/token 事件）。
         """
-        turn = super()._handle_response(resp, extra_results)
+        turn = super()._handle_response(resp, extra_results, on_event=on_event)
         if turn.reply:
             stripped = strip_chain_of_thought(turn.reply)
             turn.reply = stripped or None

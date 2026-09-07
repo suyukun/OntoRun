@@ -736,6 +736,140 @@ def register_risk_agent_routes(app: FastAPI) -> None:
             evidence=response_evidence,
         )
 
+    @app.post("/agent/risk/chat/stream")
+    def risk_agent_chat_stream(body: ChatRequest, request: Request):
+        """风险对话 SSE 流式端点（批 4-②）：token 增量 + 工具轮次事件实时推送。
+
+        事件帧（data: {...}\n\n）：
+        - token {text}：最终回复的正文增量；
+        - tool_start {name} / tool_result {name, outcome}：每轮工具实查直播；
+        - final {session_id, reply, need_confirm, outcome, evidence}：终帧（同旧端点响应体）；
+        - error {message}：编排异常（对外固定文案）。
+        会话管理/反问定位/上下文注入与 /agent/risk/chat 同源；旧端点保留（评测/冒烟兼容）。
+        """
+        import queue as _queue
+        import threading as _threading
+        from typing import Iterator
+
+        from fastapi.responses import StreamingResponse
+
+        actor = request.headers.get("X-Actor", "human")
+        if actor not in ALLOWED_ACTORS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "request_id": "",
+                    "outcome": "error",
+                    "error": {
+                        "code": "INVALID_ACTOR",
+                        "message": f"非法操作者（X-Actor 仅允许 {ALLOWED_ACTORS}）",
+                        "detail": {"actor": actor},
+                    },
+                },
+            )
+        session_id = body.session_id
+        state = risk_sessions.get(session_id, owner=actor) if session_id else None
+        is_new_session = state is None
+        if state is None:
+            agent = _get_agent()
+            session_id = risk_sessions.create(agent, owner=actor)
+            state = risk_sessions.get(session_id, owner=actor)
+        else:
+            agent = state.agent
+
+        # F22②：新会话直接质疑且未定位对象 → 反问定位（不经 LLM），单帧 final 直返
+        message_early = body.message
+        if (
+            is_new_session
+            and _CHALLENGE_HINT_RE.search(message_early)
+            and not (_OBJECT_ID_RE.search(message_early) or _group_name_hit(message_early))
+        ):
+            def _single() -> Iterator[str]:
+                payload = {
+                    "type": "final",
+                    "session_id": session_id,
+                    "reply": (
+                        "您的质疑需要先定位对象：请提供集团编号（GRP-…）、预警编号"
+                        "（WS-…）或集团名称，我将调取证据链实查该集团标红/标橙的"
+                        "真实原因维度（集中度实算比对 / 非集中度触发事由），凭实回答。"
+                    ),
+                    "need_confirm": None,
+                    "outcome": None,
+                    "evidence": None,
+                }
+                yield "data: " + _json.dumps(payload, ensure_ascii=False) + '\n\n'
+
+            return StreamingResponse(_single(), media_type="text/event-stream")
+
+        # P1-1 会话上下文：追问注入最近一次证据链载荷
+        message = body.message
+        if _is_followup_question(message) and state.last_evidence:
+            message = _with_evidence_context(message, state.last_evidence)
+
+        q: "_queue.Queue" = _queue.Queue()
+        _SENTINEL = object()
+
+        def _run() -> None:
+            import logging
+
+            try:
+                turn = agent.run_turn(message, on_event=q.put)
+                if turn.need_confirm:
+                    risk_sessions.set_pending(session_id, turn.need_confirm)
+                else:
+                    risk_sessions.set_pending(session_id, None)
+                ev = _extract_evidence(turn)
+                if ev:
+                    state.last_evidence = ev[-1]
+                response_evidence = (
+                    ev if ev else ([state.last_evidence] if state.last_evidence else None)
+                )
+                risk_sessions.persist(session_id, agent)
+                need_confirm_dict = None
+                if turn.need_confirm:
+                    tc = turn.need_confirm
+                    need_confirm_dict = {
+                        "id": tc.id,
+                        "name": tc.name,
+                        "arguments": tc.arguments,
+                    }
+                outcome = None
+                if turn.tool_results:
+                    try:
+                        outcome = _json.loads(turn.tool_results[-1].content).get("outcome")
+                    except (_json.JSONDecodeError, KeyError):
+                        pass
+                q.put(
+                    {
+                        "type": "final",
+                        "session_id": session_id,
+                        "reply": turn.reply or "",
+                        "need_confirm": need_confirm_dict,
+                        "outcome": outcome,
+                        "evidence": response_evidence,
+                    }
+                )
+            except Exception:
+                logging.getLogger(__name__).exception("SSE 风险对话编排失败")
+                q.put({"type": "error", "message": "服务器内部错误"})
+            finally:
+                q.put(_SENTINEL)
+
+        def _gen() -> Iterator[str]:
+            t = _threading.Thread(target=_run, daemon=True)
+            t.start()
+            while True:
+                item = q.get()
+                if item is _SENTINEL:
+                    break
+                yield "data: " + _json.dumps(item, ensure_ascii=False) + '\n\n'
+
+        return StreamingResponse(
+            _gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/agent/risk/confirm")
     async def risk_agent_confirm(body: ConfirmRequest, request: Request):
         """风险双签确认/驳回：仅 human 可确认（防伪造双签），确认后走风险引擎执行 + 审计。"""

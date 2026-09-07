@@ -51,19 +51,54 @@ export function resolveChatMode(): ChatMode {
   return env === 'live' ? 'live' : 'fake';
 }
 
-export async function sendRiskChat(
+export type StreamEvent =
+  | { type: 'token'; text: string }
+  | { type: 'tool_start'; name: string }
+  | { type: 'tool_result'; name: string; outcome: string }
+  | ({ type: 'final' } & ChatApiResponse)
+  | { type: 'error'; message: string };
+
+/** SSE 流式对话（批 4-②）：逐帧回调，final 帧兑现完整响应。HTTP 非 200 或断流抛错。 */
+export async function streamRiskChat(
   message: string,
-  sessionId?: string,
+  sessionId: string | undefined,
+  onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<ChatApiResponse> {
-  const res = await fetch('/api/agent/risk/chat', {
+  const res = await fetch('/api/agent/risk/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Actor': 'human' },
     body: JSON.stringify(sessionId ? { message, session_id: sessionId } : { message }),
     signal,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as ChatApiResponse;
+  if (!res.body) throw new Error('empty-stream');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let final: ChatApiResponse | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        const ev = JSON.parse(line.slice(5)) as StreamEvent;
+        if (ev.type === 'final') {
+          final = { session_id: ev.session_id, reply: ev.reply, need_confirm: ev.need_confirm, outcome: ev.outcome, evidence: ev.evidence };
+          onEvent(ev);
+        } else {
+          onEvent(ev);
+        }
+      }
+    }
+  }
+  if (!final) throw new Error('stream-incomplete');
+  return final;
 }
 
 // —— 图表派生（c4 chip）：从揭示载荷 detail_rows / rules_hits.computed 派生柱状系列，不手写数字 ——

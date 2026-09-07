@@ -132,6 +132,53 @@ class DeepSeekProvider:
         """异步入口（TD-6）：同步 SDK 调用扔线程池，事件循环不被阻塞。"""
         return await asyncio.to_thread(self.chat, messages, tools)
 
+    def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None,
+        on_delta: Any,
+    ) -> ChatResponse:
+        """流式版本（批 4-② SSE）：stream=True 聚合，token 增量实时回调。
+
+        - on_delta("token", text)：正文增量逐段回调（工具调用轮通常无正文）；
+        - 返回值与 chat() 完全同构（聚合完的 ChatResponse），管道其余部分零改动；
+        - 注意：若某轮同时出现正文与 tool_calls（罕见），正文已回调——上层以
+          final 回复为准做一次覆盖修正。
+        """
+        stream = self._client.chat.completions.create(
+            model=self.model,
+            messages=[_to_openai_message(m) for m in messages],
+            tools=tools,
+            stream=True,
+        )
+        content_parts: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content_parts.append(delta.content)
+                on_delta("token", delta.content)
+            for tc in delta.tool_calls or []:
+                slot = calls.setdefault(tc.index, {"id": "", "name": "", "args": []})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function and tc.function.name:
+                    slot["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    slot["args"].append(tc.function.arguments)
+        tool_calls: list[ToolCall] = []
+        for slot in calls.values():
+            try:
+                args = json.loads("".join(slot["args"]) or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            tool_calls.append(ToolCall(id=slot["id"], name=slot["name"], arguments=args))
+        return ChatResponse(content="".join(content_parts), tool_calls=tool_calls)
+
 
 def _to_openai_message(m: ChatMessage) -> dict:
     """Agent 层消息 → OpenAI SDK 消息（assistant tool_calls / tool 关联转换）。"""

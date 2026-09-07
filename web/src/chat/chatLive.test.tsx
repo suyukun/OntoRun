@@ -29,18 +29,44 @@ beforeAll(() => {
   (globalThis as typeof globalThis & { IntersectionObserver?: unknown }).IntersectionObserver ??= IOStub;
 });
 
-const okResponse = (overrides: Partial<ChatApiResponse>): Response =>
+const REPLY = '归集集中度 **10.8%** 超预警线 **10%**，橙色预警成立。';
+
+/** SSE 流 mock（批 4-②）：工具直播帧 + token 帧 + final 帧 */
+const sse = (frames: object[]): Response =>
   new Response(
-    JSON.stringify({
+    new ReadableStream({
+      start(c) {
+        const enc = new TextEncoder();
+        for (const fr of frames) c.enqueue(enc.encode(`data: ${JSON.stringify(fr)}
+
+`));
+        c.close();
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+
+const okResponse = (overrides: Partial<ChatApiResponse>, withTools = true): Response =>
+  sse([
+    ...(withTools
+      ? [
+          { type: 'tool_start', name: 'risk_query:group_customer' },
+          { type: 'tool_result', name: 'risk_query:group_customer', outcome: 'ok' },
+          { type: 'tool_start', name: 'act1_group_reveal' },
+          { type: 'tool_result', name: 'act1_group_reveal', outcome: 'ok' },
+        ]
+      : []),
+    { type: 'token', text: overrides.reply ?? REPLY },
+    {
+      type: 'final',
       session_id: 'sess_test1',
-      reply: '归集集中度 **10.8%** 超预警线 **10%**，橙色预警成立。',
+      reply: REPLY,
       need_confirm: null,
       outcome: 'ok',
       evidence: null,
       ...overrides,
-    } satisfies ChatApiResponse),
-    { status: 200, headers: { 'Content-Type': 'application/json' } },
-  );
+    },
+  ]);
 
 const revealRow = {
   row_ref: 'customer.ap_subsidiary_credit_detail#group=GRP-1&org=安平银行',
@@ -122,13 +148,13 @@ describe('live 真实问数契约（批 3）', () => {
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const [url1, init1] = fetchFn.mock.calls[0];
-    expect(String(url1)).toBe('/api/agent/risk/chat');
+    expect(String(url1)).toBe('/api/agent/risk/chat/stream');
     const body1 = JSON.parse(String(init1?.body));
     expect(body1.message).toBe('天晟集团有限公司现在有什么风险预警？');
     expect(body1.session_id).toBeUndefined();
     expect(init1?.headers?.['X-Actor']).toBe('human');
 
-    // tools 完成态折叠摘要（§5.5）= 真实证据项数；正文 = 真实 reply
+    // tools 完成态折叠摘要（§5.5）= 直播步数；正文 = 真实 reply
     expect(screen.getAllByText('实查 2 项 · 证据链随答返回').length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText(/10.8%/).length).toBeGreaterThan(0));
 
@@ -180,7 +206,7 @@ describe('live 真实问数契约（批 3）', () => {
 
     fireEvent.click(screen.getByText('天晟集团有限公司现在有什么风险预警？'));
     await screen.findByText('本次回答生成失败', undefined, { timeout: 20000 });
-    expect(screen.getByText('风险问答服务异常，请稍后重试')).toBeInTheDocument();
+    expect(screen.getByText(/服务异常|网络异常/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
     await screen.findByText('查看证据链 · 证据 0 项', undefined, { timeout: 20000 });
