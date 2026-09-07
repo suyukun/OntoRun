@@ -105,6 +105,7 @@ class Customer(BaseModel):
 - 火山账户级 429 的症状识别：子代理长时间 running 但零文件动静、零提交 = 30s→300s×4 的静默退避循环（约 20 分钟），先查限流窗口再判僵死；interrupt/接管消息要等其 turn 边界才被读取。
 - 子代理并发 ≤2 个长任务（长任务 = 预计 >10 分钟或多轮工具调用的编码/审查任务）；交付即收尾，不让 continuable 长挂（idle 占配额窗口）；**重派接管前必须终止旧会话并清点工作区，防同任务双飞写同一文件**。
 - 429 应对顺序：① 并发控制（治本）-> ② 退避等待（DSH retryPolicy 长退避，见 ~/.dsh/settings.yaml）-> ③ 套餐内换模型（试验性，账户级限流下不保证有效）-> ④ plan 外 provider（最后手段）。
+- 墙钟超时硬约束：前台调用约 600s 即被掐死且结果不可恢复——多轮评审、agent 走查等重活必须拆成 <5 分钟一段串行调用、裁薄输入；超时后拆小重跑，不许原样重试（2026-09 两击实证：handoff 评委走查超时、AGENTS 仲裁 workflow 600s 被杀）。
 
 ## Git 工作流
 - commit 用英文 conventional commits：feat/fix/refactor/docs/test/chore/perf/ci。
