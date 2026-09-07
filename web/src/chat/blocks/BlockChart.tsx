@@ -53,7 +53,8 @@ function buildOption(series?: ChartSeriesItem[]): EChartsOption {
       xAxis: {
         type: 'category',
         data: series.map((s) => s.org),
-        axisLabel: { interval: 0, hideOverlap: false, fontSize: 11, color: RISK_COLORS.textFaint },
+        // 类目多时自动抽稀防重叠（假数据 4 类目 interval 0 不受影响；live 行数不定）
+        axisLabel: { interval: 'auto', hideOverlap: true, fontSize: 11, color: RISK_COLORS.textFaint },
         axisLine: { lineStyle: { color: RISK_COLORS.borderSoft } },
         axisTick: { show: false },
       },

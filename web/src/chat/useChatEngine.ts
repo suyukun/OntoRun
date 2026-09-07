@@ -341,8 +341,8 @@ export function useChatEngine() {
           await sleep(Math.min(res.reply.length * 12, LIVE_TEXT_WAIT_CAP_MS) + 250);
           if (!alive()) return;
 
-          // c4 类提问且载荷含占比行 → 从真实证据派生图（不手写数字）
-          const wantChart = /画|对比图|图表/.test(question);
+          // 画图类提问且载荷含占比行 → 从真实证据派生图（不手写数字）；触发词放宽（批 4-①）
+          const wantChart = /画一张|画个|画图|柱状图|饼图|对比图|可视化|图表/.test(question);
           const series = chartSeriesFromEvidence(evidence);
           if (wantChart && series) {
             patchMessage(sessionKey, msgId, (m) => ({ ...m, chartSeries: series }));
