@@ -236,7 +236,9 @@ export default function ChatShell() {
           />
         )}
         <SessionSidebar
-          sessions={engine.sessions.map((s) => ({ key: s.key, label: s.label }))}
+          sessions={[...engine.sessions]
+            .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false))
+            .map((s) => ({ key: s.key, label: s.label, pinned: s.pinned }))}
           currentKey={session.key}
           collapsed={collapsed}
           overlay={overlayMode}
@@ -246,6 +248,9 @@ export default function ChatShell() {
             engine.newSession();
             if (overlayMode) setCollapsed(true);
           }}
+          onDelete={engine.deleteSession}
+          onRename={engine.renameSession}
+          onTogglePin={engine.togglePin}
         />
         <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: RISK_COLORS.ink }}>
           <MessageFlow

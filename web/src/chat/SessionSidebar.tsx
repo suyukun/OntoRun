@@ -1,20 +1,224 @@
 // 左栏会话列表 —— 展开 240 / 折叠 56 两态（docs/chat-ux-spec-v1.md §2.3/§2.4）
-import { MoreOutlined, PlusOutlined } from '@ant-design/icons';
+// 批 4：会话管理——置顶 / 重命名（行内编辑）/ 删除（Popconfirm）；条目 div[role=button]（内嵌操作按钮）
+import { useEffect, useRef, useState } from 'react';
+import { DeleteOutlined, EditOutlined, PlusOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons';
+import { Popconfirm } from 'antd';
 import { RISK_COLORS } from '../risk/riskTheme';
 
+export interface SidebarSession {
+  key: string;
+  label: string;
+  pinned?: boolean;
+}
+
 interface Props {
-  sessions: { key: string; label: string }[];
+  sessions: SidebarSession[];
   currentKey: string;
   collapsed: boolean;
   overlay: boolean;
   generatingKeys: string[];
   onSelect: (key: string) => void;
   onNew: () => void;
+  onDelete: (key: string) => void;
+  onRename: (key: string, label: string) => void;
+  onTogglePin: (key: string) => void;
 }
 
 const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
+const iconBtnStyle = {
+  width: 22,
+  height: 22,
+  borderRadius: 5,
+  border: 0,
+  background: 'transparent',
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: RISK_COLORS.textFaint,
+  fontSize: 13,
+  padding: 0,
+} as const;
 
-export default function SessionSidebar({ sessions, currentKey, collapsed, overlay, generatingKeys, onSelect, onNew }: Props) {
+function SessionRow({
+  session,
+  current,
+  generating,
+  onSelect,
+  onDelete,
+  onRename,
+  onTogglePin,
+}: {
+  session: SidebarSession;
+  current: boolean;
+  generating: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  onRename: (label: string) => void;
+  onTogglePin: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(session.label);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft.trim() && draft.trim() !== session.label) onRename(draft);
+    else setDraft(session.label);
+  };
+
+  return (
+    <div
+      className="chat-session-item"
+      title={session.label}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        width: '100%',
+        height: 36,
+        borderRadius: 6,
+        padding: '0 8px 0 12px',
+        fontSize: 13,
+        lineHeight: '20px',
+        textAlign: 'left',
+        color: RISK_COLORS.text,
+        background: current ? RISK_COLORS.panelAlt : undefined,
+      }}
+    >
+      {current && (
+        <span style={{ position: 'absolute', left: 0, top: 10, width: 2, height: 16, borderRadius: 1, background: RISK_COLORS.accent }} />
+      )}
+      {session.pinned && !editing && (
+        <PushpinFilled style={{ fontSize: 11, color: RISK_COLORS.accent, flexShrink: 0 }} aria-label="已置顶" />
+      )}
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 20))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') {
+              setDraft(session.label);
+              setEditing(false);
+            }
+          }}
+          onBlur={commit}
+          aria-label="重命名会话"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 13,
+            lineHeight: '20px',
+            border: `1px solid ${RISK_COLORS.accent}`,
+            borderRadius: 4,
+            padding: '2px 6px',
+            outline: 'none',
+            fontFamily: 'inherit',
+            color: RISK_COLORS.text,
+            background: '#fff',
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="chat-session-main"
+          onClick={onSelect}
+          title={session.label}
+          aria-current={current || undefined}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            textAlign: 'left',
+            fontSize: 13,
+            lineHeight: '20px',
+            fontFamily: 'inherit',
+            background: 'transparent',
+            border: 0,
+            padding: 0,
+            cursor: 'pointer',
+            color: RISK_COLORS.text,
+          }}
+        >
+          {session.label}
+        </button>
+      )}
+      {generating ? (
+        <span title="生成中" style={{ display: 'inline-flex', gap: 3, alignItems: 'center', paddingRight: 2 }}>
+          <span className="chat-dot" />
+          <span className="chat-dot" />
+          <span className="chat-dot" />
+        </span>
+      ) : (
+        !editing && (
+          <span className="chat-more" style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="chat-icon-btn"
+              title={`${session.pinned ? '取消置顶' : '置顶'} ${session.label}`}
+              aria-label={`${session.pinned ? '取消置顶' : '置顶'} ${session.label}`}
+              style={iconBtnStyle}
+              onClick={onTogglePin}
+            >
+              {session.pinned ? <PushpinFilled style={{ color: RISK_COLORS.accent }} /> : <PushpinOutlined />}
+            </button>
+            <button
+              type="button"
+              className="chat-icon-btn"
+              title="重命名"
+              aria-label={`重命名 ${session.label}`}
+              style={iconBtnStyle}
+              onClick={() => {
+                setDraft(session.label);
+                setEditing(true);
+              }}
+            >
+              <EditOutlined />
+            </button>
+            <Popconfirm
+              title="删除会话"
+              description="删除后不可恢复，确认？"
+              okText="删除"
+              cancelText="取消"
+              onConfirm={onDelete}
+            >
+              <button
+                type="button"
+                className="chat-icon-btn"
+                title="删除"
+                aria-label={`删除 ${session.label}`}
+                style={{ ...iconBtnStyle, color: RISK_COLORS.red }}
+              >
+                <DeleteOutlined />
+              </button>
+            </Popconfirm>
+          </span>
+        )
+      )}
+    </div>
+  );
+}
+
+export default function SessionSidebar({
+  sessions,
+  currentKey,
+  collapsed,
+  overlay,
+  generatingKeys,
+  onSelect,
+  onNew,
+  onDelete,
+  onRename,
+  onTogglePin,
+}: Props) {
   const expandedVisible = overlay || !collapsed;
 
   return (
@@ -74,55 +278,18 @@ export default function SessionSidebar({ sessions, currentKey, collapsed, overla
         </button>
         <div style={{ fontSize: 12, lineHeight: '20px', color: RISK_COLORS.textFaint, padding: '8px 12px 0' }}>今天</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {sessions.map((s) => {
-            const current = s.key === currentKey;
-            const gen = generatingKeys.includes(s.key) && !current;
-            return (
-              <button
-                type="button"
-                key={s.key}
-                className="chat-session-item"
-                onClick={() => onSelect(s.key)}
-                title={s.label}
-                aria-current={current || undefined}
-                style={{
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '100%',
-                  height: 36,
-                  borderRadius: 6,
-                  padding: '0 12px',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  lineHeight: '20px',
-                  fontFamily: 'inherit',
-                  textAlign: 'left',
-                  border: 0,
-                  color: RISK_COLORS.text,
-                  // 非当前项不写内联底色：hover 底 panelAlt 交给 .chat-session-item:hover（§2.3）
-                  background: current ? RISK_COLORS.panelAlt : undefined,
-                }}
-              >
-                {current && (
-                  <span
-                    style={{ position: 'absolute', left: 0, top: 10, width: 2, height: 16, borderRadius: 1, background: RISK_COLORS.accent }}
-                  />
-                )}
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
-                <span style={{ flex: 1 }} />
-                {gen ? (
-                  <span title="生成中" style={{ display: 'inline-flex', gap: 3, alignItems: 'center', paddingRight: 2 }}>
-                    <span className="chat-dot" />
-                    <span className="chat-dot" />
-                    <span className="chat-dot" />
-                  </span>
-                ) : (
-                  <MoreOutlined className="chat-more" title="更多（演示版未开放）" style={{ fontSize: 16, color: RISK_COLORS.textFaint }} />
-                )}
-              </button>
-            );
-          })}
+          {sessions.map((s) => (
+            <SessionRow
+              key={s.key}
+              session={s}
+              current={s.key === currentKey}
+              generating={generatingKeys.includes(s.key)}
+              onSelect={() => onSelect(s.key)}
+              onDelete={() => onDelete(s.key)}
+              onRename={(label) => onRename(s.key, label)}
+              onTogglePin={() => onTogglePin(s.key)}
+            />
+          ))}
         </div>
       </div>
 
@@ -181,9 +348,16 @@ export default function SessionSidebar({ sessions, currentKey, collapsed, overla
                   alignItems: 'center',
                   justifyContent: 'center',
                   padding: 0,
+                  position: 'relative',
                 }}
               >
                 {s.label.slice(0, 1)}
+                {s.pinned && (
+                  <span
+                    aria-hidden
+                    style={{ position: 'absolute', top: -1, right: -1, width: 7, height: 7, borderRadius: 4, background: RISK_COLORS.accent }}
+                  />
+                )}
               </button>
             );
           })}

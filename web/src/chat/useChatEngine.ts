@@ -71,6 +71,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** live：后端会话 id（多轮上下文由后端 RiskAgent 会话承载） */
   remoteId?: string;
+  /** 批 4：置顶（展示时排前，插入序内稳定） */
+  pinned?: boolean;
 }
 
 let seq = 0;
@@ -454,6 +456,38 @@ export function useChatEngine() {
     setCurrentKey(key);
   }, []);
 
+  // —— 会话管理（批 4）：删除 / 重命名 / 置顶 ——
+  const deleteSession = useCallback(
+    (key: string) => {
+      if (generatingRef.current[key]) return; // 生成中不可删
+      const prev = sessionsRef.current;
+      const idx = prev.findIndex((s) => s.key === key);
+      if (idx === -1) return;
+      const rest = prev.filter((s) => s.key !== key);
+      const next = rest.length ? rest : [{ key: `n${Date.now()}`, label: '新对话', messages: [] }];
+      setSessions(next);
+      if (currentKey === key) setCurrentKey(next[Math.max(0, Math.min(idx - 1, next.length - 1))].key);
+      bump();
+    },
+    [currentKey],
+  );
+
+  const renameSession = useCallback(
+    (key: string, raw: string) => {
+      const label = raw.trim().slice(0, 20);
+      if (!label) return;
+      patchSession(key, (s) => ({ ...s, label }));
+    },
+    [patchSession],
+  );
+
+  const togglePin = useCallback(
+    (key: string) => {
+      patchSession(key, (s) => ({ ...s, pinned: !s.pinned }));
+    },
+    [patchSession],
+  );
+
   return {
     sessions,
     currentKey,
@@ -465,5 +499,8 @@ export function useChatEngine() {
     stopGenerate,
     retry,
     regenerate,
+    deleteSession,
+    renameSession,
+    togglePin,
   };
 }
