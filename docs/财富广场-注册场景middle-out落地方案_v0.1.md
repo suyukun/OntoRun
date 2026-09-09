@@ -1,6 +1,6 @@
 # 财富广场·注册场景 middle-out 落地方案 v0.1
 
-> 状态：草案，待 Jack 圈选问题清单后启动。前置：docs/财富广场-ChatBI展示层产品设计_v0.2.md、demo（scripts/fortune_demo/）。
+> 状态：草案，待 Jack 圈选问题清单后启动。**操作入口：给数仓采集输入见 `docs/财富广场-数仓输入采集操作单_v0.1.md`（Jack 只需照做那一页，本篇是方法论备查）。**前置：docs/财富广场-ChatBI展示层产品设计_v0.2.md、demo（scripts/fortune_demo/）。
 
 ## 〇 一页结论
 

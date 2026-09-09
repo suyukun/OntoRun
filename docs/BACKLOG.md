@@ -21,7 +21,9 @@
 - [x] T2 ChatBI 壳工程 chatbi/（子代理 df3bb760，2026-09-09 交付，Rose 复核：tsc 0 错/eslint 0 错/vitest 4 passed/未越界 + commit fd30d6f）
 - [~] T5 D6 模板方案（依赖 T1 已满足，2026-09-09 派出）
 - [x] T5 D6 模板方案（子代理 44bb1e8f，2026-09-09 交付，Rose 复核：pytest 10 passed + 拦截抽查 + commit 574488b；遗留：validate_numbers int 入参归一 → T7）
-- [~] 波 2 派活（2026-09-09，zai-coding-cn/glm-5.3-flash ×2 并行）：T3 消息卡三级披露精修（子代理 887dd11b，只碰 components/mock/types）· T4 会话管理与持久化联调（子代理 0027057d，只碰 SessionBar/App/hooks/storage/app）
+- [x] T3 消息卡三级披露精修（子代理 887dd11b，2026-09-09 交付，Rose 复核：vitest 22/22+未越界 + commit f0dbf1c；遗留小项：参数 chips 规则表生成 → 归入 T7/后续）
+- [x] T4 会话管理与持久化联调（子代理 0027057d，2026-09-09 交付，Rose 复核：pytest 14 passed/vitest 22 passed/E2E API 级全链路实跑 + app.db 隐藏语义库级验证 + commits dcfc535·0012096）
+- [~] T6 viz 契约与渲染（子代理派出，纯 SVG 零依赖）
 - [ ] 波 3：T6 viz 渲染 · T7 验收测试包与集成联调（Rose 主导）
 
 ## B. OntoRun 工程线
