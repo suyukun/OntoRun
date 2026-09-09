@@ -127,6 +127,14 @@ export function SessionBar(props: Props) {
                     </button>
                     <button
                       className="opbtn"
+                      title="删除会话"
+                      aria-label="删除会话"
+                      onClick={(e) => { e.stopPropagation(); props.onDelete(s.id); }}
+                    >
+                      <Icon name="trash" size={13} />
+                    </button>
+                    <button
+                      className="opbtn"
                       title="更多操作"
                       aria-label="更多操作"
                       onClick={(e) => { e.stopPropagation(); setMenuFor(s.id); }}
