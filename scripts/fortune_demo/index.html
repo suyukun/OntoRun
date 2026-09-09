@@ -106,10 +106,21 @@ async function ask(){
   const tl = document.getElementById("tl"), res = document.getElementById("res"), flow = document.getElementById("flow"), ans = document.getElementById("ans");
   tl.innerHTML = '<div class="empty">决策中…</div>'; res.innerHTML = ""; flow.innerHTML = ""; ans.innerHTML = "";
   document.getElementById("badge").innerHTML = "";
-  const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})});
-  const d = await r.json();
-  renderResult(d);
+  try {
+    const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    renderResult(d);
+  } catch (e) {
+    tl.innerHTML = "";
+    ans.innerHTML = '<div class="answer bad"><b>查询失败：</b>' + e.message + '（服务未启动或网络异常）</div>';
+  }
+}
+
+function renderResult(d){
+  const tl = document.getElementById("tl"), res = document.getElementById("res"), flow = document.getElementById("flow"), ans = document.getElementById("ans");
   document.getElementById("badge").innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>';
+  document.getElementById("reqid").textContent = "证据编号 " + d.request_id + " · 路径类型 " + d.path;
   tl.innerHTML = "";
   d.steps.forEach((s, i) => {
     setTimeout(() => {
@@ -122,7 +133,6 @@ async function ask(){
   setTimeout(() => {
     ans.innerHTML = '<div class="answer ' + (d.path.match(/rejected|blocked|unregistered|validation/) ? "bad" : "") + '"><b>回答：</b>' + d.answer + '</div>';
   }, d.steps.length * 260);
-  // 数据流面板
   if (d.tables && d.tables.length) {
     let f = '<div class="fnode">用户问题</div><span class="farrow">→</span><div class="fnode">语义层·规则路由</div><span class="farrow">→ SQL 下推 →</span>';
     d.tables.forEach(t => { f += '<div class="fnode ' + t.layer.toLowerCase() + '">' + t.layer + ' · ' + t.name + '</div>'; });
