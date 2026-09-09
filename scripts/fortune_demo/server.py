@@ -83,6 +83,21 @@ def trace(request_id: str):
         pass
     return {"error": "not found"}
 
+@app.delete("/api/history/{request_id}")
+def del_history(request_id: str):
+    import json as _json
+    keep = []
+    try:
+        for line in open(sl.TRACE_LOG, encoding="utf-8"):
+            d = _json.loads(line)
+            if d.get("request_id") != request_id:
+                keep.append(line if line.endswith("\n") else line + "\n")
+    except FileNotFoundError:
+        return {"deleted": 0}
+    with open(sl.TRACE_LOG, "w", encoding="utf-8") as f:
+        f.write("".join(keep))
+    return {"deleted": 1}
+
 @app.post("/api/ask")
 def ask(body: Ask):
     return sl.run_query(body.question)

@@ -12,37 +12,40 @@
   header { background:#101828; color:#fff; padding:10px 20px; display:flex; align-items:baseline; gap:12px; flex:none; }
   header h1 { font-size:15px; font-weight:600; } header span { font-size:11.5px; color:#98a2b3; }
   .layout { flex:1; display:flex; min-height:0; }
-  /* 侧栏 */
-  .side { width:220px; background:#fff; border-right:1px solid var(--line); display:flex; flex-direction:column; flex:none; }
+  .side { width:230px; background:#fff; border-right:1px solid var(--line); display:flex; flex-direction:column; flex:none; }
   .newchat { margin:12px; padding:9px; background:var(--acc); color:#fff; border:0; border-radius:8px; cursor:pointer; font-size:13px; }
   .side h3 { font-size:11px; color:var(--sub); padding:6px 14px; letter-spacing:.06em; }
   .hlist { flex:1; overflow-y:auto; padding:0 8px 8px; }
-  .hitem { padding:8px 10px; border-radius:7px; cursor:pointer; font-size:12px; color:var(--ink); margin-bottom:2px; }
+  .hitem { position:relative; padding:8px 26px 8px 10px; border-radius:7px; cursor:pointer; font-size:12px; color:var(--ink); margin-bottom:2px; }
   .hitem:hover { background:#eef2f7; }
   .hitem .rid { display:block; color:#98a2b3; font-size:10.5px; font-family:Menlo,monospace; margin-top:2px; }
-  .sprof { padding:10px 14px; border-top:1px solid var(--line); font-size:11px; color:var(--sub); }
-  /* 主区 */
+  .hdel { position:absolute; right:6px; top:8px; width:18px; height:18px; border:0; border-radius:5px; background:none; color:#98a2b3; cursor:pointer; font-size:13px; line-height:18px; padding:0; }
+  .hdel:hover { background:#fee2e2; color:var(--bad); }
   .main { flex:1; display:flex; flex-direction:column; min-width:0; }
   .msgs { flex:1; overflow-y:auto; padding:20px 26px 10px; }
-  .empty { color:#98a2b3; text-align:center; margin-top:12vh; font-size:13px; }
+  .empty { color:#98a2b3; text-align:center; margin-top:10vh; font-size:13px; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:18px; }
   .chips button { background:#fff; border:1px solid var(--line); border-radius:18px; padding:5px 14px; font-size:12px; color:var(--sub); cursor:pointer; }
   .chips button:hover { border-color:var(--acc); color:var(--acc); }
-  .m { margin-bottom:18px; display:flex; }
+  .m { margin-bottom:20px; display:flex; }
   .m.user { justify-content:flex-end; }
-  .bub { max-width:78%; padding:10px 14px; border-radius:12px; line-height:1.6; font-size:13.5px; white-space:pre-wrap; }
+  .bub { max-width:88%; padding:12px 16px; border-radius:12px; line-height:1.6; font-size:13.5px; }
   .m.user .bub { background:var(--acc); color:#fff; border-bottom-right-radius:3px; }
-  .m.ai { justify-content:flex-start; }
-  .m.ai .bub { background:var(--card); border:1px solid var(--line); border-bottom-left-radius:3px; max-width:92%; }
-  .steps { border-left:2px solid var(--line); margin:2px 0 8px; padding-left:12px; }
-  .stp { font-size:12px; color:var(--sub); margin-bottom:5px; opacity:.25; transition:opacity .2s; }
-  .stp.on { opacity:1; color:var(--ink); }
+  .m.ai .bub { background:var(--card); border:1px solid var(--line); border-bottom-left-radius:3px; max-width:94%; }
+  .sec { margin-bottom:10px; }
+  .sec h4 { font-size:11px; color:var(--sub); font-weight:600; letter-spacing:.05em; margin-bottom:5px; }
+  .steps { border-left:2px solid var(--line); padding-left:12px; }
+  .stp { font-size:12px; color:var(--sub); margin-bottom:5px; }
   .stp .st { font-size:10.5px; padding:0 6px; border-radius:7px; margin-right:6px; background:#dcfce7; color:var(--ok); }
-  .stp .st.fail, .stp .st.blocked { background:#f3f4f6; color:var(--blocked,#6b7280); }
-  .ans { min-height:18px; }
+  .stp .st.fail, .stp .st.blocked { background:#f3f4f6; color:#6b7280; }
+  .stp pre { margin:4px 0 0; }
+  .ans { font-size:14px; line-height:1.7; }
   .ans .cursor { display:inline-block; width:7px; height:14px; background:var(--acc); vertical-align:-2px; animation:bl .8s infinite; }
   @keyframes bl { 50% { opacity:0; } }
-  .tracebar { margin-top:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  pre { background:#0f172a; color:#d7e2f0; border-radius:7px; padding:9px 11px; font-size:11.5px; font-family:"SF Mono",Menlo,monospace; overflow-x:auto; white-space:pre-wrap; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  th { background:#f0f3f7; text-align:left; } th,td { border:1px solid var(--line); padding:5px 10px; }
+  .tracebar { margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .badge { padding:2px 10px; border-radius:12px; font-size:11px; font-weight:600; color:#fff; }
   .path-hot { background:var(--hot); } .path-cold_pushdown,.path-cold_adhoc { background:var(--cold); }
   .path-rejected,.path-blocked_param,.path-unregistered,.path-validation_failed { background:#6b7280; }
@@ -55,10 +58,7 @@
   .evt button { border:0; background:none; padding:6px 14px; font-size:12px; color:var(--sub); cursor:pointer; border-radius:7px 7px 0 0; }
   .evt button.on { background:#fff; color:var(--ink); font-weight:600; }
   .evb { padding:12px 14px; max-height:340px; overflow-y:auto; }
-  .evb table { border-collapse:collapse; width:100%; font-size:12px; }
-  .evb th, .evb td { border:1px solid var(--line); padding:4px 9px; text-align:left; } .evb th { background:#f0f3f7; }
-  pre { background:#0f172a; color:#d7e2f0; border-radius:7px; padding:9px 11px; font-size:11.5px; font-family:"SF Mono",Menlo,monospace; overflow-x:auto; white-space:pre-wrap; margin:5px 0; }
-  .basis { font-size:12.5px; line-height:1.8; color:var(--ink); }
+  .basis { font-size:12.5px; line-height:1.8; }
   .basis b { color:var(--ok); }
   .inputrow { flex:none; padding:12px 26px 18px; display:flex; gap:10px; }
   .inputrow input { flex:1; padding:11px 15px; border:1px solid var(--line); border-radius:10px; font-size:14px; }
@@ -67,13 +67,12 @@
 </style>
 </head>
 <body>
-<header><h1>财富广场 ChatBI · 注册域</h1><span id="pname"></span><span>· 每个回答挂证据面板（决策过程 + 结论依据）</span></header>
+<header><h1>财富广场 ChatBI · 注册域</h1><span>· 每个回答都在对话里给出决策过程、依据与数据</span></header>
 <div class="layout">
   <div class="side">
     <button class="newchat" onclick="newChat()">＋ 新对话</button>
     <h3>查询历史（点击回放）</h3>
     <div class="hlist" id="hlist"><div style="padding:8px 12px;font-size:12px;color:#98a2b3">暂无</div></div>
-    <div class="sprof" id="sprof"></div>
   </div>
   <div class="main">
     <div class="msgs" id="msgs">
@@ -88,18 +87,27 @@
 </div>
 <script>
 let PROFILE = null, BUSY = false;
+const EXAMPLES = ["8月注册用户数是多少？","8月按渠道的注册用户数？","8月注册用户的男女比例是多少？","8月注册用户里参加过活动的有多少？"];
 const PATHNAMES = { hot:"🔥 热路径", cold_pushdown:"❄ 冷路径·明细下推", cold_adhoc:"❄ 冷路径·维表即席",
   rejected:"⛔ 范围外拒答", blocked_param:"✋ 参数追问", unregistered:"⛔ 未注册口径", validation_failed:"⚠ 校验拦截" };
 
+function fillChips(){
+  const box = document.getElementById("chips");
+  if (!box) return;
+  box.innerHTML = "";
+  EXAMPLES.forEach(t => { const b = document.createElement("button"); b.textContent = t;
+    b.onclick = () => { document.getElementById("q").value = t; send(); }; box.appendChild(b); });
+}
+
 async function boot(){
   PROFILE = await (await fetch("/api/profile")).json();
-  document.getElementById("pname").textContent = PROFILE.display;
-  document.getElementById("sprof").innerHTML = "业务档案：" + PROFILE.name + "<br>面板装配：" + PROFILE.panels.join(" · ");
-  ["8月注册用户数是多少？","8月按渠道的注册用户数？","8月注册用户的男女比例是多少？","8月注册用户里参加过活动的有多少？"].forEach(t => {
-    const b = document.createElement("button"); b.textContent = t; b.onclick = () => { document.getElementById("q").value = t; send(); };
-    document.getElementById("chips").appendChild(b);
-  });
-  loadHistory();
+  fillChips(); loadHistory();
+}
+
+function newChat(){
+  const ms = document.getElementById("msgs");
+  ms.innerHTML = '<div class="empty">已开新对话（历史仍可在左侧回放）</div><div class="chips" id="chips"></div>';
+  fillChips();
 }
 
 function userBubble(q){
@@ -109,7 +117,12 @@ function userBubble(q){
 }
 function aiShell(){
   const m = document.createElement("div"); m.className = "m ai";
-  m.innerHTML = '<div class="bub"><div class="steps"></div><div class="ans"></div><div class="tracebar" style="display:none"></div><div class="evpanel"></div></div>';
+  m.innerHTML = '<div class="bub">' +
+    '<div class="sec"><h4>决策过程</h4><div class="steps"></div></div>' +
+    '<div class="sec"><h4>回答</h4><div class="ans"></div></div>' +
+    '<div class="sec" data-sec="data" style="display:none"><h4>返回数据</h4><div class="dattbl"></div></div>' +
+    '<div class="tracebar" style="display:none"></div>' +
+    '<div class="evpanel"></div></div>';
   document.getElementById("msgs").appendChild(m);
   scrollDown();
   return m.querySelector(".bub");
@@ -117,14 +130,17 @@ function aiShell(){
 function scrollDown(){ const ms = document.getElementById("msgs"); ms.scrollTop = ms.scrollHeight; }
 
 async function send(){
-  const q = document.getElementById("q").value.trim();
+  const qEl = document.getElementById("q");
+  const q = qEl.value.trim();
   if (!q || BUSY) return;
   BUSY = true; document.getElementById("sendbtn").disabled = true;
-  document.getElementById("emptytip").style.display = "none";
-  document.getElementById("chips").style.display = "none";
-  document.getElementById("q").value = "";
+  const tip = document.getElementById("emptytip"); if (tip) tip.style.display = "none";
+  const chips = document.getElementById("chips"); if (chips) chips.style.display = "none";
+  qEl.value = "";
   userBubble(q); scrollDown();
-  const bub = aiShell(), stepsEl = bub.querySelector(".steps"), ansEl = bub.querySelector(".ans"),
+  const bub = aiShell();
+  const stepsEl = bub.querySelector(".steps"), ansEl = bub.querySelector(".ans"),
+        dataSec = bub.querySelector('[data-sec="data"]'), dataTable = bub.querySelector(".dattbl"),
         bar = bub.querySelector(".tracebar"), panel = bub.querySelector(".evpanel");
   let text = "", d = null;
   try {
@@ -141,25 +157,28 @@ async function send(){
         const ev = JSON.parse(part.slice(6));
         if (ev.kind === "step") {
           const s = ev.step;
-          const div = document.createElement("div"); div.className = "stp on";
-          div.innerHTML = '<span class="st ' + s.status + '">' + s.status + '</span><b>' + s.n + ' ' + s.title + '</b> ' + s.detail.slice(0, 70);
+          const div = document.createElement("div"); div.className = "stp";
+          div.innerHTML = '<span class="st ' + s.status + '">' + s.status + '</span><b>' + s.n + ' ' + s.title + '</b> ' + s.detail +
+            (s.sql ? '<pre>' + s.sql + '</pre>' : "");
           stepsEl.appendChild(div); scrollDown();
         } else if (ev.kind === "token") {
           text += ev.text;
           ansEl.innerHTML = text + '<span class="cursor"></span>'; scrollDown();
-        } else if (ev.kind === "final") {
-          d = ev.result;
-        }
+        } else if (ev.kind === "final") { d = ev.result; }
       }
     }
-    ansEl.textContent = text || d.answer;
-    // 步骤直播折叠为摘要
-    stepsEl.style.display = "none";
+    if (!d) throw new Error("服务返回不完整（无 final 帧）");
+    ansEl.textContent = d.answer;
+    if (d.rows && d.rows.length) {
+      dataSec.style.display = "";
+      let h = '<table><tr>' + Object.keys(d.rows[0]).map(k => '<th>' + k + '</th>').join("") + '</tr>';
+      d.rows.forEach(r => { h += '<tr>' + Object.values(r).map(v => '<td>' + v + '</td>').join("") + '</tr>'; });
+      dataTable.innerHTML = h + '</table>';
+    }
     bar.style.display = "flex";
     bar.innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>' +
-      '<button class="evbtn">🔍 证据面板：决策过程 + 结论依据</button>' +
+      '<button class="evbtn">详情（完整决策记录）</button>' +
       '<span class="req">' + d.request_id + '</span>';
-    // 证据面板内容（按 profile panels 装配；本 profile = 决策过程 + 结论依据）
     panel.innerHTML = evPanelHTML(d);
     bindPanel(bub, panel);
   } catch (e) {
@@ -184,7 +203,7 @@ function evPanelHTML(d){
     '<button data-tab="basis">结论依据</button>' +
     '<button data-tab="data">返回数据</button></div>' +
     '<div class="evb" data-pane="proc">' + stepsHtml + '</div>' +
-    '<div class="evb" data-pane="basis" style="display:none" class="basis"><div class="basis">' +
+    '<div class="evb" data-pane="basis" style="display:none"><div class="basis">' +
       '<b>口径：</b>' + (basisRule.caliber || "—") + '<br>' +
       '<b>命中规则：</b>' + d.rule + '<br>' +
       '<b>数据路径：</b>' + (d.tables || []).map(t => t.layer + ' · ' + t.name).join('，') + '<br>' +
@@ -194,7 +213,6 @@ function evPanelHTML(d){
 const RULE_HINT = {};
 
 function bindPanel(bub, panel){
-  // 证据面板交互统一绑在气泡容器上：.evbtn（tracebar 内）与 .evpanel（兄弟节点）都在 bub 下冒泡
   bub.onclick = (e) => {
     const t = e.target;
     if (t.classList.contains("evbtn")) { panel.classList.toggle("open"); return; }
@@ -210,35 +228,55 @@ function bindPanel(bub, panel){
 
 async function loadHistory(){
   const hs = await (await fetch("/api/history")).json();
-  document.getElementById("hlist").innerHTML = hs.length ? hs.map(h =>
-    '<div class="hitem" onclick="replay(\'' + h.request_id + '\')">' + h.question +
+  const box = document.getElementById("hlist");
+  box.innerHTML = hs.length ? hs.map(h =>
+    '<div class="hitem" data-rid="' + h.request_id + '">' + h.question +
+    '<button class="hdel" data-del="' + h.request_id + '" title="删除">×</button>' +
     '<span class="rid">' + h.started_at + ' · ' + (PATHNAMES[h.path] || h.path) + '</span></div>').join("")
     : '<div style="padding:8px 12px;font-size:12px;color:#98a2b3">暂无</div>';
 }
-async function replay(rid){
-  const d = await (await fetch("/api/trace/" + rid)).json();
+document.getElementById("hlist").addEventListener("click", async (e) => {
+  const del = e.target.closest(".hdel");
+  if (del) { e.stopPropagation();
+    await fetch("/api/history/" + del.dataset.del, {method:"DELETE"});
+    loadHistory(); return; }
+  const item = e.target.closest(".hitem");
+  if (!item) return;
+  const d = await (await fetch("/api/trace/" + item.dataset.rid)).json();
   if (d.error) return;
-  document.getElementById("emptytip").style.display = "none";
-  document.getElementById("chips").style.display = "none";
+  const ms = document.getElementById("msgs");
+  const tip = document.getElementById("emptytip"); if (tip) tip.style.display = "none";
+  const chips = document.getElementById("chips"); if (chips) chips.style.display = "none";
   userBubble(d.question);
   renderFinal(d);
   scrollDown();
-}
+});
 function renderFinal(d){
-  const bub = aiShell(), stepsEl = bub.querySelector(".steps"), ansEl = bub.querySelector(".ans"),
+  const bub = aiShell();
+  const stepsEl = bub.querySelector(".steps"), ansEl = bub.querySelector(".ans"),
+        dataSec = bub.querySelector('[data-sec="data"]'), dataTable = bub.querySelector(".dattbl"),
         bar = bub.querySelector(".tracebar"), panel = bub.querySelector(".evpanel");
+  d.steps.forEach(s => {
+    const div = document.createElement("div"); div.className = "stp";
+    div.innerHTML = '<span class="st ' + s.status + '">' + s.status + '</span><b>' + s.n + ' ' + s.title + '</b> ' + s.detail +
+      (s.sql ? '<pre>' + s.sql + '</pre>' : "");
+    stepsEl.appendChild(div);
+  });
   ansEl.textContent = d.answer;
+  if (d.rows && d.rows.length) {
+    dataSec.style.display = "";
+    let h = '<table><tr>' + Object.keys(d.rows[0]).map(k => '<th>' + k + '</th>').join("") + '</tr>';
+    d.rows.forEach(r => { h += '<tr>' + Object.values(r).map(v => '<td>' + v + '</td>').join("") + '</tr>'; });
+    dataTable.innerHTML = h + '</table>';
+  }
   bar.style.display = "flex";
   bar.innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>' +
-    '<button class="evbtn">🔍 证据面板：决策过程 + 结论依据</button>' +
+    '<button class="evbtn">详情（完整决策记录）</button>' +
     '<span class="req">' + d.request_id + '</span>';
   panel.innerHTML = evPanelHTML(d);
-  bindPanel(panel);
+  bindPanel(bub, panel);
 }
-function newChat(){
-  const ms = document.getElementById("msgs");
-  ms.innerHTML = '<div class="empty" id="emptytip">已开新对话（历史仍可在左侧回放）</div>';
-}
+loadHistory();
 boot();
 </script>
 </body>

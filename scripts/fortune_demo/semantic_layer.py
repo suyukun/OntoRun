@@ -149,20 +149,27 @@ def _persist(result: dict):
         pass
 
 def iter_query(question: str):
-    """执行一次完整决策链，逐步 yield 事件（供 SSE 流式 / CLI / 聚合消费）。
-    事件：{"kind":"step", ...step} / {"kind":"token","text"} / {"kind":"final","result":result}"""
-    def emit(steps, n, title, status, detail, **extra):
-        d = {"n": n, "title": title, "status": status, "detail": detail}
-        d.update(extra); steps.append(d)
-        return {"kind": "step", "step": d}
-    request_id = f"REQ-{date.today().isoformat()}-{uuid.uuid4().hex[:6].upper()}"
+    """执行一次完整决策链，逐步 yield 事件。
+    事件：{"kind":"step",...} / {"kind":"token","text"} / {"kind":"final","result":result}
+    纪律：每条路径必须 _persist + yield final（否则前端拿不到结果）。"""
     import datetime as _dt
+    request_id = f"REQ-{date.today().isoformat()}-{uuid.uuid4().hex[:6].upper()}"
     started_at = _dt.datetime.now().isoformat(timespec="seconds")
     steps = []
-    def step(n, title, status, detail, **extra):
-        s = emit(steps, n, title, status, detail, **extra)
-        return s
+    result = {"request_id": request_id, "started_at": started_at, "question": question, "rule": None,
+              "steps": steps, "path": "unknown", "answer": "", "sql": None, "rows": [], "tables": []}
 
+    def emit(n, title, status, detail, **extra):
+        d = {"n": n, "title": title, "status": status, "detail": detail}
+        d.update(extra)
+        steps.append(d)
+        return {"kind": "step", "step": d}
+
+    def finish():
+        _persist(result)
+        return {"kind": "final", "result": result}
+
+    # [1] 意图路由（LLM 只能输出规则 ID 枚举；失败退回关键词匹配）
     llm = llm_route(question)
     llm_params = None
     if llm and "error" not in llm:
@@ -170,56 +177,68 @@ def iter_query(question: str):
         why = f"DeepSeek 路由 {llm['ms']}ms · 原始输出: {llm['raw']}"
     else:
         rid, kw = route(question)
-        why = f"LLM 路由不可用（{llm.get('error', '未知') if isinstance(llm, dict) else llm}），退回关键词匹配 → 命中「{kw}」" if isinstance(llm, dict) else f"关键词匹配: {kw}"
-    yield step(1, "意图路由", "ok" if rid else "fail", f"选定规则 = {rid or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
-    result = {"request_id": request_id, "started_at": started_at, "question": question, "rule": rid, "steps": steps,
-              "path": "unknown", "answer": "", "sql": None, "rows": [], "tables": []}
+        err = llm.get("error") if isinstance(llm, dict) else "未知"
+        why = f"LLM 路由不可用（{err}），退回关键词匹配 → 命中「{kw}」"
+    result["rule"] = rid
+    yield emit(1, "意图路由", "ok" if rid else "fail",
+               f"选定规则 = {rid or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
+
     if rid is None:
         result["path"] = "unregistered"
         result["answer"] = "该问题尚未注册口径，可提交为新的派生规则候选。"
-        step(7, "回答", "blocked", result["answer"])
-        _persist(result)
-        return result
+        yield emit(7, "回答", "blocked", result["answer"])
+        yield finish()
+        return
 
     rule = RULES[rid]
-    result["path"] = rule["path"]; result["tables"] = rule.get("tables", [])
-    if "reject" in rule:
-        step(2, "口径拦截", "blocked", rule["reject"])
-        result["answer"] = rule["reject"]
-        step(7, "回答", "blocked", rule["reject"])
-        _persist(result)
-        return result
-    yield step(2, "口径声明", "ok", rule["caliber"])
+    result["path"] = rule["path"]
+    result["tables"] = rule.get("tables", [])
 
+    # 范围外（拒答）
+    if "reject" in rule:
+        result["answer"] = rule["reject"]
+        yield emit(2, "口径拦截", "blocked", rule["reject"])
+        yield emit(7, "回答", "blocked", result["answer"])
+        yield finish()
+        return
+
+    # [2] 口径声明
+    yield emit(2, "口径声明", "ok", rule["caliber"])
+
+    # [3] 参数抽取 + 硬校验（LLM 抽取优先，关键词回退；边界校验兜底）
     params = (llm.get("params") if llm and "error" not in llm else None) or extract_params(question)
     src_note = "DeepSeek 抽取" if (llm and "error" not in llm and llm.get("params")) else "关键词回退抽取"
-    oob = params and (params["start"] < DATA_RANGE["min"] or params["end"] > DATA_RANGE["max"])
-    if oob:
-        step(3, "参数校验", "fail", f"时间范围超出样本数据边界 {DATA_RANGE} → 如实说明，不硬答")
+    if params and (params["start"] < DATA_RANGE["min"] or params["end"] > DATA_RANGE["max"]):
         result["path"] = "blocked_param"
         result["answer"] = f"当前样本数据仅覆盖 {DATA_RANGE['min']} ~ {DATA_RANGE['max']}，该时间段无数据。"
-        step(7, "回答", "blocked", result["answer"])
-        conn_close = None
-        return result
+        yield emit(3, "参数校验", "fail", f"时间范围超出样本数据边界 {DATA_RANGE} → 如实说明，不硬答")
+        yield emit(7, "回答", "blocked", result["answer"])
+        yield finish()
+        return
     if params is None:
-        step(3, "参数校验", "fail", "时间范围缺失 → 追问用户，不猜测")
         result["path"] = "blocked_param"
         result["answer"] = "请问您要查询哪个月份？"
-        step(7, "回答", "blocked", result["answer"])
-        return result
-    yield step(3, "参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
+        yield emit(3, "参数校验", "fail", "时间范围缺失 → 追问用户，不猜测")
+        yield emit(7, "回答", "blocked", result["answer"])
+        yield finish()
+        return
+    yield emit(3, "参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
 
+    # [4] SQL 编译（确定性，LLM 不参与）
     sql = compile_sql(rule["sql"], params)
     result["sql"] = sql
-    yield step(4, "SQL 编译", "ok", "由规则模板确定性编译（LLM 未参与）", sql=sql)
+    yield emit(4, "SQL 编译", "ok", "由规则模板确定性编译（LLM 未参与）", sql=sql)
 
-    conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row
-    t0 = time.time()
+    # [5] 下推执行
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    t0 = _time.time()
     rows = [dict(r) for r in conn.execute(sql)]
-    ms = round((time.time() - t0) * 1000, 1)
+    ms = round((_time.time() - t0) * 1000, 1)
     result["rows"] = rows
-    yield step(5, "下推执行", "ok", f"sqlite → {len(rows)} 行，{ms}ms（计算在数据引擎，不在语义层）", ms=ms, row_count=len(rows))
+    yield emit(5, "下推执行", "ok", f"sqlite → {len(rows)} 行，{ms}ms（计算在数据引擎，不在语义层）", ms=ms, row_count=len(rows))
 
+    # [6] 结果校验
     checks = []
     actual_cols = list(rows[0].keys()) if rows else rule["columns"]
     checks.append(("列结构与规则声明一致", actual_cols == rule["columns"]))
@@ -234,36 +253,24 @@ def iter_query(question: str):
         checks.append(("冷路径免责声明已附加", True))
     all_ok = all(ok for _, ok in checks)
     for name, ok in checks:
-        step(6, "结果校验", "ok" if ok else "fail", f"{'✓' if ok else '✗'} {name}")
+        yield emit(6, "结果校验", "ok" if ok else "fail", f"{'✓' if ok else '✗'} {name}")
     if not all_ok:
+        conn.close()
         result["path"] = "validation_failed"
         result["answer"] = "校验未通过，拒绝返回结果。"
-        step(7, "回答", "blocked", result["answer"])
-        conn.close()
-        _persist(result)
-        return result
+        yield emit(7, "回答", "blocked", result["answer"])
+        yield finish()
+        return
 
+    # [7] 回答（拒答/追问外的正常路径才逐字流式）
     notice = f"（{rule['notice']}）" if rule.get("notice") else ""
     result["answer"] = answer_assemble(rid, rows, params) + notice
-    yield step(7, "回答", "ok", result["answer"])
+    yield emit(7, "回答", "ok", result["answer"])
     conn.close()
-    _persist(result)
     for i in range(0, len(result["answer"]), 3):
         yield {"kind": "token", "text": result["answer"][i:i+3]}
         _time.sleep(0.015)
-    yield {"kind": "final", "result": result}
-
-if __name__ == "__main__":
-    print(f"request 演示：")
-    for q in ["8月注册用户数是多少？", "8月按渠道的注册用户数？", "8月注册用户的男女比例是多少？",
-              "8月注册用户里参加过活动的有多少？", "注册用户数是多少？"]:
-        res = run_query(q)
-        print("━" * 60)
-        print(f"Q: {q}   [path={res['path']}]")
-        for s in res["steps"]:
-            print(f"  [{s['n']} {s['title']}] {s['status']} — {s['detail']}")
-        print(f"  答: {res['answer']}")
-
+    yield finish()
 
 def run_query(question: str) -> dict:
     """聚合 iter_query 的 final 结果（CLI / 旧接口兼容）。落盘由 iter_query 负责。"""
