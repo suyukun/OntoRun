@@ -148,3 +148,15 @@ def test_pii_guard_passes_encrypted_masks_plaintext():
     assert rows[0]["usr_phone_erpt"] == "enc(aes)::phone:ab12"
     assert rows[0]["usr_idcardno_erpt"] == "***MASKED***"
     assert rows[0]["total"] == 5
+
+
+def test_viz_contract_propagated():
+    """D7: rule viz field must propagate to final.result.viz (None → table fallback)."""
+    from semantic.engine import iter_query
+    for q, expected in [("8月按渠道的注册用户数？", "bar"), ("8月注册用户数是多少？", "kpi")]:
+        final = None
+        for ev in iter_query(q, request_id="VIZ-CONTRACT"):
+            if ev["kind"] == "final":
+                final = ev["result"]
+        assert final is not None
+        assert final.get("viz") == expected, f"{q}: viz={final.get('viz')}, expected {expected}"

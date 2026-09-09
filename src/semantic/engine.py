@@ -281,6 +281,7 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
     """SQL compile → pushdown → validation → template answer (numbers from rows only)."""
     rule_id = ctx.result["rule"]
     ctx.result["params"] = params
+    ctx.result["viz"] = rule.get("viz")  # D7: visualization contract from rule registry (None → table fallback)
     ctx.result["sql"] = compile_sql(rule["sql"], params)
     yield ctx.emit("SQL 编译", "ok", "由规则模板确定性编译（LLM 未参与）", sql=ctx.result["sql"])
 
