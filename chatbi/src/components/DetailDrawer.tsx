@@ -93,7 +93,7 @@ export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () =
 
           {r?.sql && (
             <div className="basis-sql">
-              <b>执行 SQL（规则模板确定性编译，LLM 未参与）：</b>
+              <b>执行 SQL：</b>
               <pre className="sql">{r.sql}</pre>
             </div>
           )}

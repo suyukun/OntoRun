@@ -237,7 +237,7 @@ def _run_gates(ctx: Ctx):
         ctx.result["degraded"] = True
         ctx.result["route_code"] = route_code
     yield ctx.emit("意图路由", "ok" if rule_id else "fail",
-                   f"选定规则 = {rule_id or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
+                   f"选定规则 = {rule_id or '无'}（{why}）")
 
     if rule_id is None:
         ctx.result["path"] = "unregistered"
@@ -291,7 +291,7 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
     ctx.result["params"] = params
     ctx.result["viz"] = rule.get("viz")  # D7: visualization contract from rule registry (None → table fallback)
     ctx.result["sql"] = compile_sql(rule["sql"], params)
-    yield ctx.emit("SQL 编译", "ok", "由规则模板确定性编译（LLM 未参与）", sql=ctx.result["sql"])
+    yield ctx.emit("SQL 编译", "ok", "按命中规则的模板编译，参数已绑定", sql=ctx.result["sql"])
 
     try:
         rows, checks, ms = _execute(rule, rule_id, params)
@@ -301,7 +301,7 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
         return
 
     ctx.result["rows"] = sanitize.apply_pii_policy(rows, SENSITIVE_FIELDS)
-    yield ctx.emit("下推执行", "ok", f"sqlite → {len(rows)} 行，{ms}ms（计算在数据引擎，不在语义层）",
+    yield ctx.emit("下推执行", "ok", f"sqlite → {len(rows)} 行 · {ms}ms",
                    ms=ms, row_count=len(rows))
     for name, ok in checks:
         yield ctx.emit("结果校验", "ok" if ok else "fail", f"{'✓' if ok else '✗'} {name}")
@@ -331,8 +331,7 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
         yield ctx.emit("回答", "blocked", ctx.result["answer"])
         yield ctx.final_frame()
         return
-    yield ctx.emit("数字校验", "ok",
-                   f"回答 {len(found)} 个数字全部 ∈ 语义层可溯源集合（D6）")
+    yield ctx.emit("数字校验", "ok", f"{len(found)} 个数字全部可溯源")
     yield from _stream_answer(ctx)
     yield ctx.final_frame()
 

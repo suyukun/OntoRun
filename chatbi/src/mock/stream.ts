@@ -66,7 +66,7 @@ const SQL_CHANNEL = "SELECT ch.chnl_nm AS channel, COUNT(DISTINCT r.usr_id) AS c
 
 function routeStep(rid: string, ok: boolean): StepInfo {
   return st(1, '意图路由', ok ? 'ok' : 'fail',
-    '选定规则 = ' + rid + '（mock 路由 · 模拟 DeepSeek 286ms · 原始输出: {"rule_id":"' + rid + '","params":{"start":"2026-08-01","end":"2026-08-31"}}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。');
+    '选定规则 = ' + rid + '（mock 路由 · 模拟 DeepSeek 286ms · 原始输出: {"rule_id":"' + rid + '","params":{"start":"2026-08-01","end":"2026-08-31"}}）');
 }
 
 const CALIBER_TOTAL = 'SUM(去重 usr_id)；含子公司同步注册；口径裁决号 2026-09-08-J1';
@@ -82,8 +82,8 @@ function buildSpec(sc: DataScenario, rejectKw?: string): Spec {
           routeStep('REG_TOTAL', true),
           st(2, '口径声明', 'ok', CALIBER_TOTAL),
           st(3, '参数抽取+校验', 'ok', '{"start":"2026-08-01","end":"2026-08-31"} ✓（关键词回退抽取）'),
-          st(4, 'SQL 编译', 'ok', '由规则模板确定性编译（LLM 未参与）', { sql: SQL_TOTAL }),
-          st(5, '下推执行', 'ok', 'sqlite → 1 行，2.4ms（计算在数据引擎，不在语义层）', { ms: 2.4 }),
+          st(4, 'SQL 编译', 'ok', '按命中规则的模板编译，参数已绑定', { sql: SQL_TOTAL }),
+          st(5, '下推执行', 'ok', 'sqlite → 1 行，2.4ms', { ms: 2.4 }),
           st(6, '结果校验', 'ok', '✓ 列结构与规则声明一致'),
           st(7, '回答', 'ok', answer),
         ],
@@ -104,8 +104,8 @@ function buildSpec(sc: DataScenario, rejectKw?: string): Spec {
           routeStep('REG_BY_CHANNEL', true),
           st(2, '口径声明', 'ok', '明细按 rgst_chnl_id 聚合去重；渠道名 JOIN 渠道维表；与 REG_TOTAL 必须同源一致'),
           st(3, '参数抽取+校验', 'ok', '{"start":"2026-08-01","end":"2026-08-31"} ✓（关键词回退抽取）'),
-          st(4, 'SQL 编译', 'ok', '由规则模板确定性编译（LLM 未参与）', { sql: SQL_CHANNEL }),
-          st(5, '下推执行', 'ok', 'sqlite → 4 行，6.8ms（计算在数据引擎，不在语义层）', { ms: 6.8 }),
+          st(4, 'SQL 编译', 'ok', '按命中规则的模板编译，参数已绑定', { sql: SQL_CHANNEL }),
+          st(5, '下推执行', 'ok', 'sqlite → 4 行，6.8ms', { ms: 6.8 }),
           st(6, '结果校验', 'ok', '✓ 列结构与规则声明一致'),
           st(6, '结果校验', 'ok', '✓ 同源交叉：分渠道合计 2,893 = 热路径总数 2,893'),
           st(7, '回答', 'ok', answer),
@@ -128,8 +128,8 @@ function buildSpec(sc: DataScenario, rejectKw?: string): Spec {
           routeStep('GENDER_RATIO', true),
           st(2, '口径声明', 'ok', '维表 usr_sex 属性分布；明细级即席计算，回答必须标注'),
           st(3, '参数抽取+校验', 'ok', '{"start":"2026-08-01","end":"2026-08-31"} ✓（关键词回退抽取）'),
-          st(4, 'SQL 编译', 'ok', '由规则模板确定性编译（LLM 未参与）'),
-          st(5, '下推执行', 'ok', 'sqlite → 3 行，9.1ms（计算在数据引擎，不在语义层）', { ms: 9.1 }),
+          st(4, 'SQL 编译', 'ok', '按命中规则的模板编译，参数已绑定'),
+          st(5, '下推执行', 'ok', 'sqlite → 3 行，9.1ms', { ms: 9.1 }),
           st(6, '结果校验', 'ok', '✓ 列结构与规则声明一致'),
           st(6, '结果校验', 'ok', '✓ 冷路径免责声明已附加'),
           st(7, '回答', 'ok', answer),
@@ -200,8 +200,8 @@ function buildSpec(sc: DataScenario, rejectKw?: string): Spec {
           routeStep('REG_BY_CHANNEL', true),
           st(2, '口径声明', 'ok', '明细按 rgst_chnl_id 聚合去重；渠道名 JOIN 渠道维表；与 REG_TOTAL 必须同源一致'),
           st(3, '参数抽取+校验', 'ok', '{"start":"2026-08-01","end":"2026-08-31"} ✓（关键词回退抽取）'),
-          st(4, 'SQL 编译', 'ok', '由规则模板确定性编译（LLM 未参与）', { sql: SQL_CHANNEL }),
-          st(5, '下推执行', 'ok', 'sqlite → 4 行，6.8ms（计算在数据引擎，不在语义层）', { ms: 6.8 }),
+          st(4, 'SQL 编译', 'ok', '按命中规则的模板编译，参数已绑定', { sql: SQL_CHANNEL }),
+          st(5, '下推执行', 'ok', 'sqlite → 4 行，6.8ms', { ms: 6.8 }),
           st(6, '结果校验', 'ok', '✓ 列结构与规则声明一致'),
           st(6, '结果校验', 'fail', '✗ 同源交叉：分渠道合计 3,000 ≠ 热路径总数 2,893'),
           st(7, '回答', 'blocked', answer),
