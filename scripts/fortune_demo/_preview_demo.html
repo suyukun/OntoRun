@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>财富广场·注册域语义层演示</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1a2332; --sub:#5a6572; --line:#e3e7ec;
+          --hot:#d9541e; --cold:#2563eb; --ok:#15803d; --bad:#b91c1c; --blocked:#6b7280; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  header { background:#101828; color:#fff; padding:14px 24px; display:flex; align-items:baseline; gap:14px; }
+  header h1 { font-size:17px; font-weight:600; }
+  header span { font-size:12px; color:#98a2b3; }
+  .wrap { max-width:1280px; margin:0 auto; padding:18px 24px 40px; }
+  .askbox { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .askbox input { width:calc(100% - 110px); padding:10px 14px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .askbox button { width:96px; margin-left:8px; padding:10px 0; background:#2563eb; border:0; border-radius:8px; color:#fff; font-size:14px; cursor:pointer; }
+  .chips { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  .chips button { background:#eef2f7; border:1px solid var(--line); border-radius:20px; padding:4px 12px; font-size:12px; color:var(--sub); cursor:pointer; }
+  .grid { display:grid; grid-template-columns: 7fr 5fr; gap:16px; }
+  @media (max-width: 960px){ .grid { grid-template-columns: 1fr; } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-height:300px; }
+  .panel h2 { font-size:13px; color:var(--sub); font-weight:600; margin-bottom:12px; letter-spacing:.05em; }
+  .badge { display:inline-block; padding:3px 12px; border-radius:14px; font-size:12px; font-weight:600; color:#fff; }
+  .path-hot { background:var(--hot); } .path-cold_pushdown,.path-cold_adhoc { background:var(--cold); }
+  .path-rejected,.path-blocked_param,.path-unregistered,.path-validation_failed { background:var(--blocked); }
+  .tl { position:relative; padding-left:22px; }
+  .tl::before { content:""; position:absolute; left:7px; top:6px; bottom:6px; width:2px; background:var(--line); }
+  .stp { position:relative; margin-bottom:10px; opacity:0; transform:translateY(6px); transition:all .25s ease; }
+  .stp.show { opacity:1; transform:none; }
+  .stp::before { content:""; position:absolute; left:-21px; top:6px; width:10px; height:10px; border-radius:50%;
+                 background:#fff; border:2px solid var(--ok); }
+  .stp.fail::before, .stp.blocked::before { border-color:var(--blocked); }
+  .stp b { font-size:13px; } .stp .st { font-size:11px; padding:1px 7px; border-radius:8px; margin-left:6px; }
+  .st.ok { background:#dcfce7; color:var(--ok); } .st.fail { background:#fee2e2; color:var(--bad); } .st.blocked { background:#f3f4f6; color:var(--blocked); }
+  .stp p { color:var(--sub); font-size:12.5px; margin-top:3px; line-height:1.5; }
+  pre { background:#0f172a; color:#d7e2f0; border-radius:8px; padding:10px 12px; font-size:11.5px;
+        font-family:"SF Mono",Menlo,Consolas,monospace; overflow-x:auto; margin-top:6px; white-space:pre-wrap; }
+  table { border-collapse:collapse; width:100%; font-size:12px; margin-top:8px; }
+  th { background:#f0f3f7; text-align:left; } th,td { border:1px solid var(--line); padding:5px 9px; }
+  .flow { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+  .fnode { border:1px solid var(--line); border-radius:7px; padding:5px 10px; font-size:11.5px; background:#fbfcfe; }
+  .fnode.dim { border-color:#93c5fd; background:#eff6ff; } .fnode.dwd { border-color:#fdba74; background:#fff7ed; }
+  .fnode.dws { border-color:var(--hot); background:#fff1e8; color:var(--hot); font-weight:600; }
+  .farrow { color:#98a2b3; font-size:12px; }
+  .tabs { display:flex; gap:2px; margin:22px 0 0; }
+  .tabs button { padding:8px 20px; border:1px solid var(--line); border-bottom:0; background:#eef1f5; border-radius:8px 8px 0 0; cursor:pointer; font-size:13px; color:var(--sub); }
+  .tabs button.on { background:var(--card); color:var(--ink); font-weight:600; }
+  .tabbody { background:var(--card); border:1px solid var(--line); border-radius:0 10px 10px 10px; padding:16px; }
+  .sel { padding:6px 10px; border:1px solid var(--line); border-radius:7px; margin-bottom:10px; font-size:13px; }
+  .meta { color:var(--sub); font-size:12px; margin:6px 0; }
+  .rule { border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+  .rule b { font-size:13px; } .rule .rid { color:var(--cold); font-family:Menlo,monospace; font-size:12px; margin-right:8px; }
+  .answer { margin-top:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 14px; font-size:14px; }
+  .answer.bad { background:#f3f4f6; border-color:#e5e7eb; }
+  .reqid { font-family:Menlo,monospace; font-size:11px; color:#98a2b3; margin-bottom:8px; }
+  .empty { color:#98a2b3; text-align:center; padding:60px 0; font-size:13px; }
+</style>
+</head>
+<body>
+<header><h1>财富广场 · 注册域语义层演示</h1><span>合成样本 · 口径为演示裁决 · 每次查询生成证据 trace（request_id）</span></header>
+<div class="wrap">
+  <div class="askbox">
+    <input id="q" placeholder="输入问题，如：8月按渠道的注册用户数？" onkeydown="if(event.key==='Enter')ask()">
+    <button onclick="ask()">查询</button>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>决策流水线 <span id="badge"></span></h2>
+      <div class="reqid" id="reqid"></div>
+      <div class="tl" id="tl"><div class="empty">发起一次查询，查看每一步决策与数据流动</div></div>
+      <div id="ans"></div>
+    </div>
+    <div class="panel">
+      <h2>数据返回路径</h2>
+      <div id="flow"><div class="empty">此处显示查询命中的数据层与流转</div></div>
+      <div id="res"></div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="on" onclick="tab(this,'data')">数据浏览</button>
+    <button onclick="tab(this,'rules')">规则注册表</button>
+  </div>
+  <div class="tabbody">
+    <div id="tab-data">
+      <select class="sel" id="tsel" onchange="showTable()"></select>
+      <div id="tinfo"></div>
+    </div>
+    <div id="tab-rules" style="display:none"><div class="meta">规则 = 人工裁决后注册的口径；LLM 只能引用，不能发明。</div><div id="rlist"></div></div>
+  </div>
+</div>
+<script>
+// —— 演示预览：内嵌真实 API 返回（来自 curl 实测），override fetch；预览专用禁动画延迟 ——
+const MOCK_ASK = {
+  request_id: "REQ-2026-09-08-A3F19B", question: "8月按渠道的注册用户数？",
+  rule: "REG_BY_CHANNEL", path: "cold_pushdown",
+  steps: [
+    {n:1,title:"意图路由",status:"ok",detail:"选定规则 = REG_BY_CHANNEL（命中关键词「按渠道」）。LLM 输出被限制为规则 ID，不生成 SQL。"},
+    {n:2,title:"口径声明",status:"ok",detail:"明细按 rgst_chnl_id 聚合去重；渠道名 JOIN 渠道维表；与 REG_TOTAL 必须同源一致"},
+    {n:3,title:"参数抽取+校验",status:"ok",detail:"{'start': '2026-08-01', 'end': '2026-08-31'} ✓"},
+    {n:4,title:"SQL 编译",status:"ok",detail:"由规则模板确定性编译（LLM 未参与）",sql:"SELECT ch.chnl_nm AS channel, COUNT(DISTINCT r.usr_id) AS cnt FROM dwd_tr_rgst_df r JOIN dim_ch_chl_df ch ON ch.chnl_id = r.rgst_chnl_id WHERE r.data_dt BETWEEN '2026-08-01' AND '2026-08-31' GROUP BY 1 ORDER BY 2 DESC"},
+    {n:5,title:"下推执行",status:"ok",detail:"sqlite → 7 行，8.7ms（计算在数据引擎，不在语义层）",ms:8.7,row_count:7},
+    {n:6,title:"结果校验",status:"ok",detail:"✓ 列结构与规则声明一致"},
+    {n:6,title:"结果校验",status:"ok",detail:"✓ 渠道枚举 ⊆ 渠道维表"},
+    {n:6,title:"结果校验",status:"ok",detail:"✓ 同源交叉：分渠道合计 1778 = 热路径总数 1778"},
+    {n:7,title:"回答",status:"ok",detail:"共 1,778 人，TOP3：微广场 392、负一屏 338、小米合作 253。"}
+  ],
+  answer: "共 1,778 人，TOP3：微广场 392、负一屏 338、小米合作 253。",
+  tables: [{name:"dwd_tr_rgst_df",layer:"DWD"},{name:"dim_ch_chl_df",layer:"DIM"}],
+  rows: [{channel:"微广场",cnt:392},{channel:"负一屏",cnt:338},{channel:"小米合作",cnt:253},{channel:"中信证券app",cnt:246},{channel:"信享app",cnt:204},{channel:"中信建投app",cnt:198},{channel:"搜索投放",cnt:147}]
+};
+const MOCK_TABLES = [
+  {name:"dim_ch_chl_df", rows:7, columns:[{name:"chnl_id",type:"TEXT"},{name:"chnl_nm",type:"TEXT"},{name:"fst_chnl_nm",type:"TEXT"},{name:"fin_chnl_flg",type:"INT"}],
+   sample:[{chnl_id:"CH001",chnl_nm:"中信证券app",fst_chnl_nm:"中信证券",fin_chnl_flg:1},{chnl_id:"CH002",chnl_nm:"中信建投app",fst_chnl_nm:"中信建投",fin_chnl_flg:1},{chnl_id:"CH004",chnl_nm:"微广场",fst_chnl_nm:"微信生态",fin_chnl_flg:0},{chnl_id:"CH006",chnl_nm:"小米合作",fst_chnl_nm:"外部投放",fin_chnl_flg:0}]},
+  {name:"dim_cu_usr_info_df", rows:3864, columns:[{name:"usr_id",type:"TEXT"},{name:"rgst_dt",type:"TEXT"},{name:"rgst_chnl_id",type:"TEXT"},{name:"real_fg",type:"INT"},{name:"usr_sex",type:"INT"},{name:"usr_phone_erpt",type:"TEXT"}],
+   sample:[{usr_id:"U000001",rgst_dt:"2026-07-01",rgst_chnl_id:"CH004",real_fg:1,usr_sex:2,usr_phone_erpt:"enc(aes)::phone:3fa8…"},{usr_id:"U000002",rgst_dt:"2026-07-01",rgst_chnl_id:"CH001",real_fg:0,usr_sex:1,usr_phone_erpt:"enc(aes)::phone:91bc…"}]},
+  {name:"dwd_tr_rgst_df", rows:3864, columns:[{name:"data_dt",type:"TEXT"},{name:"usr_id",type:"TEXT"},{name:"rgst_chnl_id",type:"TEXT"},{name:"rgst",type:"INT"},{name:"if_act",type:"INT"},{name:"is_real",type:"INT"}],
+   sample:[{data_dt:"2026-07-01",usr_id:"U000001",rgst_chnl_id:"CH004",rgst:1,if_act:1,is_real:1},{data_dt:"2026-07-01",usr_id:"U000002",rgst_chnl_id:"CH001",rgst:1,if_act:0,is_real:0}]},
+  {name:"dws_reg_daily_df", rows:434, columns:[{name:"data_dt",type:"TEXT"},{name:"chnl_id",type:"TEXT"},{name:"cnt",type:"INT"}],
+   sample:[{data_dt:"2026-07-01",chnl_id:"CH001",cnt:9},{data_dt:"2026-07-01",chnl_id:"CH004",cnt:14},{data_dt:"2026-08-31",chnl_id:"CH004",cnt:11}]}
+];
+const MOCK_RULES = [
+  {id:"REG_TOTAL",desc:"注册用户数（自然月去重人数）",path:"hot",caliber:"SUM(去重 usr_id)；含子公司同步注册；口径裁决号 2026-09-08-J1",sql:"SELECT COALESCE(SUM(cnt),0) AS total FROM dws_reg_daily_df WHERE data_dt BETWEEN :start AND :end"},
+  {id:"REG_BY_CHANNEL",desc:"分渠道注册用户数（明细下推聚合）",path:"cold_pushdown",caliber:"明细按 rgst_chnl_id 聚合去重；与 REG_TOTAL 必须同源一致",sql:"SELECT ch.chnl_nm AS channel, COUNT(DISTINCT r.usr_id) AS cnt FROM dwd_tr_rgst_df r JOIN dim_ch_chl_df ch …"},
+  {id:"GENDER_RATIO",desc:"注册用户性别分布（维表属性即席统计）",path:"cold_adhoc",caliber:"维表 usr_sex 属性分布；明细级即席计算，回答必须标注",sql:"SELECT CASE usr_sex … FROM dim_cu_usr_info_df u …"},
+  {id:"OUT_OF_SCOPE",desc:"范围外问题（活跃/转化域未注册）",path:"rejected",caliber:"涉及活跃/转化域 → 拦截，不生成 SQL、不猜测"}
+];
+window.fetch = async (url, opts) => {
+  const u = typeof url === "string" ? url : url.url;
+  const wrap = data => ({ ok: true, json: async () => data });
+  if (u === "/api/ask") return wrap(MOCK_ASK);
+  if (u === "/api/tables") return wrap(MOCK_TABLES);
+  if (u === "/api/rules") return wrap(MOCK_RULES);
+  return { ok: false };
+};
+window.setTimeout = fn => fn();  // 预览专用：动画立即完成
+
+const EXAMPLES = ["8月注册用户数是多少？","8月按渠道的注册用户数？","8月注册用户的男女比例是多少？","8月注册用户里参加过活动的有多少？","注册用户数是多少？"];
+const PATHNAMES = { hot:"🔥 热路径（DWS 预聚合直查）", cold_pushdown:"❄ 冷路径（明细下推聚合）", cold_adhoc:"❄ 冷路径（维表属性即席）",
+  rejected:"⛔ 范围外·拒答", blocked_param:"✋ 参数缺失·追问", unregistered:"⛔ 未注册口径", validation_failed:"⚠ 校验失败·拦截" };
+EXAMPLES.forEach(t => { const b = document.createElement("button"); b.textContent = t; b.onclick = () => { document.getElementById("q").value = t; ask(); }; document.getElementById("chips").appendChild(b); });
+
+async function ask(){
+  const q = document.getElementById("q").value.trim(); if(!q) return;
+  const tl = document.getElementById("tl"), res = document.getElementById("res"), flow = document.getElementById("flow"), ans = document.getElementById("ans");
+  tl.innerHTML = '<div class="empty">决策中…</div>'; res.innerHTML = ""; flow.innerHTML = ""; ans.innerHTML = "";
+  document.getElementById("badge").innerHTML = "";
+  const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})});
+  const d = await r.json();
+  document.getElementById("reqid").textContent = "证据编号 " + d.request_id + " · 路径类型 " + d.path;
+  document.getElementById("badge").innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>';
+  tl.innerHTML = "";
+  d.steps.forEach((s, i) => {
+    setTimeout(() => {
+      const div = document.createElement("div");
+      div.className = "stp show " + (s.status !== "ok" ? "fail" : "");
+      div.innerHTML = '<b>' + s.n + ' ' + s.title + '</b><span class="st ' + s.status + '">' + s.status + '</span><p>' + s.detail + '</p>' + (s.sql ? '<pre>' + s.sql + '</pre>' : '');
+      tl.appendChild(div);
+    }, i * 260);
+  });
+  setTimeout(() => {
+    ans.innerHTML = '<div class="answer ' + (d.path.match(/rejected|blocked|unregistered|validation/) ? "bad" : "") + '"><b>回答：</b>' + d.answer + '</div>';
+  }, d.steps.length * 260);
+  // 数据流面板
+  if (d.tables && d.tables.length) {
+    let f = '<div class="fnode">用户问题</div><span class="farrow">→</span><div class="fnode">语义层·规则路由</div><span class="farrow">→ SQL 下推 →</span>';
+    d.tables.forEach(t => { f += '<div class="fnode ' + t.layer.toLowerCase() + '">' + t.layer + ' · ' + t.name + '</div>'; });
+    f += '<span class="farrow">→ 结果回传 →</span><div class="fnode">校验 → 回答</div>';
+    flow.innerHTML = '<div class="flow">' + f + '</div>' +
+      '<div class="meta">数据层图例：<span style="color:var(--hot)">DWS 汇总层（热路径）</span> · <span style="color:var(--cold)">DWD 明细层 / DIM 维表层（冷路径）</span></div>';
+  } else {
+    flow.innerHTML = '<div class="empty">本次查询未触达数据层</div>';
+  }
+  if (d.rows && d.rows.length) {
+    let h = '<table><tr>' + Object.keys(d.rows[0]).map(k => '<th>' + k + '</th>').join("") + '</tr>';
+    d.rows.forEach(r => { h += '<tr>' + Object.values(r).map(v => '<td>' + v + '</td>').join("") + '</tr>'; });
+    res.innerHTML = h + '</table>';
+  } else { res.innerHTML = '<div class="empty">无结果集</div>'; }
+}
+
+function tab(btn, id){
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("on")); btn.classList.add("on");
+  document.getElementById("tab-data").style.display = id === "data" ? "" : "none";
+  document.getElementById("tab-rules").style.display = id === "rules" ? "" : "none";
+}
+
+async function loadTables(){
+  const ts = await (await fetch("/api/tables")).json();
+  const sel = document.getElementById("tsel");
+  const LAYER = {dim_: "DIM 维表", dwd_: "DWD 明细", dws_: "DWS 汇总"};
+  ts.forEach(t => { const o = document.createElement("option"); o.value = t.name;
+    const pre = Object.keys(LAYER).find(k => t.name.startsWith(k)) || "";
+    o.textContent = t.name + "（" + (LAYER[pre] || "表") + " · " + t.rows + " 行）"; sel.appendChild(o); });
+  window._tables = ts; showTable();
+}
+function showTable(){
+  const t = window._tables.find(x => x.name === document.getElementById("tsel").value);
+  let h = '<div class="meta">' + t.rows + ' 行 × ' + t.columns.length + ' 列 · 显示前 20 行样本（合成数据，脱敏）</div>';
+  h += '<table><tr>' + t.columns.map(c => '<th>' + c.name + '<br><span style="color:#98a2b3;font-weight:400">' + c.type + '</span></th>').join("") + '</tr>';
+  t.sample.forEach(r => { h += '<tr>' + t.columns.map(c => '<td>' + (r[c.name] === null ? '<span style="color:#c2c9d1">NULL</span>' : r[c.name]) + '</td>').join("") + '</tr>'; });
+  document.getElementById("tinfo").innerHTML = h + '</table>';
+}
+async function loadRules(){
+  const rs = await (await fetch("/api/rules")).json();
+  document.getElementById("rlist").innerHTML = rs.map(r =>
+    '<div class="rule"><span class="rid">' + r.id + '</span><b>' + r.desc + '</b>' +
+    '<span class="badge path-' + r.path + '" style="margin-left:8px">' + (PATHNAMES[r.path] || r.path) + '</span>' +
+    '<p style="margin-top:5px;color:var(--sub);font-size:12.5px">口径：' + (r.caliber || r.reject || "") + '</p>' +
+    (r.sql ? '<pre>' + r.sql + '</pre>' : "") + '</div>').join("");
+}
+loadTables(); loadRules();
+</script>
+<script>window.addEventListener("load", () => { document.getElementById("q").value = MOCK_ASK.question; ask(); });</script></body>
+</html>
