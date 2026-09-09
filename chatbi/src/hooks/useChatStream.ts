@@ -14,8 +14,14 @@ export interface StreamCallbacks {
   onEnded: (why: EndReason, err?: StreamError) => void;
 }
 
+/** 发送附加字段：会话归属 + 幂等键（重试复用同 client_request_id → 后端回放快照不产生重复 trace，附录 A） */
+export interface SendExtras {
+  conversationId?: string;
+  clientRequestId?: string;
+}
+
 export interface ChatStream {
-  send: (question: string) => void;
+  send: (question: string, extras?: SendExtras) => void;
   stop: () => void;
   busy: boolean;
 }
@@ -41,7 +47,7 @@ export function useChatStream(cfg: { endpoint: string; mock: boolean; callbacks:
   }, []);
 
   const send = useCallback(
-    (question: string) => {
+    (question: string, extras?: SendExtras) => {
       if (abortRef.current) return; // BUSY：一次一问（§3.6 连发不做排队）
       const ctrl = new AbortController();
       abortRef.current = ctrl;
@@ -71,7 +77,7 @@ export function useChatStream(cfg: { endpoint: string; mock: boolean; callbacks:
         }
       };
       if (cfg.mock) void runMock(question, dispatch, ctrl.signal, finish);
-      else void runSse(question, cfg.endpoint, dispatch, ctrl, finish);
+      else void runSse(question, cfg.endpoint, extras, dispatch, ctrl, finish);
     },
     [cfg.endpoint, cfg.mock],
   );
@@ -97,7 +103,14 @@ async function runMock(question: string, dispatch: Dispatch, signal: AbortSignal
   finish('interrupted'); // mock 序列必有 final，正常不会到这里
 }
 
-async function runSse(question: string, endpoint: string, dispatch: Dispatch, ctrl: AbortController, finish: Terminal): Promise<void> {
+async function runSse(
+  question: string,
+  endpoint: string,
+  extras: SendExtras | undefined,
+  dispatch: Dispatch,
+  ctrl: AbortController,
+  finish: Terminal,
+): Promise<void> {
   let timedOut = false;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   const resetWatchdog = () => {
@@ -112,7 +125,11 @@ async function runSse(question: string, endpoint: string, dispatch: Dispatch, ct
     const resp = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({
+        question,
+        conversation_id: extras?.conversationId,
+        client_request_id: extras?.clientRequestId,
+      }),
       signal: ctrl.signal,
     });
     if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);

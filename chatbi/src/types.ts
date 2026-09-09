@@ -66,11 +66,45 @@ export interface ChatMessage {
   error: StreamError | null;
   phase: 'streaming' | 'done';
   endedBy?: EndReason;
+  /** client_request_id：重试复用同 id，后端幂等回放不产生重复 trace（附录 A） */
+  crid?: string;
 }
 
-/** 会话栏条目（T2 = 本地态占位；服务端持久化/删除隐藏语义在 T4 接入） */
+export interface HistoryEntry {
+  request_id: string;
+  started_at: string;
+  question: string;
+  path: string | null;
+  state: string | null;
+  answer: string;
+}
+
+/** 服务端会话条目（GET /api/sessions 原始契约；pinned/starred 为 0/1） */
+export interface ServerSession {
+  id: string;
+  title: string;
+  pinned: number | boolean;
+  starred: number | boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 服务端消息（GET /api/sessions/{id} 契约；assistant 消息带完整 result 快照，恢复=快照渲染非重新执行） */
+export interface ServerMessage {
+  id: string;
+  conversation_id: string;
+  role: 'user' | 'assistant';
+  question: string | null;
+  request_id: string | null;
+  state: string | null;
+  answer: string | null;
+  result: FinalResult | null;
+  created_at: string;
+}
+
+/** 会话栏条目（T4：服务端 /api/sessions 为唯一事实源；后端未起时本地降级，仍走同结构） */
 export interface SessionItem {
-  id: number;
+  id: string;
   title: string;
   pinned: boolean;
   starred: boolean;
