@@ -146,7 +146,7 @@ def history(limit: int = config.HISTORY_DEFAULT_LIMIT):
             "state": trace.get("state"),
             "answer": (trace.get("answer") or "")[:80],
         })
-    return list(reversed(out))[-max(1, limit):]
+    return list(reversed(out))[: max(1, limit)]  # newest N, newest first
 
 
 @app.get("/api/trace/{request_id}")
@@ -198,7 +198,13 @@ def patch_session(session_id: str, body: SessionPatch):
 
 @app.delete("/api/sessions/{session_id}")
 def delete_session(session_id: str):
-    """Session delete = hidden flag (physical rows preserved for audit)."""
-    if not storage.hide_conversation(session_id):
+    """Session delete = hidden flag + hide linked history entries (acceptance #7:
+    gone from both the session list and history replay); physical rows and the
+    append-only trace JSONL stay preserved for audit (appendix D)."""
+    if storage.get_conversation(session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
+    storage.hide_conversation(session_id)
+    for msg in storage.list_messages(session_id):
+        if msg.get("request_id"):
+            storage.hide_history(msg["request_id"])
     return {"hidden": 1, "id": session_id}
