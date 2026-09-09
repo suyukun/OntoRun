@@ -138,9 +138,21 @@ def answer_assemble(rule_id, rows, params):
         return "、".join(f"{r['gender']} {r['cnt']:,}（{100*r['cnt']/s:.1f}%）" for r in rows) + f"。合计 {s:,} 人。"
     return ""
 
+TRACE_LOG = "/Users/suyukun/Documents/OntoRun/data/fortune/trace_log.jsonl"
+
+def _persist(result: dict):
+    """证据链落库（最小版）：每次查询全步 trace 追加至 JSONL。审计级（不可篡改/回放/导出）为待办。"""
+    try:
+        with open(TRACE_LOG, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(result, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 def run_query(question: str) -> dict:
     """执行一次完整决策链，返回结构化结果（供 CLI 打印 / Web API 消费）。"""
     request_id = f"REQ-{date.today().isoformat()}-{uuid.uuid4().hex[:6].upper()}"
+    import datetime as _dt
+    started_at = _dt.datetime.now().isoformat(timespec="seconds")
     steps = []
     def step(n, title, status, detail, **extra):
         d = {"n": n, "title": title, "status": status, "detail": detail}
@@ -155,12 +167,13 @@ def run_query(question: str) -> dict:
         rid, kw = route(question)
         why = f"LLM 路由不可用（{llm.get('error', '未知') if isinstance(llm, dict) else llm}），退回关键词匹配 → 命中「{kw}」" if isinstance(llm, dict) else f"关键词匹配: {kw}"
     step(1, "意图路由", "ok" if rid else "fail", f"选定规则 = {rid or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
-    result = {"request_id": request_id, "question": question, "rule": rid, "steps": steps,
+    result = {"request_id": request_id, "started_at": started_at, "question": question, "rule": rid, "steps": steps,
               "path": "unknown", "answer": "", "sql": None, "rows": [], "tables": []}
     if rid is None:
         result["path"] = "unregistered"
         result["answer"] = "该问题尚未注册口径，可提交为新的派生规则候选。"
         step(7, "回答", "blocked", result["answer"])
+        _persist(result)
         return result
 
     rule = RULES[rid]
@@ -169,6 +182,7 @@ def run_query(question: str) -> dict:
         step(2, "口径拦截", "blocked", rule["reject"])
         result["answer"] = rule["reject"]
         step(7, "回答", "blocked", rule["reject"])
+        _persist(result)
         return result
     step(2, "口径声明", "ok", rule["caliber"])
 
@@ -221,12 +235,14 @@ def run_query(question: str) -> dict:
         result["answer"] = "校验未通过，拒绝返回结果。"
         step(7, "回答", "blocked", result["answer"])
         conn.close()
+        _persist(result)
         return result
 
     notice = f"（{rule['notice']}）" if rule.get("notice") else ""
     result["answer"] = answer_assemble(rid, rows, params) + notice
     step(7, "回答", "ok", result["answer"])
     conn.close()
+    _persist(result)
     return result
 
 if __name__ == "__main__":

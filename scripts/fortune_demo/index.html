@@ -84,6 +84,7 @@
   <div class="tabs">
     <button class="on" onclick="tab(this,'data')">数据浏览</button>
     <button onclick="tab(this,'rules')">规则注册表</button>
+    <button onclick="tab(this,'history');loadHistory()">查询历史</button>
   </div>
   <div class="tabbody">
     <div id="tab-data">
@@ -91,6 +92,7 @@
       <div id="tinfo"></div>
     </div>
     <div id="tab-rules" style="display:none"><div class="meta">规则 = 人工裁决后注册的口径；LLM 只能引用，不能发明。</div><div id="rlist"></div></div>
+    <div id="tab-history" style="display:none"><div class="meta">每次查询的全步 trace 已落库（data/fortune/trace_log.jsonl）——点击任一条可在上方流水线中回放，即证据查看。</div><div id="hlist"></div></div>
   </div>
 </div>
 <script>
@@ -106,7 +108,7 @@ async function ask(){
   document.getElementById("badge").innerHTML = "";
   const r = await fetch("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})});
   const d = await r.json();
-  document.getElementById("reqid").textContent = "证据编号 " + d.request_id + " · 路径类型 " + d.path;
+  renderResult(d);
   document.getElementById("badge").innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>';
   tl.innerHTML = "";
   d.steps.forEach((s, i) => {
@@ -141,6 +143,7 @@ function tab(btn, id){
   document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("on")); btn.classList.add("on");
   document.getElementById("tab-data").style.display = id === "data" ? "" : "none";
   document.getElementById("tab-rules").style.display = id === "rules" ? "" : "none";
+  document.getElementById("tab-history").style.display = id === "history" ? "" : "none";
 }
 
 async function loadTables(){
@@ -166,6 +169,22 @@ async function loadRules(){
     '<span class="badge path-' + r.path + '" style="margin-left:8px">' + (PATHNAMES[r.path] || r.path) + '</span>' +
     '<p style="margin-top:5px;color:var(--sub);font-size:12.5px">口径：' + (r.caliber || r.reject || "") + '</p>' +
     (r.sql ? '<pre>' + r.sql + '</pre>' : "") + '</div>').join("");
+}
+async function loadHistory(){
+  const hs = await (await fetch("/api/history")).json();
+  document.getElementById("hlist").innerHTML = hs.length ? hs.map(h =>
+    '<div class="rule" style="cursor:pointer" onclick="replay(\'' + h.request_id + '\')">' +
+    '<span class="rid">' + h.started_at + '</span><b>' + h.question + '</b>' +
+    '<span class="badge path-' + h.path + '" style="margin-left:8px">' + (PATHNAMES[h.path] || h.path) + '</span>' +
+    '<p style="margin-top:4px;color:var(--sub);font-size:12px">' + h.answer + '</p>' +
+    '<span class="rid">' + h.request_id + '</span></div>').join("")
+    : '<div class="empty">暂无查询记录</div>';
+}
+async function replay(rid){
+  const d = await (await fetch("/api/trace/" + rid)).json();
+  if (d.error) return;
+  renderResult(d);
+  window.scrollTo({top:0, behavior:"smooth"});
 }
 loadTables(); loadRules();
 </script>

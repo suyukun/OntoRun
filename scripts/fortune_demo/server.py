@@ -34,6 +34,31 @@ def tables():
 def rules():
     return [{"id": k, **{kk: vv for kk, vv in v.items() if kk in ("desc", "caliber", "path", "sql", "notice")}} for k, v in sl.RULES.items()]
 
+@app.get("/api/history")
+def history():
+    import json as _json
+    out = []
+    try:
+        for line in open(sl.TRACE_LOG, encoding="utf-8"):
+            d = _json.loads(line)
+            out.append({"request_id": d["request_id"], "started_at": d.get("started_at", ""),
+                        "question": d["question"], "path": d["path"], "answer": (d.get("answer") or "")[:80]})
+    except FileNotFoundError:
+        pass
+    return list(reversed(out))[-50:]
+
+@app.get("/api/trace/{request_id}")
+def trace(request_id: str):
+    import json as _json
+    try:
+        for line in open(sl.TRACE_LOG, encoding="utf-8"):
+            d = _json.loads(line)
+            if d["request_id"] == request_id:
+                return d
+    except FileNotFoundError:
+        pass
+    return {"error": "not found"}
+
 @app.post("/api/ask")
 def ask(body: Ask):
     return sl.run_query(body.question)
