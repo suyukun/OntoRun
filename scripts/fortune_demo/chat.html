@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>财富广场 ChatBI · 注册域 Demo</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#1a2332; --sub:#5a6572; --line:#e3e7ec;
+          --hot:#d9541e; --cold:#2563eb; --ok:#15803d; --bad:#b91c1c; --acc:#2563eb; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--ink); font-size:14px; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  header { background:#101828; color:#fff; padding:10px 20px; display:flex; align-items:baseline; gap:12px; flex:none; }
+  header h1 { font-size:15px; font-weight:600; } header span { font-size:11.5px; color:#98a2b3; }
+  .layout { flex:1; display:flex; min-height:0; }
+  /* 侧栏 */
+  .side { width:220px; background:#fff; border-right:1px solid var(--line); display:flex; flex-direction:column; flex:none; }
+  .newchat { margin:12px; padding:9px; background:var(--acc); color:#fff; border:0; border-radius:8px; cursor:pointer; font-size:13px; }
+  .side h3 { font-size:11px; color:var(--sub); padding:6px 14px; letter-spacing:.06em; }
+  .hlist { flex:1; overflow-y:auto; padding:0 8px 8px; }
+  .hitem { padding:8px 10px; border-radius:7px; cursor:pointer; font-size:12px; color:var(--ink); margin-bottom:2px; }
+  .hitem:hover { background:#eef2f7; }
+  .hitem .rid { display:block; color:#98a2b3; font-size:10.5px; font-family:Menlo,monospace; margin-top:2px; }
+  .sprof { padding:10px 14px; border-top:1px solid var(--line); font-size:11px; color:var(--sub); }
+  /* 主区 */
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .msgs { flex:1; overflow-y:auto; padding:20px 26px 10px; }
+  .empty { color:#98a2b3; text-align:center; margin-top:12vh; font-size:13px; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:18px; }
+  .chips button { background:#fff; border:1px solid var(--line); border-radius:18px; padding:5px 14px; font-size:12px; color:var(--sub); cursor:pointer; }
+  .chips button:hover { border-color:var(--acc); color:var(--acc); }
+  .m { margin-bottom:18px; display:flex; }
+  .m.user { justify-content:flex-end; }
+  .bub { max-width:78%; padding:10px 14px; border-radius:12px; line-height:1.6; font-size:13.5px; white-space:pre-wrap; }
+  .m.user .bub { background:var(--acc); color:#fff; border-bottom-right-radius:3px; }
+  .m.ai { justify-content:flex-start; }
+  .m.ai .bub { background:var(--card); border:1px solid var(--line); border-bottom-left-radius:3px; max-width:92%; }
+  .steps { border-left:2px solid var(--line); margin:2px 0 8px; padding-left:12px; }
+  .stp { font-size:12px; color:var(--sub); margin-bottom:5px; opacity:.25; transition:opacity .2s; }
+  .stp.on { opacity:1; color:var(--ink); }
+  .stp .st { font-size:10.5px; padding:0 6px; border-radius:7px; margin-right:6px; background:#dcfce7; color:var(--ok); }
+  .stp .st.fail, .stp .st.blocked { background:#f3f4f6; color:var(--blocked,#6b7280); }
+  .ans { min-height:18px; }
+  .ans .cursor { display:inline-block; width:7px; height:14px; background:var(--acc); vertical-align:-2px; animation:bl .8s infinite; }
+  @keyframes bl { 50% { opacity:0; } }
+  .tracebar { margin-top:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge { padding:2px 10px; border-radius:12px; font-size:11px; font-weight:600; color:#fff; }
+  .path-hot { background:var(--hot); } .path-cold_pushdown,.path-cold_adhoc { background:var(--cold); }
+  .path-rejected,.path-blocked_param,.path-unregistered,.path-validation_failed { background:#6b7280; }
+  .evbtn { border:1px solid var(--line); background:#fbfcfe; border-radius:7px; padding:3px 11px; font-size:11.5px; cursor:pointer; color:var(--ink); }
+  .evbtn:hover { border-color:var(--acc); color:var(--acc); }
+  .req { font-family:Menlo,monospace; font-size:10.5px; color:#98a2b3; }
+  .evpanel { margin-top:8px; border:1px solid var(--line); border-radius:9px; background:#fbfcfe; overflow:hidden; display:none; }
+  .evpanel.open { display:block; }
+  .evt { display:flex; gap:2px; background:#eef1f5; padding:5px 8px 0; }
+  .evt button { border:0; background:none; padding:6px 14px; font-size:12px; color:var(--sub); cursor:pointer; border-radius:7px 7px 0 0; }
+  .evt button.on { background:#fff; color:var(--ink); font-weight:600; }
+  .evb { padding:12px 14px; max-height:340px; overflow-y:auto; }
+  .evb table { border-collapse:collapse; width:100%; font-size:12px; }
+  .evb th, .evb td { border:1px solid var(--line); padding:4px 9px; text-align:left; } .evb th { background:#f0f3f7; }
+  pre { background:#0f172a; color:#d7e2f0; border-radius:7px; padding:9px 11px; font-size:11.5px; font-family:"SF Mono",Menlo,monospace; overflow-x:auto; white-space:pre-wrap; margin:5px 0; }
+  .basis { font-size:12.5px; line-height:1.8; color:var(--ink); }
+  .basis b { color:var(--ok); }
+  .inputrow { flex:none; padding:12px 26px 18px; display:flex; gap:10px; }
+  .inputrow input { flex:1; padding:11px 15px; border:1px solid var(--line); border-radius:10px; font-size:14px; }
+  .inputrow button { padding:11px 26px; background:var(--acc); color:#fff; border:0; border-radius:10px; font-size:14px; cursor:pointer; }
+  .inputrow button:disabled { opacity:.5; cursor:not-allowed; }
+</style>
+</head>
+<body>
+<header><h1>财富广场 ChatBI · 注册域</h1><span id="pname"></span><span>· 每个回答挂证据面板（决策过程 + 结论依据）</span></header>
+<div class="layout">
+  <div class="side">
+    <button class="newchat" onclick="newChat()">＋ 新对话</button>
+    <h3>查询历史（点击回放）</h3>
+    <div class="hlist" id="hlist"><div style="padding:8px 12px;font-size:12px;color:#98a2b3">暂无</div></div>
+    <div class="sprof" id="sprof"></div>
+  </div>
+  <div class="main">
+    <div class="msgs" id="msgs">
+      <div class="empty" id="emptytip">试试下面的示例问题，或直接输入</div>
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="inputrow">
+      <input id="q" placeholder="输入问题…" onkeydown="if(event.key==='Enter')send()">
+      <button id="sendbtn" onclick="send()">发送</button>
+    </div>
+  </div>
+</div>
+<script>
+let PROFILE = null, BUSY = false;
+const PATHNAMES = { hot:"🔥 热路径", cold_pushdown:"❄ 冷路径·明细下推", cold_adhoc:"❄ 冷路径·维表即席",
+  rejected:"⛔ 范围外拒答", blocked_param:"✋ 参数追问", unregistered:"⛔ 未注册口径", validation_failed:"⚠ 校验拦截" };
+
+async function boot(){
+  PROFILE = await (await fetch("/api/profile")).json();
+  document.getElementById("pname").textContent = PROFILE.display;
+  document.getElementById("sprof").innerHTML = "业务档案：" + PROFILE.name + "<br>面板装配：" + PROFILE.panels.join(" · ");
+  ["8月注册用户数是多少？","8月按渠道的注册用户数？","8月注册用户的男女比例是多少？","8月注册用户里参加过活动的有多少？"].forEach(t => {
+    const b = document.createElement("button"); b.textContent = t; b.onclick = () => { document.getElementById("q").value = t; send(); };
+    document.getElementById("chips").appendChild(b);
+  });
+  loadHistory();
+}
+
+function userBubble(q){
+  const m = document.createElement("div"); m.className = "m user";
+  m.innerHTML = '<div class="bub"></div>'; m.querySelector(".bub").textContent = q;
+  document.getElementById("msgs").appendChild(m);
+}
+function aiShell(){
+  const m = document.createElement("div"); m.className = "m ai";
+  m.innerHTML = '<div class="bub"><div class="steps"></div><div class="ans"></div><div class="tracebar" style="display:none"></div><div class="evpanel"></div></div>';
+  document.getElementById("msgs").appendChild(m);
+  scrollDown();
+  return m.querySelector(".bub");
+}
+function scrollDown(){ const ms = document.getElementById("msgs"); ms.scrollTop = ms.scrollHeight; }
+
+async function send(){
+  const q = document.getElementById("q").value.trim();
+  if (!q || BUSY) return;
+  BUSY = true; document.getElementById("sendbtn").disabled = true;
+  document.getElementById("emptytip").style.display = "none";
+  document.getElementById("chips").style.display = "none";
+  document.getElementById("q").value = "";
+  userBubble(q); scrollDown();
+  const bub = aiShell(), stepsEl = bub.querySelector(".steps"), ansEl = bub.querySelector(".ans"),
+        bar = bub.querySelector(".tracebar"), panel = bub.querySelector(".evpanel");
+  let text = "", d = null;
+  try {
+    const resp = await fetch(PROFILE.endpoint, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})});
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for (const part of parts) {
+        if (!part.startsWith("data: ")) continue;
+        const ev = JSON.parse(part.slice(6));
+        if (ev.kind === "step") {
+          const s = ev.step;
+          const div = document.createElement("div"); div.className = "stp on";
+          div.innerHTML = '<span class="st ' + s.status + '">' + s.status + '</span><b>' + s.n + ' ' + s.title + '</b> ' + s.detail.slice(0, 70);
+          stepsEl.appendChild(div); scrollDown();
+        } else if (ev.kind === "token") {
+          text += ev.text;
+          ansEl.innerHTML = text + '<span class="cursor"></span>'; scrollDown();
+        } else if (ev.kind === "final") {
+          d = ev.result;
+        }
+      }
+    }
+    ansEl.textContent = text || d.answer;
+    // 步骤直播折叠为摘要
+    stepsEl.style.display = "none";
+    bar.style.display = "flex";
+    bar.innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>' +
+      '<button class="evbtn">🔍 证据面板：决策过程 + 结论依据</button>' +
+      '<span class="req">' + d.request_id + '</span>';
+    // 证据面板内容（按 profile panels 装配；本 profile = 决策过程 + 结论依据）
+    panel.innerHTML = evPanelHTML(d);
+    bindPanel(bub, panel);
+  } catch (e) {
+    ansEl.innerHTML = '<span style="color:var(--bad)">查询失败：' + e.message + '</span>';
+  }
+  BUSY = false; document.getElementById("sendbtn").disabled = false;
+  scrollDown(); loadHistory();
+}
+
+function evPanelHTML(d){
+  const stepsHtml = d.steps.map(s =>
+    '<div style="margin-bottom:6px;font-size:12px"><span class="st ' + s.status + '" style="font-size:10.5px;padding:0 6px;border-radius:7px;background:#dcfce7;color:var(--ok)">' + s.status + '</span> <b>' + s.n + ' ' + s.title + '</b> — ' + s.detail +
+    (s.sql ? '<pre>' + s.sql + '</pre>' : "") + '</div>').join("");
+  const checks = d.steps.filter(s => s.title === "结果校验").map(s => '<b>' + s.detail + '</b>').join('<br>') || "—";
+  const rowsHtml = (d.rows && d.rows.length)
+    ? '<table><tr>' + Object.keys(d.rows[0]).map(k => '<th>' + k + '</th>').join("") + '</tr>' +
+      d.rows.map(r => '<tr>' + Object.values(r).map(v => '<td>' + v + '</td>').join("") + '</tr>').join("") + '</table>'
+    : '<div style="color:#98a2b3;font-size:12px">无结果集</div>';
+  const basisRule = RULE_HINT[d.rule] || {};
+  return '<div class="evt">' +
+    '<button class="on" data-tab="proc">决策过程</button>' +
+    '<button data-tab="basis">结论依据</button>' +
+    '<button data-tab="data">返回数据</button></div>' +
+    '<div class="evb" data-pane="proc">' + stepsHtml + '</div>' +
+    '<div class="evb" data-pane="basis" style="display:none" class="basis"><div class="basis">' +
+      '<b>口径：</b>' + (basisRule.caliber || "—") + '<br>' +
+      '<b>命中规则：</b>' + d.rule + '<br>' +
+      '<b>数据路径：</b>' + (d.tables || []).map(t => t.layer + ' · ' + t.name).join('，') + '<br>' +
+      '<b>校验记录：</b><br>' + checks + '</div></div>' +
+    '<div class="evb" data-pane="data" style="display:none">' + rowsHtml + '</div>';
+}
+const RULE_HINT = {};
+
+function bindPanel(bub, panel){
+  // 证据面板交互统一绑在气泡容器上：.evbtn（tracebar 内）与 .evpanel（兄弟节点）都在 bub 下冒泡
+  bub.onclick = (e) => {
+    const t = e.target;
+    if (t.classList.contains("evbtn")) { panel.classList.toggle("open"); return; }
+    if (!panel.classList.contains("open")) return;
+    const tab = t.closest("[data-tab]");
+    if (!tab || !panel.contains(tab)) return;
+    panel.querySelectorAll(".evt button").forEach(b => b.classList.remove("on"));
+    tab.classList.add("on");
+    const pane = tab.dataset.tab;
+    panel.querySelectorAll(".evb").forEach(x => x.style.display = x.dataset.pane === pane ? "" : "none");
+  };
+}
+
+async function loadHistory(){
+  const hs = await (await fetch("/api/history")).json();
+  document.getElementById("hlist").innerHTML = hs.length ? hs.map(h =>
+    '<div class="hitem" onclick="replay(\'' + h.request_id + '\')">' + h.question +
+    '<span class="rid">' + h.started_at + ' · ' + (PATHNAMES[h.path] || h.path) + '</span></div>').join("")
+    : '<div style="padding:8px 12px;font-size:12px;color:#98a2b3">暂无</div>';
+}
+async function replay(rid){
+  const d = await (await fetch("/api/trace/" + rid)).json();
+  if (d.error) return;
+  document.getElementById("emptytip").style.display = "none";
+  document.getElementById("chips").style.display = "none";
+  userBubble(d.question);
+  renderFinal(d);
+  scrollDown();
+}
+function renderFinal(d){
+  const bub = aiShell(), stepsEl = bub.querySelector(".steps"), ansEl = bub.querySelector(".ans"),
+        bar = bub.querySelector(".tracebar"), panel = bub.querySelector(".evpanel");
+  ansEl.textContent = d.answer;
+  bar.style.display = "flex";
+  bar.innerHTML = '<span class="badge path-' + d.path + '">' + (PATHNAMES[d.path] || d.path) + '</span>' +
+    '<button class="evbtn">🔍 证据面板：决策过程 + 结论依据</button>' +
+    '<span class="req">' + d.request_id + '</span>';
+  panel.innerHTML = evPanelHTML(d);
+  bindPanel(panel);
+}
+function newChat(){
+  const ms = document.getElementById("msgs");
+  ms.innerHTML = '<div class="empty" id="emptytip">已开新对话（历史仍可在左侧回放）</div>';
+}
+boot();
+</script>
+</body>
+</html>

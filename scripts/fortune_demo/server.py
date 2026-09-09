@@ -3,7 +3,8 @@
 import sqlite3, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+import json as _json
 from pydantic import BaseModel
 import semantic_layer as sl
 
@@ -33,6 +34,29 @@ def tables():
 @app.get("/api/rules")
 def rules():
     return [{"id": k, **{kk: vv for kk, vv in v.items() if kk in ("desc", "caliber", "path", "sql", "notice")}} for k, v in sl.RULES.items()]
+
+@app.get("/chat")
+def chat_page():
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat.html"))
+
+@app.get("/api/profile")
+def profile():
+    # 业务档案：壳按此装配。未来风控接入 = 增加一份 profile（如 jinrong-risk），壳零改动。
+    # 金控示例（结构预留）：{"name":"jinrong-risk","endpoint":"/agent/risk/chat/stream","panels":["conclusion_basis","need_confirm"]}
+    return {
+        "name": "fortune-registration",
+        "display": "财富广场 · 注册域",
+        "endpoint": "/api/chat",
+        "panels": ["decision_pipeline", "path_badge", "conclusion_basis", "history"],
+    }
+
+@app.post("/api/chat")
+def chat(body: Ask):
+    """SSE：决策步骤逐帧直播 → 回答逐字流式 → final（完整 trace）。"""
+    def gen():
+        for ev in sl.iter_query(body.question):
+            yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 @app.get("/api/history")
 def history():

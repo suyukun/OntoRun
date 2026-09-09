@@ -5,8 +5,9 @@
 ## 跑法
 1. 造样：/opt/anaconda3/bin/python3 scripts/fortune_demo/build_sample.py
 2. 服务：cd scripts/fortune_demo && set -a; . ../../.env; set +a; /opt/anaconda3/bin/python3 -m uvicorn server:app --host 127.0.0.1 --port 8900
-3. CLI：/opt/anaconda3/bin/python3 scripts/fortune_demo/semantic_layer.py
-4. 静态预览（无需服务）：双击 _preview_demo.html
+3. ChatBI 壳（展示层 Demo 主入口）：http://127.0.0.1:8900/chat —— 对话流式 + 证据面板（决策过程/结论依据/返回数据）+ 历史回放
+4. 分析页（旧，三面板）：http://127.0.0.1:8900/
+5. CLI：/opt/anaconda3/bin/python3 scripts/fortune_demo/semantic_layer.py
 
 ## 真假边界（诚实声明）
 - **假**：数据（合成样本，按字典字段结构造，分布参数为演示假设）；口径裁决号（演示占位）。

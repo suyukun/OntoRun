@@ -148,15 +148,20 @@ def _persist(result: dict):
     except Exception:
         pass
 
-def run_query(question: str) -> dict:
-    """执行一次完整决策链，返回结构化结果（供 CLI 打印 / Web API 消费）。"""
+def iter_query(question: str):
+    """执行一次完整决策链，逐步 yield 事件（供 SSE 流式 / CLI / 聚合消费）。
+    事件：{"kind":"step", ...step} / {"kind":"token","text"} / {"kind":"final","result":result}"""
+    def emit(steps, n, title, status, detail, **extra):
+        d = {"n": n, "title": title, "status": status, "detail": detail}
+        d.update(extra); steps.append(d)
+        return {"kind": "step", "step": d}
     request_id = f"REQ-{date.today().isoformat()}-{uuid.uuid4().hex[:6].upper()}"
     import datetime as _dt
     started_at = _dt.datetime.now().isoformat(timespec="seconds")
     steps = []
     def step(n, title, status, detail, **extra):
-        d = {"n": n, "title": title, "status": status, "detail": detail}
-        d.update(extra); steps.append(d)
+        s = emit(steps, n, title, status, detail, **extra)
+        return s
 
     llm = llm_route(question)
     llm_params = None
@@ -166,7 +171,7 @@ def run_query(question: str) -> dict:
     else:
         rid, kw = route(question)
         why = f"LLM 路由不可用（{llm.get('error', '未知') if isinstance(llm, dict) else llm}），退回关键词匹配 → 命中「{kw}」" if isinstance(llm, dict) else f"关键词匹配: {kw}"
-    step(1, "意图路由", "ok" if rid else "fail", f"选定规则 = {rid or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
+    yield step(1, "意图路由", "ok" if rid else "fail", f"选定规则 = {rid or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
     result = {"request_id": request_id, "started_at": started_at, "question": question, "rule": rid, "steps": steps,
               "path": "unknown", "answer": "", "sql": None, "rows": [], "tables": []}
     if rid is None:
@@ -184,7 +189,7 @@ def run_query(question: str) -> dict:
         step(7, "回答", "blocked", rule["reject"])
         _persist(result)
         return result
-    step(2, "口径声明", "ok", rule["caliber"])
+    yield step(2, "口径声明", "ok", rule["caliber"])
 
     params = (llm.get("params") if llm and "error" not in llm else None) or extract_params(question)
     src_note = "DeepSeek 抽取" if (llm and "error" not in llm and llm.get("params")) else "关键词回退抽取"
@@ -202,18 +207,18 @@ def run_query(question: str) -> dict:
         result["answer"] = "请问您要查询哪个月份？"
         step(7, "回答", "blocked", result["answer"])
         return result
-    step(3, "参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
+    yield step(3, "参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
 
     sql = compile_sql(rule["sql"], params)
     result["sql"] = sql
-    step(4, "SQL 编译", "ok", "由规则模板确定性编译（LLM 未参与）", sql=sql)
+    yield step(4, "SQL 编译", "ok", "由规则模板确定性编译（LLM 未参与）", sql=sql)
 
     conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row
     t0 = time.time()
     rows = [dict(r) for r in conn.execute(sql)]
     ms = round((time.time() - t0) * 1000, 1)
     result["rows"] = rows
-    step(5, "下推执行", "ok", f"sqlite → {len(rows)} 行，{ms}ms（计算在数据引擎，不在语义层）", ms=ms, row_count=len(rows))
+    yield step(5, "下推执行", "ok", f"sqlite → {len(rows)} 行，{ms}ms（计算在数据引擎，不在语义层）", ms=ms, row_count=len(rows))
 
     checks = []
     actual_cols = list(rows[0].keys()) if rows else rule["columns"]
@@ -240,10 +245,13 @@ def run_query(question: str) -> dict:
 
     notice = f"（{rule['notice']}）" if rule.get("notice") else ""
     result["answer"] = answer_assemble(rid, rows, params) + notice
-    step(7, "回答", "ok", result["answer"])
+    yield step(7, "回答", "ok", result["answer"])
     conn.close()
     _persist(result)
-    return result
+    for i in range(0, len(result["answer"]), 3):
+        yield {"kind": "token", "text": result["answer"][i:i+3]}
+        _time.sleep(0.015)
+    yield {"kind": "final", "result": result}
 
 if __name__ == "__main__":
     print(f"request 演示：")
@@ -255,3 +263,12 @@ if __name__ == "__main__":
         for s in res["steps"]:
             print(f"  [{s['n']} {s['title']}] {s['status']} — {s['detail']}")
         print(f"  答: {res['answer']}")
+
+
+def run_query(question: str) -> dict:
+    """聚合 iter_query 的 final 结果（CLI / 旧接口兼容）。落盘由 iter_query 负责。"""
+    result = None
+    for ev in iter_query(question):
+        if ev["kind"] == "final":
+            result = ev["result"]
+    return result
