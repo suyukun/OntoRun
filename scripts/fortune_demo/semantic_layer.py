@@ -49,6 +49,65 @@ RULES = {
 }
 RULE_ORDER = ["OUT_OF_SCOPE", "GENDER_RATIO", "REG_BY_CHANNEL", "REG_TOTAL"]
 
+import os, re, json as _json, time as _time
+
+def _load_env():
+    env = {}
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env")
+    if os.path.exists(p):
+        for line in open(p, encoding="utf-8"):
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+_ENV = _load_env()
+DATA_RANGE = {"min": "2026-07-01", "max": "2026-08-31"}  # 样本数据边界（硬校验用）
+
+def llm_route(question):
+    """真 LLM 路由（DeepSeek）：输出被限制为规则 ID 枚举 + 参数 JSON。
+    硬校验：rule_id 必须在注册表内（发明即拒绝）；日期格式合法。
+    任何失败返回 None → 上层退回关键词匹配（降级路径）。"""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return {"error": "openai 包未安装"}
+    key = _ENV.get("DEEPSEEK_API_KEY")
+    if not key:
+        return {"error": ".env 无 DEEPSEEK_API_KEY"}
+    catalog = "\n".join(f"- {k}: {v.get('desc', '')}" for k, v in RULES.items())
+    system = (
+        "你是语义层的意图路由器。唯一任务：把用户问题映射到唯一规则 ID，并抽取时间参数。"
+        '只输出一个 JSON 对象：{"rule_id": "...", "params": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}}，'
+        "rule_id 必须从清单中选择，禁止发明；时间缺失时 params 传空对象；"
+        "时间参数必须落在样本数据可用范围内：2026-07-01 ~ 2026-08-31。\n与注册规则无关的问题一律 rule_id=OUT_OF_SCOPE。\n规则清单：\n" + catalog
+    )
+    try:
+        client = OpenAI(api_key=key, base_url=_ENV.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+        t0 = _time.time()
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": question}],
+            temperature=0, max_tokens=200,
+        )
+        ms = round((_time.time() - t0) * 1000)
+        raw = resp.choices[0].message.content.strip()
+    except Exception as e:
+        return {"error": f"LLM 调用失败: {e}"}
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return {"error": f"LLM 输出非 JSON: {raw[:80]}", "raw": raw, "ms": ms}
+    try:
+        data = _json.loads(m.group(0))
+    except Exception as e:
+        return {"error": f"JSON 解析失败: {e}", "raw": raw, "ms": ms}
+    rid = data.get("rule_id")
+    if rid not in RULES:
+        return {"error": f"LLM 发明了未注册规则「{rid}」→ 拒绝", "raw": raw, "ms": ms}
+    params = {k: v for k, v in (data.get("params") or {}).items() if re.match(r"^\d{4}-\d{2}-\d{2}$", str(v))}
+    return {"rule_id": rid, "params": params, "raw": raw, "ms": ms, "model": "deepseek-chat"}
+
+
 def route(question):
     for rid in RULE_ORDER:
         for kw in RULES[rid]["keywords"]:
@@ -87,8 +146,15 @@ def run_query(question: str) -> dict:
         d = {"n": n, "title": title, "status": status, "detail": detail}
         d.update(extra); steps.append(d)
 
-    rid, why = route(question)
-    step(1, "意图路由", "ok" if rid else "fail", f"选定规则 = {rid or '无'}（{why}）。LLM 输出被限制为规则 ID，不生成 SQL。")
+    llm = llm_route(question)
+    llm_params = None
+    if llm and "error" not in llm:
+        rid = llm["rule_id"]
+        why = f"DeepSeek 路由 {llm['ms']}ms · 原始输出: {llm['raw']}"
+    else:
+        rid, kw = route(question)
+        why = f"LLM 路由不可用（{llm.get('error', '未知') if isinstance(llm, dict) else llm}），退回关键词匹配 → 命中「{kw}」" if isinstance(llm, dict) else f"关键词匹配: {kw}"
+    step(1, "意图路由", "ok" if rid else "fail", f"选定规则 = {rid or '无'}（{why}）。LLM 只能输出规则 ID 枚举，不生成 SQL；发明即拒绝。")
     result = {"request_id": request_id, "question": question, "rule": rid, "steps": steps,
               "path": "unknown", "answer": "", "sql": None, "rows": [], "tables": []}
     if rid is None:
@@ -106,14 +172,23 @@ def run_query(question: str) -> dict:
         return result
     step(2, "口径声明", "ok", rule["caliber"])
 
-    params = extract_params(question)
+    params = (llm.get("params") if llm and "error" not in llm else None) or extract_params(question)
+    src_note = "DeepSeek 抽取" if (llm and "error" not in llm and llm.get("params")) else "关键词回退抽取"
+    oob = params and (params["start"] < DATA_RANGE["min"] or params["end"] > DATA_RANGE["max"])
+    if oob:
+        step(3, "参数校验", "fail", f"时间范围超出样本数据边界 {DATA_RANGE} → 如实说明，不硬答")
+        result["path"] = "blocked_param"
+        result["answer"] = f"当前样本数据仅覆盖 {DATA_RANGE['min']} ~ {DATA_RANGE['max']}，该时间段无数据。"
+        step(7, "回答", "blocked", result["answer"])
+        conn_close = None
+        return result
     if params is None:
         step(3, "参数校验", "fail", "时间范围缺失 → 追问用户，不猜测")
         result["path"] = "blocked_param"
         result["answer"] = "请问您要查询哪个月份？"
         step(7, "回答", "blocked", result["answer"])
         return result
-    step(3, "参数抽取+校验", "ok", f"{params} ✓")
+    step(3, "参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
 
     sql = compile_sql(rule["sql"], params)
     result["sql"] = sql
