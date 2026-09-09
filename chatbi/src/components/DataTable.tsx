@@ -6,23 +6,25 @@ interface Props {
 export function DataTable({ rows }: Props) {
   const cols = Object.keys(rows[0] ?? {});
   return (
-    <table>
-      <thead>
-        <tr>
-          {cols.map((c) => (
-            <th key={c}>{c}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
+    <div className="tblwrap">
+      <table>
+        <thead>
+          <tr>
             {cols.map((c) => (
-              <td key={c}>{String(r[c])}</td>
+              <th key={c} scope="col">{c}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {cols.map((c) => (
+                <td key={c} className={typeof r[c] === 'number' ? 'num' : undefined}>{String(r[c])}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

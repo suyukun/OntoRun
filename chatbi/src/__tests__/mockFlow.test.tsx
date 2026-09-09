@@ -46,17 +46,17 @@ describe('mock 模式核心流程（验收主链路）', () => {
     fireEvent.change(screen.getByPlaceholderText('输入问题…'), { target: { value: '8月按渠道的注册用户数？' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
 
-    // L1 生成期动态进度（final 前必须出现过）
-    await waitFor(() => expect(screen.getByText(/校验中 · 第 \d+/)).toBeTruthy(), { timeout: 3000 });
+    // L1 生成期动态进度（final 前必须出现过；步数动态，只报当前步 n）
+    await waitFor(() => expect(screen.getByText(/第 \d+ 步 · /)).toBeTruthy(), { timeout: 3000 });
 
-    // final 后：路径徽章 + 回答 + 数据表格
-    await waitFor(() => expect(screen.getByText('❄ 冷路径·明细下推')).toBeTruthy(), { timeout: 15000 });
+    // final 后：路径徽章（业务化文案，附录 G） + 回答 + 数据表格
+    await waitFor(() => expect(screen.getByText('明细即席计算')).toBeTruthy(), { timeout: 15000 });
     expect(screen.getByText(/共 2,893 人/)).toBeTruthy();
     const tbl = screen.getByRole('table');
     expect(within(tbl).getAllByRole('row').length).toBeGreaterThanOrEqual(5); // 表头 + 4 行渠道
 
     // L2：点击 L1 展开步骤列表
-    fireEvent.click(screen.getByText('❄ 冷路径·明细下推'));
+    fireEvent.click(screen.getByText('明细即席计算'));
     expect(screen.getByText(/意图路由/)).toBeTruthy();
 
     // L3：详情抽屉 + Tab 切换（断言收敛在抽屉内，避免与 L2 步骤详情重复匹配）

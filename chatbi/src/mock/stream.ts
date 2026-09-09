@@ -15,12 +15,20 @@ export type Scenario =
   | 'out_of_range'
   | 'rejected'
   | 'unregistered'
-  | 'validation_failed';
+  | 'validation_failed'
+  /** 传输层两态（无 final 帧）：服务异常 error 帧 / 断流中断——八状态 UI 自查用 */
+  | 'service_error'
+  | 'interrupted_stream';
+
+/** 产生 FinalResult 的数据场景（service_error / interrupted_stream 走 error 帧或无 final 收尾） */
+type DataScenario = Exclude<Scenario, 'service_error' | 'interrupted_stream'>;
 
 const SUCCESS_PATHS = ['hot', 'cold_pushdown', 'cold_adhoc'];
 
 /** mock 模式关键字 → 场景（联调后由真实后端取代；此处让八状态在无后端时可独立演示） */
 export function pickScenario(question: string): Scenario {
+  if (/服务异常|停服|宕机/.test(question)) return 'service_error';
+  if (/断流|断网|断开/.test(question)) return 'interrupted_stream';
   if (/活跃|活动|日活|抽奖|转化/.test(question)) return 'rejected';
   if (/9月|去年|2025/.test(question)) return 'out_of_range';
   if (/凌晨/.test(question)) return 'empty_result';
@@ -61,7 +69,7 @@ function routeStep(rid: string, ok: boolean): StepInfo {
 
 const CALIBER_TOTAL = 'SUM(去重 usr_id)；含子公司同步注册；口径裁决号 2026-09-08-J1';
 
-function buildSpec(sc: Scenario): Spec {
+function buildSpec(sc: DataScenario): Spec {
   switch (sc) {
     case 'hot_success': {
       const answer = '2026-08 月注册 2,893 人。';
@@ -200,7 +208,7 @@ function buildSpec(sc: Scenario): Spec {
   }
 }
 
-function buildResult(sc: Scenario, question: string): FinalResult {
+function buildResult(sc: DataScenario, question: string): FinalResult {
   const s = buildSpec(sc);
   return {
     request_id: 'REQ-2026-09-09-MOCK01',
@@ -226,9 +234,24 @@ function tokenEvents(answer: string): ChatEvent[] {
   return evs;
 }
 
-/** 组装一次模拟查询的完整事件序列（step → token? → final），格式对齐附录 A。 */
+/** 组装一次模拟查询的完整事件序列（step → token? → final/error），格式对齐附录 A。 */
 export function buildMockEvents(question: string): ChatEvent[] {
-  const result = buildResult(pickScenario(question), question);
+  const sc = pickScenario(question);
+  if (sc === 'service_error') {
+    // 附录 B：基础设施失败 → 脱敏 error 帧（后发出即终止，无 final）
+    return [
+      { kind: 'step', step: st(1, '意图路由', 'fail', '语义服务基础设施异常（mock 场景：模拟服务不可达）') },
+      { kind: 'error', code: 'E_NET', message: '查询失败：服务未响应' },
+    ];
+  }
+  if (sc === 'interrupted_stream') {
+    // 附录 A：断流无 final 帧 → 壳判「已中断」+ 重试
+    return [
+      { kind: 'step', step: st(1, '意图路由', 'ok', '选定规则 = REG_TOTAL（mock 路由 · 模拟 DeepSeek 286ms）') },
+      { kind: 'step', step: st(2, '口径声明', 'ok', CALIBER_TOTAL) },
+    ];
+  }
+  const result = buildResult(sc, question);
   const evs: ChatEvent[] = result.steps.map((s) => ({ kind: 'step', step: s }) as ChatEvent);
   if (SUCCESS_PATHS.includes(result.path)) evs.push(...tokenEvents(result.answer));
   evs.push({ kind: 'final', result });
