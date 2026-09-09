@@ -18,13 +18,13 @@ export const MOCK_PROFILE: Profile = {
     '8月的日活是多少？',
   ],
   path_labels: {
-    hot: '🔥 热路径',
-    cold_pushdown: '❄ 冷路径·明细下推',
-    cold_adhoc: '❄ 冷路径·维表即席',
-    rejected: '⛔ 范围外拒答',
-    blocked_param: '✋ 参数追问',
-    unregistered: '⛔ 未注册口径',
-    validation_failed: '⚠ 校验拦截',
+    hot: '热路径',
+    cold_pushdown: '冷路径·明细下推',
+    cold_adhoc: '冷路径·维表即席',
+    rejected: '范围外拒答',
+    blocked_param: '参数追问',
+    unregistered: '未注册口径',
+    validation_failed: '校验拦截',
   },
 };
 

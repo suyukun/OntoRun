@@ -43,7 +43,9 @@ describe('L1 摘要条（§3.2 #1）', () => {
     render(<App />);
     await ask('8月按渠道的注册用户数？');
     const live = await screen.findByText(/第 \d+ 步 · /, {}, { timeout: 3000 });
-    expect(live.textContent).toMatch(/⏳ 第 \d+ 步 · .+/);
+    expect(live.textContent).toMatch(/第 \d+ 步 · .+/);
+    expect(live.querySelector('svg')).toBeTruthy(); // 进度图标为内联 SVG（去 emoji 本质防御）
+    expect(live.textContent).not.toMatch(/\p{Extended_Pictographic}/u); // 不回潮 emoji
     expect(live.textContent).not.toMatch(/\/ \d+ 步/); // 分母在 final 前不可知，不得伪造
     await screen.findByText('明细即席计算', {}, { timeout: 15000 });
   });

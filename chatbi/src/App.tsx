@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Icon } from './components/Icon';
 import { loadProfile, type ProfileBundle } from './api';
 import { ChatInput } from './components/ChatInput';
 import { MessageCard } from './components/MessageCard';
@@ -157,7 +158,9 @@ export default function App() {
   const historyPanel = (
     <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px' }}>
       {(replay == null || replay.phase !== 'ready') && (
-        <button style={{ ...TAB_STYLE, color: '#555' }} onClick={() => setReplay(null)}>← 返回历史列表</button>
+        <button style={{ ...TAB_STYLE, color: '#555', display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => setReplay(null)}>
+          <Icon name="chevron-left" size={13} /> 返回历史列表
+        </button>
       )}
       {replay?.phase === 'loading' && <div className="empty">回放加载中…</div>}
       {replay?.phase === 'missing' && <div className="empty">该条记录已删除或不存在，无法回放。</div>}
@@ -200,7 +203,7 @@ export default function App() {
                   if (window.confirm('删除该条查询历史？删除后不可再回放（审计数据物理保留）。')) histRemove(e.request_id).catch(console.error);
                 }}
               >
-                🗑
+                <Icon name="trash" size={13} />
               </button>
             </div>
           ))}
@@ -238,7 +241,7 @@ export default function App() {
                 {messages.length === 0 && (
                   <div className="emptywrap">
                     <div className="empty">
-                      {ready ? (bundle.mockMode ? 'mock 数据模式：试试示例问题（八状态关键字见 README）' : '试试示例问题，或直接输入') : '业务档案装配中…'}
+                      {ready ? (bundle.mockMode ? '内置演示数据：试试示例问题，或直接输入' : '试试示例问题，或直接输入') : '业务档案装配中…'}
                     </div>
                     <div className="chips">
                       {(profile?.examples ?? []).map((ex) => (

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { Icon } from './Icon';
 
 interface Props {
   busy: boolean;
@@ -35,7 +36,7 @@ export function ChatInput({ busy, ready, onSend, onStop }: Props) {
       />
       {busy ? (
         <button className="stopbtn" onClick={onStop}>
-          ■ 停止
+          <Icon name="square" size={10} filled /> 停止
         </button>
       ) : (
         <button onClick={fire} disabled={!ready || !value.trim()}>

@@ -143,7 +143,7 @@ describe('T4 会话恢复与持久化联调', () => {
     expect(await screen.findByText('该条记录已删除或不存在，无法回放。')).toBeTruthy();
 
     // 返回列表 → 正常条目 → 快照回放为消息卡 + 数据截至标注
-    fireEvent.click(screen.getByRole('button', { name: '← 返回历史列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回历史列表' }));
     fireEvent.click(screen.getByText('可回放的问题'));
     expect(await screen.findByText(/历史回放 · 数据截至 2026-09-10 07:30:00/)).toBeTruthy();
     expect(await screen.findByText('回放回答：2,893 人')).toBeTruthy();

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_PATH_LABELS } from '../mock/profile';
+import { Icon } from './Icon';
 import { deriveStatus, type AiStatus } from '../state/deriveStatus';
 import type { ChatMessage, FinalResult } from '../types';
+import { Chart } from './Chart';
 import { DataTable } from './DataTable';
 import { DetailDrawer } from './DetailDrawer';
 import {
@@ -117,7 +119,7 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
       case 'success_empty':
         return (
           <div className="ans emptybox">
-            <span className="empty-ic" aria-hidden="true">◻</span>
+            <span className="empty-ic" aria-hidden="true"><Icon name="inbox" size={18} /></span>
             该范围无数据
             <span className="hint">建议调整时间范围后重试。</span>
           </div>
@@ -169,7 +171,7 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
       case 'error':
         return retryRow(msg.error?.message ?? ERROR_COPY[msg.error?.code ?? ''] ?? DEFAULT_ERROR_TEXT);
       case 'interrupted':
-        return retryRow('连接已中断，半成品已丢弃。');
+        return retryRow('连接中断，本次回答未完成，可重试。');
       case 'canceled':
         return retryRow('已取消本次查询。');
     }
@@ -184,16 +186,20 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
           onClick={toggleL2}
           role={msg.steps.length > 0 && !streaming ? 'button' : undefined}
           aria-expanded={msg.steps.length > 0 && !streaming ? l2Open : undefined}
-          title={msg.steps.length > 0 && !streaming ? '点击展开/收起决策过程（L2）' : undefined}
+          title={msg.steps.length > 0 && !streaming ? '点击展开/收起决策过程' : undefined}
         >
           {streaming ? (
             <span className={'l1-live' + (slow ? ' slow' : '')}>
-              ⏳ {liveText}
+              <Icon name="loader" size={13} className="icon-spin" />
+              {liveText}
               {slow && <em className="l1-breath">处理中</em>}
             </span>
           ) : (
             <>
-              <span className={'badge path-' + (r?.path ?? status)}>{badge}</span>
+              <span className={'badge path-' + (r?.path ?? status)}>
+                <span className="dot" aria-hidden="true" />
+                {badge}
+              </span>
               {(status === 'success' || status === 'success_degraded') && checkSteps.length > 0 && (
                 <span className="oktext">{checkSteps.length} 项校验全过</span>
               )}
@@ -204,7 +210,15 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
                   onClick={(e) => { e.stopPropagation(); copyRequestId(); }}
                 >
                   {r.request_id}
-                  <span className="req-ic">{copied === null ? '⧉ 复制' : copied ? '✓ 已复制' : '✗ 未复制'}</span>
+                  <span className="req-ic">
+                    {copied === null ? (
+                      <><Icon name="copy" size={11} /> 复制</>
+                    ) : copied ? (
+                      <><Icon name="check" size={11} /> 已复制</>
+                    ) : (
+                      <><Icon name="x" size={11} /> 未复制</>
+                    )}
+                  </span>
                 </button>
               )}
             </>
@@ -216,7 +230,10 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
               </button>
             )}
             {msg.steps.length > 0 && !streaming && (
-              <span className="l2hint">{l2Open ? '▲ 收起过程' : '▼ 展开过程'}</span>
+              <span className="l2hint">
+                <Icon name="chevron-down" size={11} className={l2Open ? 'open' : undefined} />
+                {l2Open ? '收起过程' : '展开过程'}
+              </span>
             )}
           </span>
         </div>
@@ -227,11 +244,13 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
           {answer()}
         </div>
 
-        {/* 数据区：有 rows 必显示（§4.2）；空结果显示空态 */}
+        {/* 数据区：有 rows 必显示（§4.2）；空结果显示空态；渲染器按规则 viz 字段分支（D7：图表与表格同源同一 rows） */}
         {(status === 'success' || status === 'success_degraded') && r && r.rows.length > 0 && (
           <div className="sec">
             <h4>返回数据</h4>
-            <DataTable rows={r.rows} />
+            {r.viz === 'bar' || r.viz === 'kpi'
+              ? <Chart viz={r.viz} rows={r.rows} />
+              : <DataTable rows={r.rows} />}
           </div>
         )}
         {status === 'success_empty' && (
@@ -244,7 +263,7 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
         {/* L2 决策过程：默认收起，点击 L1 展开/收起；编号连续（展示序 1..N，步数动态） */}
         {l2Open && msg.steps.length > 0 && (
           <div className="sec">
-            <h4>决策过程（L2 · {msg.steps.length} 步）</h4>
+            <h4>决策过程（{msg.steps.length} 步）</h4>
             <StepList steps={msg.steps} />
           </div>
         )}

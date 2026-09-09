@@ -56,6 +56,8 @@ interface Spec {
   steps: StepInfo[];
   block_reason?: FinalResult['block_reason'];
   degraded?: boolean;
+  /** D7 viz 契约：与 rules.py 规则注册的 viz 字段一致（REG_TOTAL=kpi、REG_BY_CHANNEL=bar、GENDER_RATIO=pie） */
+  viz?: FinalResult['viz'];
 }
 
 const BOUNDARY = '2026-07-01 ~ 2026-08-31';
@@ -74,7 +76,7 @@ function buildSpec(sc: DataScenario): Spec {
     case 'hot_success': {
       const answer = '2026-08 月注册 2,893 人。';
       return {
-        path: 'hot', rule: 'REG_TOTAL', answer, sql: SQL_TOTAL,
+        path: 'hot', rule: 'REG_TOTAL', answer, sql: SQL_TOTAL, viz: 'kpi',
         rows: [{ total: 2893 }], tables: [{ name: 'dws_reg_daily_df', layer: 'DWS' }],
         steps: [
           routeStep('REG_TOTAL', true),
@@ -90,7 +92,7 @@ function buildSpec(sc: DataScenario): Spec {
     case 'cold_pushdown_success': {
       const answer = '共 2,893 人，TOP3：APP 1,240、小程序 987、官网 456。';
       return {
-        path: 'cold_pushdown', rule: 'REG_BY_CHANNEL', answer, sql: SQL_CHANNEL,
+        path: 'cold_pushdown', rule: 'REG_BY_CHANNEL', answer, sql: SQL_CHANNEL, viz: 'bar',
         rows: [
           { channel: 'APP', cnt: 1240 },
           { channel: '小程序', cnt: 987 },
@@ -113,7 +115,7 @@ function buildSpec(sc: DataScenario): Spec {
     case 'cold_adhoc_success': {
       const answer = '男 1,523（52.7%）、女 1,310（45.3%）、未知 60（2.1%）。合计 2,893 人。（明细级即席计算（未预聚合）：结果为即时快照，非月报口径）';
       return {
-        path: 'cold_adhoc', rule: 'GENDER_RATIO',
+        path: 'cold_adhoc', rule: 'GENDER_RATIO', viz: 'pie',
         answer,
         sql: "SELECT CASE usr_sex WHEN 1 THEN '男' WHEN 2 THEN '女' ELSE '未知' END AS gender, COUNT(DISTINCT u.usr_id) AS cnt FROM dim_cu_usr_info_df u WHERE u.rgst_dt BETWEEN '2026-08-01' AND '2026-08-31' GROUP BY 1 ORDER BY 2 DESC",
         rows: [
@@ -223,6 +225,7 @@ function buildResult(sc: DataScenario, question: string): FinalResult {
     steps: s.steps,
     block_reason: s.block_reason,
     degraded: s.degraded,
+    viz: s.viz,
   };
 }
 

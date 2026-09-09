@@ -88,13 +88,13 @@ def build_profile() -> dict:
             "7月注册用户数是多少？",
         ],
         "path_labels": {
-            "hot": "🔥 热路径·月报口径",
-            "cold_pushdown": "❄ 冷路径·明细下推",
-            "cold_adhoc": "🧊 冷路径·即席计算",
-            "blocked_param": "⛔ 参数待补/超边界",
-            "unregistered": "🚫 未注册口径",
-            "rejected": "🚫 范围外",
-            "validation_failed": "⚠️ 校验未通过",
+            "hot": "热路径·月报口径",
+            "cold_pushdown": "冷路径·明细下推",
+            "cold_adhoc": "冷路径·即席计算",
+            "blocked_param": "参数待补/超边界",
+            "unregistered": "未注册口径",
+            "rejected": "范围外",
+            "validation_failed": "校验未通过",
         },
         "rule_hints": {
             rid: {"caliber": rule["caliber"]}

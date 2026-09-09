@@ -14,6 +14,9 @@ export interface TableRef {
   layer: string;
 }
 
+/** D7：规则注册的 viz 字段（产品文档 §5-D7，与 rules.py 单一来源对齐） */
+export type VizKind = 'bar' | 'line' | 'pie' | 'table' | 'kpi';
+
 export interface FinalResult {
   request_id: string;
   started_at: string;
@@ -27,6 +30,8 @@ export interface FinalResult {
   steps: StepInfo[];
   /** §4.2：blocked_param 拆分为参数追问/范围超限两态，按结构化字段区分（非 answer 文案猜） */
   block_reason?: 'missing_param' | 'out_of_range';
+  /** D7 viz 契约：图表类型由语义层规则注册声明（与数据形态绑定）；缺省/未支持类型一律表格渲染 */
+  viz?: VizKind;
   /** §4.2 2b：LLM 路由降级为关键词匹配时的降级标记 */
   degraded?: boolean;
 }

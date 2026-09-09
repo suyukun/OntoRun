@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from './Icon';
 import { BUSINESS_PATH_LABELS } from './labels';
 import type { ChatMessage } from '../types';
 import { DataTable } from './DataTable';
@@ -28,10 +29,10 @@ export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () =
   return (
     <>
       <div className="drawer-mask" onClick={onClose} />
-      <div className="drawer" role="dialog" aria-label="详情 L3">
+      <div className="drawer" role="dialog" aria-label="详情">
         <div className="drawer-head">
-          <b>详情（L3）· {msg.text}</b>
-          <button className="opbtn" aria-label="关闭" onClick={onClose}>×</button>
+          <b>详情 · {msg.text}</b>
+          <button className="opbtn" aria-label="关闭" onClick={onClose}><Icon name="x" size={14} /></button>
         </div>
         <div className="tabs">
           {TABS.map((t) => (
@@ -71,7 +72,7 @@ export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () =
                   <ul>
                     {validations.map((s, i) => (
                       <li key={i} className={s.status === 'ok' ? 'vok' : 'vbad'}>
-                        {s.status === 'ok' ? '✓' : '✗'} {s.detail.replace(/^[✓✗]\s*/, '')}
+                        <Icon name={s.status === 'ok' ? 'check' : 'x'} size={11} /> {s.detail.replace(/^[✓✗]\s*/, '')}
                       </li>
                     ))}
                   </ul>

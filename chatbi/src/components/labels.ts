@@ -26,7 +26,7 @@ export const LIFECYCLE_BADGE_LABELS: Partial<Record<AiStatus, string>> = {
 /** 附录 B 错误码 → 用户文案（兜底表；后端 error 帧 message 已脱敏且优先展示）。 */
 export const ERROR_COPY: Record<string, string> = {
   E_NET: '查询失败：服务未响应',
-  E_SQL: '查询执行出错，已记录（编号）',
+  E_SQL: '查询执行出错，系统已记录，可重试。',
   E_VALIDATION: '校验未通过，拒绝返回',
   E_PARAM_MISSING: '请问您要查询哪个月份？',
   E_PARAM_RANGE: '当前查询时间超出数据覆盖范围',

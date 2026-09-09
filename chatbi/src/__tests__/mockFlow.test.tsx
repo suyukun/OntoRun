@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import App from '../App';
 import { deriveFinal } from '../state/deriveStatus';
 import { useChatStream } from '../hooks/useChatStream';
@@ -9,6 +9,9 @@ beforeEach(() => {
   // /api/profile 拉取失败 → 验证 mock 降级路径
   vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('backend down'))));
 });
+
+// vitest globals 关闭时 testing-library 不自动 cleanup，DOM 会跨用例堆叠（与 messageCard.test 一致）
+afterEach(() => cleanup());
 
 const baseResult: FinalResult = {
   request_id: 'R',
@@ -39,8 +42,8 @@ describe('deriveFinal 八状态映射（v0.2 §4.2 path→状态一对一）', (
 });
 
 describe('mock 模式核心流程（验收主链路）', () => {
-  it('profile 失败降级 mock → L1 动态更新 → 回答流式 → 表格渲染 → L2/L3 可展开', async () => {
-    render(<App />);
+  it('profile 失败降级 mock → L1 动态更新 → 回答流式 → viz=bar 柱状图渲染 → L2/L3 可展开', async () => {
+    const { container } = render(<App />);
     expect(await screen.findByText('mock 数据')).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('输入问题…'), { target: { value: '8月按渠道的注册用户数？' } });
@@ -49,11 +52,12 @@ describe('mock 模式核心流程（验收主链路）', () => {
     // L1 生成期动态进度（final 前必须出现过；步数动态，只报当前步 n）
     await waitFor(() => expect(screen.getByText(/第 \d+ 步 · /)).toBeTruthy(), { timeout: 3000 });
 
-    // final 后：路径徽章（业务化文案，附录 G） + 回答 + 数据表格
+    // final 后：路径徽章（业务化文案，附录 G） + 回答 + viz=bar → SVG 柱状图（D7：与表格同源同一 rows）
     await waitFor(() => expect(screen.getByText('明细即席计算')).toBeTruthy(), { timeout: 15000 });
     expect(screen.getByText(/共 2,893 人/)).toBeTruthy();
-    const tbl = screen.getByRole('table');
-    expect(within(tbl).getAllByRole('row').length).toBeGreaterThanOrEqual(5); // 表头 + 4 行渠道
+    expect(container.querySelectorAll('.bub svg rect').length).toBeGreaterThanOrEqual(4); // 4 渠道各一柱，来自同一 rows
+    expect(screen.getByText('1,240')).toBeTruthy(); // TOP1 APP 数值常显
+    expect(screen.queryByRole('table')).toBeNull(); // viz=bar 走图表渲染器，非表格
 
     // L2：点击 L1 展开步骤列表
     fireEvent.click(screen.getByText('明细即席计算'));
@@ -64,6 +68,16 @@ describe('mock 模式核心流程（验收主链路）', () => {
     const drawer = screen.getByRole('dialog');
     fireEvent.click(within(drawer).getByRole('button', { name: '结论依据' }));
     expect(within(drawer).getByText(/REG_BY_CHANNEL/)).toBeTruthy();
+  });
+
+  it('viz=kpi：热路径总数（REG_TOTAL=kpi）渲染为大数字指标卡，不出现表格/SVG', async () => {
+    const { container } = render(<App />);
+    fireEvent.change(await screen.findByPlaceholderText('输入问题…'), { target: { value: '8月注册用户数是多少？' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(screen.getByText('月报口径（预聚合）')).toBeTruthy(), { timeout: 15000 });
+    expect(screen.getByText('2,893')).toBeTruthy(); // 大数字 = rows[0].total，同源不另算
+    expect(container.querySelector('.bub svg[role="img"]')).toBeNull(); // 无图表 svg（UI 功能图标 aria-hidden 不计入）
+    expect(screen.queryByRole('table')).toBeNull();
   });
 });
 
