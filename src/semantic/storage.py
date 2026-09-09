@@ -29,6 +29,12 @@ def migrate() -> None:
     try:
         for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
             conn.executescript(sql_file.read_text(encoding="utf-8"))
+        # 002: archived 归档位（SQLite ADD COLUMN 无 IF NOT EXISTS，pragma 探测后执行；
+        # 归档=用户侧移出主列表可恢复，区别于 hidden=删除）
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)")}
+        if "archived" not in cols:
+            conn.execute(
+                "ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
@@ -48,16 +54,18 @@ def create_conversation(title: str) -> dict:
         conn.commit()
     finally:
         conn.close()
-    return {"id": cid, "title": title, "pinned": 0, "starred": 0, "hidden": 0,
+    return {"id": cid, "title": title, "pinned": 0, "starred": 0, "hidden": 0, "archived": 0,
             "created_at": now, "updated_at": now}
 
 
-def list_conversations() -> list:
+def list_conversations(archived: bool = False) -> list:
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT id, title, pinned, starred, created_at, updated_at "
-            "FROM conversations WHERE hidden = 0 ORDER BY pinned DESC, updated_at DESC"
+            "SELECT id, title, pinned, starred, archived, created_at, updated_at "
+            "FROM conversations WHERE hidden = 0 AND archived = ? "
+            "ORDER BY pinned DESC, updated_at DESC",
+            (1 if archived else 0,),
         ).fetchall()
     finally:
         conn.close()
@@ -69,7 +77,7 @@ def get_conversation(cid: str) -> dict | None:
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT id, title, pinned, starred, created_at, updated_at "
+            "SELECT id, title, pinned, starred, archived, created_at, updated_at "
             "FROM conversations WHERE id = ? AND hidden = 0", (cid,)
         ).fetchone()
     finally:
@@ -79,7 +87,7 @@ def get_conversation(cid: str) -> dict | None:
 
 def update_conversation(cid: str, fields: dict) -> dict | None:
     sets, vals = ["updated_at = ?"], [_now()]
-    for col in ("title", "pinned", "starred"):
+    for col in ("title", "pinned", "starred", "archived"):
         if fields.get(col) is not None:
             val = fields[col]
             vals.insert(len(vals) - 1, int(val) if col != "title" else val)

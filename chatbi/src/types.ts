@@ -34,6 +34,8 @@ export interface FinalResult {
   viz?: VizKind;
   /** §4.2 2b：LLM 路由降级为关键词匹配时的降级标记 */
   degraded?: boolean;
+  /** 决策链总耗时（ms，后端 final 帧注入；思考折叠条显示「已思考 N 步 · X.Xs」） */
+  total_ms?: number;
 }
 
 export interface StreamError {
@@ -75,21 +77,13 @@ export interface ChatMessage {
   crid?: string;
 }
 
-export interface HistoryEntry {
-  request_id: string;
-  started_at: string;
-  question: string;
-  path: string | null;
-  state: string | null;
-  answer: string;
-}
-
-/** 服务端会话条目（GET /api/sessions 原始契约；pinned/starred 为 0/1） */
+/** 服务端会话条目（GET /api/sessions 原始契约；pinned/starred/archived 为 0/1） */
 export interface ServerSession {
   id: string;
   title: string;
   pinned: number | boolean;
   starred: number | boolean;
+  archived?: number | boolean;
   created_at: string;
   updated_at: string;
 }
@@ -113,4 +107,7 @@ export interface SessionItem {
   title: string;
   pinned: boolean;
   starred: boolean;
+  archived?: boolean;
+  /** 最近更新时间（服务端排序/前端时间分组用；本地降级可缺省） */
+  updatedAt?: string;
 }

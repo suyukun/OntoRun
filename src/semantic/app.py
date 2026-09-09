@@ -41,6 +41,7 @@ class SessionPatch(BaseModel):
     title: str | None = None
     pinned: bool | None = None
     starred: bool | None = None
+    archived: bool | None = None
 
 
 # ------------------------------------------------------------------ chat (SSE)
@@ -173,8 +174,9 @@ def create_session(body: SessionCreate):
 
 
 @app.get("/api/sessions")
-def list_sessions():
-    return storage.list_conversations()
+def list_sessions(archived: bool = False):
+    """?archived=true 返回归档区（主列表默认排除归档会话）。"""
+    return storage.list_conversations(archived=archived)
 
 
 @app.get("/api/sessions/{session_id}")

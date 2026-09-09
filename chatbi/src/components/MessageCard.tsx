@@ -8,13 +8,15 @@ import { DataTable } from './DataTable';
 import { DetailDrawer } from './DetailDrawer';
 import {
   BUSINESS_PATH_LABELS, DEFAULT_ERROR_TEXT, ERROR_COPY, LIFECYCLE_BADGE_LABELS,
-  REQ_ID_HINT, RESULT_BADGE_LABELS, copyText,
+  RESULT_BADGE_LABELS, copyText,
 } from './labels';
 import { StepList } from './StepList';
 
 interface Props {
   msg: ChatMessage;
   pathLabels: Record<string, string>;
+  /** profile 示例问题（拒答时给出可点的换问引导） */
+  examples?: string[];
   onRetry: (q: string) => void;
   onFollowUp: (q: string) => void;
 }
@@ -22,7 +24,7 @@ interface Props {
 /** 参数追问快捷 chips（§4.2 #3：选中即续查；P0 前端常量，规则表生成随 T5 接入）。 */
 const PARAM_CHIPS = ['8月', '7月'];
 
-/** §3.3：总决策 >2.5s 时 L1 追加「处理中」呼吸态（不自动展开 L2）。 */
+/** §3.3：总决策 >2.5s 时追加「处理中」呼吸态（不自动展开思考区）。 */
 const SLOW_MS = 2500;
 const COPIED_RESET_MS = 1600;
 
@@ -38,21 +40,43 @@ function badgeText(status: AiStatus, r: FinalResult | null, pathLabels: Record<s
   );
 }
 
-/** AI 消息卡（§3.2）：L1 摘要条（常驻）→ 回答区 → 数据区 → L2 决策过程（默认收起）→ L3 抽屉。 */
-export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
-  const [l2Open, setL2Open] = useState(false);
+/** rows → TSV（复制数据用：表头 + 行，制表符分隔，贴 Excel/微信即用） */
+function rowsToTsv(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return '';
+  const keys = Object.keys(rows[0]);
+  return [keys.join('\t'), ...rows.map((r) => keys.map((k) => String(r[k] ?? '')).join('\t'))].join('\n');
+}
+
+/**
+ * AI 消息卡（Agent 惯例交互，UX 2026-09-09 重构）：
+ * 思考区（流式时展开直播步骤 → 首个回答 token 自动折叠 → 「已思考 N 步 · X.Xs」一行可再展开）
+ * → 回答区 → 数据区（含复制）→ 操作行（详情）。req id 收进详情抽屉，不再常驻卡面。
+ */
+export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowUp }: Props) {
+  // 恢复/回放的消息以 done 态挂载 → 思考区收起；新消息流式挂载 → 展开直播
+  const [thinkOpen, setThinkOpen] = useState(msg.phase === 'streaming');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [slow, setSlow] = useState(false);
   /** null=未操作，true/false=最近一次复制成败（三态反馈） */
-  const [copied, setCopied] = useState<boolean | null>(null);
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [copiedData, setCopiedData] = useState<boolean | null>(null);
+  const userToggled = useRef(false);
+  const dataTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const status = deriveStatus(msg);
   const r = msg.result;
   const streaming = status === 'loading';
   const badge = badgeText(status, r, pathLabels);
 
-  // 呼吸态：本次流式超过阈值后 L1 追加「处理中」
+  // 回答 token 开始输出 → 思考区自动折叠；终局（含无 token 的追问/拒答路径）同样折叠。
+  // 用户手动展开/收起过则尊重用户选择。
+  useEffect(() => {
+    if (streaming && msg.streamedText && !userToggled.current) setThinkOpen(false);
+  }, [streaming, msg.streamedText]);
+  useEffect(() => {
+    if (!streaming) setThinkOpen((v) => (userToggled.current ? v : false));
+  }, [streaming]);
+
+  // 呼吸态：本次流式超过阈值后追加「处理中」
   useEffect(() => {
     if (!streaming) {
       setSlow(false);
@@ -63,19 +87,19 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
   }, [streaming, msg.id]);
 
   useEffect(() => () => {
-    if (copyTimer.current) clearTimeout(copyTimer.current);
+    if (dataTimer.current) clearTimeout(dataTimer.current);
   }, []);
 
-  const copyRequestId = () => {
-    if (!r) return;
-    void copyText(r.request_id).then((ok) => {
-      setCopied(ok);
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopied(false), COPIED_RESET_MS);
+  const copyData = () => {
+    if (!r || r.rows.length === 0) return;
+    void copyText(rowsToTsv(r.rows)).then((ok) => {
+      setCopiedData(ok);
+      if (dataTimer.current) clearTimeout(dataTimer.current);
+      dataTimer.current = setTimeout(() => setCopiedData(null), COPIED_RESET_MS);
     });
   };
 
-  // 生成期直播（§3.3：直播只在 L1 体现，不展开 L2）。成功路径步骤数不固定（D6 动态追加
+  // 生成期直播（§3.3：直播只在思考区头部体现）。成功路径步骤数不固定（D6 动态追加
   // 「数字校验」步），final 前总数未知——只报当前进度 n，不硬编码分母。
   const lastStep = msg.steps[msg.steps.length - 1];
   const liveText = msg.streamedText
@@ -84,10 +108,15 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
       ? `第 ${msg.steps.length} 步 · ${lastStep.title}`
       : '正在建立连接…';
 
+  const secs = r?.total_ms != null ? r.total_ms / 1000 : msg.steps.reduce((a, s) => a + (s.ms ?? 0), 0) / 1000;
+  const durText = secs >= 1 ? ` · ${secs.toFixed(1)}s` : '';
+
   const checkSteps = r ? r.steps.filter((s) => s.title.includes('校验')) : [];
   const failedSteps = r ? r.steps.filter((s) => s.status === 'fail') : [];
-  const toggleL2 = () => {
-    if (msg.steps.length > 0 && !streaming) setL2Open((v) => !v);
+  const toggleThink = () => {
+    if (msg.steps.length === 0) return;
+    userToggled.current = true;
+    setThinkOpen((v) => !v);
   };
 
   const retryRow = (text: string) => (
@@ -144,7 +173,19 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
           </div>
         );
       case 'rejected':
-        return <div className="ans">{r?.answer}</div>;
+        return (
+          <div className="ans">
+            {r?.answer}
+            {examples.length > 0 && (
+              <span className="chips-inline">
+                {examples.slice(0, 3).map((ex) => (
+                  <button key={ex} onClick={() => onFollowUp(ex)}>{ex}</button>
+                ))}
+              </span>
+            )}
+            <span className="hint">点上方任一问题即可直接查询。</span>
+          </div>
+        );
       case 'unregistered':
         return (
           <div className="ans">
@@ -180,63 +221,51 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
   return (
     <div className="m ai">
       <div className="bub">
-        {/* L1 摘要条：生成期动态进度；完成后 徽章 · 校验摘要 · 证据编号（hover 说明 + 点击复制）；点击展开/收起 L2 */}
+        {/* 思考区头部：生成期直播进度；完成后「已思考 N 步」可展开；右侧徽章 + 校验摘要 */}
         <div
-          className={'l1bar' + (msg.steps.length > 0 && !streaming ? ' clickable' : '')}
-          onClick={toggleL2}
-          role={msg.steps.length > 0 && !streaming ? 'button' : undefined}
-          aria-expanded={msg.steps.length > 0 && !streaming ? l2Open : undefined}
-          title={msg.steps.length > 0 && !streaming ? '点击展开/收起决策过程' : undefined}
+          className={'thinkbar' + (msg.steps.length > 0 ? ' clickable' : '')}
+          onClick={toggleThink}
+          role={msg.steps.length > 0 ? 'button' : undefined}
+          aria-expanded={msg.steps.length > 0 ? thinkOpen : undefined}
+          title={msg.steps.length > 0 ? '点击展开/收起决策过程' : undefined}
         >
           {streaming ? (
-            <span className={'l1-live' + (slow ? ' slow' : '')}>
+            <span className="think-live">
               <Icon name="loader" size={13} className="icon-spin" />
               {liveText}
               {slow && <em className="l1-breath">处理中</em>}
             </span>
           ) : (
             <>
-              <span className={'badge path-' + (r?.path ?? status)}>
-                <span className="dot" aria-hidden="true" />
-                {badge}
+              {msg.steps.length > 0 && (
+                <Icon name="chevron-down" size={12} className={'think-chev' + (thinkOpen ? ' open' : '')} />
+              )}
+              <span className="think-done">
+                {msg.steps.length > 0 ? `已思考 ${msg.steps.length} 步${durText}` : '未产生决策步骤'}
               </span>
-              {(status === 'success' || status === 'success_degraded') && checkSteps.length > 0 && (
-                <span className="oktext">{checkSteps.length} 项校验全过</span>
-              )}
-              {r && (
-                <button
-                  className="req"
-                  title={REQ_ID_HINT}
-                  onClick={(e) => { e.stopPropagation(); copyRequestId(); }}
-                >
-                  {r.request_id}
-                  <span className="req-ic">
-                    {copied === null ? (
-                      <><Icon name="copy" size={11} /> 复制</>
-                    ) : copied ? (
-                      <><Icon name="check" size={11} /> 已复制</>
-                    ) : (
-                      <><Icon name="x" size={11} /> 未复制</>
-                    )}
-                  </span>
-                </button>
-              )}
             </>
           )}
-          <span className="l1-right">
+          <span className="think-right">
             {!streaming && (
-              <button className="evbtn" onClick={(e) => { e.stopPropagation(); setDrawerOpen(true); }}>
-                详情
-              </button>
-            )}
-            {msg.steps.length > 0 && !streaming && (
-              <span className="l2hint">
-                <Icon name="chevron-down" size={11} className={l2Open ? 'open' : undefined} />
-                {l2Open ? '收起过程' : '展开过程'}
-              </span>
+              <>
+                <span className={'badge path-' + (r?.path ?? status)}>
+                  <span className="dot" aria-hidden="true" />
+                  {badge}
+                </span>
+                {(status === 'success' || status === 'success_degraded') && checkSteps.length > 0 && (
+                  <span className="oktext">{checkSteps.length} 项校验全过</span>
+                )}
+              </>
             )}
           </span>
         </div>
+
+        {/* 思考过程：流式时逐步直播追加；完成后默认折叠 */}
+        {thinkOpen && msg.steps.length > 0 && (
+          <div className="thinkbody">
+            <StepList steps={msg.steps} />
+          </div>
+        )}
 
         {/* 回答区 */}
         <div className="sec">
@@ -244,10 +273,16 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
           {answer()}
         </div>
 
-        {/* 数据区：有 rows 必显示（§4.2）；空结果显示空态；渲染器按规则 viz 字段分支（D7：图表与表格同源同一 rows） */}
+        {/* 数据区：有 rows 必显示（§4.2）；渲染器按规则 viz 字段分支（D7：图表与表格同源同一 rows） */}
         {(status === 'success' || status === 'success_degraded') && r && r.rows.length > 0 && (
           <div className="sec">
-            <h4>返回数据</h4>
+            <div className="sechead">
+              <h4>数据</h4>
+              <button className="opbtn" onClick={copyData} title="复制为 TSV（表头+数据，可直接贴 Excel）">
+                <Icon name="copy" size={12} />
+                {copiedData === true ? '已复制' : copiedData === false ? '复制失败' : '复制'}
+              </button>
+            </div>
             {r.viz === 'bar' || r.viz === 'kpi'
               ? <Chart viz={r.viz} rows={r.rows} />
               : <DataTable rows={r.rows} />}
@@ -255,16 +290,17 @@ export function MessageCard({ msg, pathLabels, onRetry, onFollowUp }: Props) {
         )}
         {status === 'success_empty' && (
           <div className="sec">
-            <h4>返回数据</h4>
+            <h4>数据</h4>
             <div className="tbl-empty">空结果集（0 行）</div>
           </div>
         )}
 
-        {/* L2 决策过程：默认收起，点击 L1 展开/收起；编号连续（展示序 1..N，步数动态） */}
-        {l2Open && msg.steps.length > 0 && (
-          <div className="sec">
-            <h4>决策过程（{msg.steps.length} 步）</h4>
-            <StepList steps={msg.steps} />
+        {/* 操作行：详情（审计视图：口径/校验/SQL/证据编号） */}
+        {!streaming && r && (
+          <div className="actrow">
+            <button className="actbtn" onClick={() => setDrawerOpen(true)}>
+              详情
+            </button>
           </div>
         )}
       </div>

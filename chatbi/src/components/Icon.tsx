@@ -20,6 +20,8 @@ export type IconName =
   | 'chevron-up'
   | 'chevron-down'
   | 'chevron-left'
+  | 'archive'
+  | 'rotate'
   | 'more';
 
 const GLYPHS: Record<IconName, ReactNode> = {
@@ -73,6 +75,19 @@ const GLYPHS: Record<IconName, ReactNode> = {
   'chevron-up': <path d="m18 15-6-6-6 6" />,
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   'chevron-left': <path d="m15 18-6-6 6-6" />,
+  archive: (
+    <>
+      <rect width="20" height="5" x="2" y="3" rx="1" />
+      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
+    </>
+  ),
+  rotate: (
+    <>
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </>
+  ),
   more: (
     <>
       <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />

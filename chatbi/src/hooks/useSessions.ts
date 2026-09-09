@@ -7,11 +7,18 @@ export const NEW_TITLE = '新对话';
 const LOCAL_SEED_ID = 'local-0';
 
 function toSession(raw: ServerSession): SessionItem {
-  return { id: raw.id, title: raw.title, pinned: !!raw.pinned, starred: !!raw.starred };
+  return {
+    id: raw.id,
+    title: raw.title,
+    pinned: !!raw.pinned,
+    starred: !!raw.starred,
+    archived: !!raw.archived,
+    updatedAt: raw.updated_at,
+  };
 }
 
-async function listRemote(): Promise<SessionItem[]> {
-  const resp = await fetch('/api/sessions');
+async function listRemote(archived = false): Promise<SessionItem[]> {
+  const resp = await fetch('/api/sessions' + (archived ? '?archived=1' : ''));
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const data = (await resp.json()) as unknown;
   if (!Array.isArray(data)) throw new Error('sessions 结构缺失');
@@ -28,7 +35,9 @@ async function createRemote(): Promise<SessionItem> {
   return toSession((await resp.json()) as ServerSession);
 }
 
-async function patchRemote(id: string, fields: Partial<Pick<SessionItem, 'title' | 'pinned' | 'starred'>>): Promise<void> {
+type PatchFields = Partial<Pick<SessionItem, 'title' | 'pinned' | 'starred' | 'archived'>>;
+
+async function patchRemote(id: string, fields: PatchFields): Promise<void> {
   const resp = await fetch('/api/sessions/' + id, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -57,7 +66,10 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
 }
 
 export interface SessionsApi {
+  /** 未归档会话（服务端模式已过滤；本地降级模式前端过滤） */
   sessions: SessionItem[];
+  /** 归档区会话 */
+  archivedSessions: SessionItem[];
   activeId: string | null;
   /** true = /api/sessions 可达（服务端为唯一事实源）；false = 后端未起，本地降级 */
   serverMode: boolean;
@@ -66,12 +78,19 @@ export interface SessionsApi {
   rename: (id: string, title: string) => Promise<void>;
   togglePin: (id: string) => Promise<void>;
   toggleStar: (id: string) => Promise<void>;
+  archive: (id: string) => Promise<void>;
+  restore: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
-/** 会话栏状态（§3.5）：服务端 CRUD + 刷新恢复；后端未起时降级为本地会话（壳可独立开发）。 */
+/**
+ * 会话栏状态（§3.5）：服务端 CRUD + 刷新恢复；后端未起时降级为本地会话（壳可独立开发）。
+ * 归档（UX 2026-09-09）：archived=1 移出主列表进归档区，可恢复；区别于删除（hidden，不可恢复）。
+ * 本地降级模式下 sessions 数组承载全部会话，派生时按 archived 过滤。
+ */
 export function useSessions(): SessionsApi {
-  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [rawSessions, setRawSessions] = useState<SessionItem[]>([]);
+  const [rawArchived, setRawArchived] = useState<SessionItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [serverMode, setServerMode] = useState(false);
   const localSeq = useRef(0);
@@ -84,6 +103,7 @@ export function useSessions(): SessionsApi {
       title: NEW_TITLE,
       pinned: false,
       starred: false,
+      archived: false,
     };
   }, []);
 
@@ -96,20 +116,21 @@ export function useSessions(): SessionsApi {
         const list = await listRemote();
         if (cancelled) return;
         setServerMode(true);
+        void listRemote(true).then((arch) => { if (!cancelled) setRawArchived(arch); }).catch(() => undefined);
         if (list.length > 0) {
-          setSessions(list);
+          setRawSessions(list);
           setActiveId(list[0].id);
         } else {
           const created = await createRemote();
           if (cancelled) return;
-          setSessions([created]);
+          setRawSessions([created]);
           setActiveId(created.id);
         }
       } catch {
         if (cancelled) return;
         const seed: SessionItem = { id: LOCAL_SEED_ID, title: NEW_TITLE, pinned: false, starred: false };
         setServerMode(false);
-        setSessions([seed]);
+        setRawSessions([seed]);
         setActiveId(seed.id);
       }
     })();
@@ -120,14 +141,15 @@ export function useSessions(): SessionsApi {
 
   const refresh = useCallback(async (): Promise<SessionItem[]> => {
     const list = await listRemote();
-    setSessions(list);
+    setRawSessions(list);
+    void listRemote(true).then(setRawArchived).catch(() => undefined);
     return list;
   }, []);
 
   const create = useCallback(async () => {
     if (!serverMode) {
       const s = localCreate();
-      setSessions((ss) => [...ss, s]);
+      setRawSessions((ss) => [...ss, s]);
       setActiveId(s.id);
       return;
     }
@@ -137,12 +159,12 @@ export function useSessions(): SessionsApi {
   }, [serverMode, localCreate, refresh]);
 
   const mutate = useCallback(
-    async (id: string, fields: Partial<Pick<SessionItem, 'title' | 'pinned' | 'starred'>>) => {
+    async (id: string, fields: PatchFields) => {
       if (serverMode) {
         await patchRemote(id, fields);
         await refresh();
       } else {
-        setSessions((ss) => ss.map((s) => (s.id === id ? { ...s, ...fields } : s)));
+        setRawSessions((ss) => ss.map((s) => (s.id === id ? { ...s, ...fields } : s)));
       }
     },
     [serverMode, refresh],
@@ -152,26 +174,39 @@ export function useSessions(): SessionsApi {
 
   const togglePin = useCallback(
     (id: string) => {
-      const cur = sessions.find((s) => s.id === id);
+      const cur = rawSessions.find((s) => s.id === id) ?? rawArchived.find((s) => s.id === id);
       return cur ? mutate(id, { pinned: !cur.pinned }) : Promise.resolve();
     },
-    [mutate, sessions],
+    [mutate, rawSessions, rawArchived],
   );
 
   const toggleStar = useCallback(
     (id: string) => {
-      const cur = sessions.find((s) => s.id === id);
+      const cur = rawSessions.find((s) => s.id === id) ?? rawArchived.find((s) => s.id === id);
       return cur ? mutate(id, { starred: !cur.starred }) : Promise.resolve();
     },
-    [mutate, sessions],
+    [mutate, rawSessions, rawArchived],
   );
+
+  const archive = useCallback(
+    async (id: string) => {
+      await mutate(id, { archived: true });
+      if (activeRef.current === id) {
+        const next = (serverMode ? await listRemote() : rawSessions.filter((s) => !s.archived && s.id !== id))[0];
+        setActiveId(next ? next.id : null);
+      }
+    },
+    [mutate, serverMode, rawSessions],
+  );
+
+  const restore = useCallback((id: string) => mutate(id, { archived: false }), [mutate]);
 
   const remove = useCallback(
     async (id: string) => {
       if (!serverMode) {
-        const rest = sessions.filter((s) => s.id !== id);
+        const rest = rawSessions.filter((s) => s.id !== id);
         const next = rest.length > 0 ? rest : [localCreate()];
-        setSessions(next);
+        setRawSessions(next);
         if (activeRef.current === id) setActiveId(next[0].id);
         return;
       }
@@ -183,10 +218,13 @@ export function useSessions(): SessionsApi {
         else await create(); // 空列表兜底：保留一个可用会话
       }
     },
-    [serverMode, sessions, refresh, create, localCreate],
+    [serverMode, rawSessions, refresh, create, localCreate],
   );
 
   const select = useCallback((id: string) => setActiveId(id), []);
 
-  return { sessions, activeId, serverMode, select, create, rename, togglePin, toggleStar, remove };
+  const sessions = serverMode ? rawSessions : rawSessions.filter((s) => !s.archived);
+  const archivedSessions = serverMode ? rawArchived : rawSessions.filter((s) => !!s.archived);
+
+  return { sessions, archivedSessions, activeId, serverMode, select, create, rename, togglePin, toggleStar, archive, restore, remove };
 }

@@ -87,11 +87,11 @@ header span { font-size: 11.5px; color: #a1a5ad; }
   gap: 6px;
 }
 .newchat:hover { background: var(--acc-hover); }
-.side h3 { font-size: 11px; color: var(--sub); padding: 6px 14px; letter-spacing: 0.06em; }
+.side h3 { font-size: 11px; color: var(--sub); padding: 6px 14px 4px; letter-spacing: 0.06em; }
 .hlist { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .hitem {
   position: relative;
-  padding: 8px 30px 8px 10px;
+  padding: 8px 46px 8px 10px;
   border-radius: 7px;
   cursor: pointer;
   font-size: 12px;
@@ -155,6 +155,36 @@ header span { font-size: 11.5px; color: #a1a5ad; }
 .sessionmenu button:hover { background: #f4f4f5; }
 .sessionmenu button.danger { color: var(--bad); }
 
+/* ── 归档区（侧栏底部，可展开恢复/删除）────────── */
+.arch { flex: none; border-top: 1px solid var(--line); margin-top: 4px; }
+.arch-toggle {
+  width: 100%;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--sub2);
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.arch-toggle:hover { color: var(--ink); background: #f4f4f5; }
+.arch-toggle svg.open { transform: rotate(180deg); }
+.arch-toggle .arch-chev { margin-left: auto; transition: transform 150ms ease; }
+.arch-list { padding: 0 8px 8px; max-height: 180px; overflow-y: auto; }
+.arch-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--sub);
+}
+.arch-item:hover { background: #f4f4f5; }
+.arch-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ── 对话区 ──────────────────────────────────── */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .msgs { flex: 1; overflow-y: auto; padding: 20px 26px 10px; }
@@ -187,9 +217,26 @@ header span { font-size: 11.5px; color: #a1a5ad; }
 
 .sec { margin-bottom: 10px; }
 .sec h4 { font-size: 11px; color: var(--sub); font-weight: 600; letter-spacing: 0.05em; margin-bottom: 5px; }
+.sechead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sechead h4 { margin-bottom: 0; }
+.sechead .opbtn { font-size: 11.5px; color: var(--sub); }
+.sechead .opbtn:hover { color: var(--acc); }
 
-/* ── L1 摘要条 ───────────────────────────────── */
-.l1bar {
+/* 底部操作行（详情入口） */
+.actrow { display: flex; gap: 8px; margin-top: 2px; opacity: 0.75; }
+.actrow:hover { opacity: 1; }
+.actbtn {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--sub2);
+  padding: 2px 0;
+}
+.actbtn:hover { color: var(--acc); }
+
+/* ── 思考区（Agent 惯例：流式直播 → 自动折叠为一行摘要）── */
+.thinkbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -202,10 +249,16 @@ header span { font-size: 11.5px; color: #a1a5ad; }
   cursor: default;
   min-height: 32px;
 }
-.l1bar.clickable { cursor: pointer; }
-.l1bar.clickable:hover { border-color: var(--line-strong); background: #f4f4f5; }
-.l1-live { color: var(--acc); font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
-.l1-live.slow, .l1-breath { animation: pulse 1.6s ease-in-out infinite; }
+.thinkbar.clickable { cursor: pointer; }
+.thinkbar.clickable:hover { border-color: var(--line-strong); background: #f4f4f5; }
+.think-live { color: var(--acc); font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.think-live, .l1-breath { animation: pulse 1.6s ease-in-out infinite; }
+.think-done { color: var(--sub); font-size: 12.5px; font-weight: 600; }
+.thinkbar.clickable:hover .think-done { color: var(--ink); }
+.think-chev { color: var(--sub2); transition: transform 150ms ease; }
+.think-chev.open { transform: rotate(180deg); }
+.think-right { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.thinkbody { margin: -4px 0 12px; }
 .l1-breath {
   font-style: normal;
   font-size: 10.5px;
@@ -216,10 +269,6 @@ header span { font-size: 11.5px; color: #a1a5ad; }
   padding: 0 7px;
 }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.l1-right { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
-.l2hint { font-size: 10.5px; color: var(--sub2); display: inline-flex; align-items: center; gap: 3px; }
-.l2hint svg { transition: transform 150ms ease; }
-.l2hint svg.open { transform: rotate(180deg); }
 .oktext { color: var(--ok); font-size: 11.5px; font-weight: 600; }
 .badtext { color: var(--bad); font-size: 12px; font-weight: 600; }
 .warnbadge {
@@ -252,22 +301,6 @@ header span { font-size: 11.5px; color: #a1a5ad; }
 .path-cold_pushdown .dot, .path-cold_adhoc .dot { background: #94a3b8; }
 .path-validation_failed { border-color: #ecd4d4; color: var(--bad); background: #fdf7f7; }
 .path-validation_failed .dot { background: var(--bad); }
-.req {
-  border: 1px dashed var(--line-strong);
-  background: var(--surface);
-  border-radius: 7px;
-  padding: 2px 8px;
-  font-family: Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--sub);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.req:hover { border-color: var(--acc); color: var(--acc); }
-.req-ic { color: var(--sub2); display: inline-flex; align-items: center; gap: 3px; }
-.req:hover .req-ic { color: var(--acc); }
 .evbtn {
   border: 1px solid var(--line);
   background: #fafafa;
@@ -316,9 +349,10 @@ header span { font-size: 11.5px; color: #a1a5ad; }
 }
 @keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
-/* L2 步骤列表：连续编号；fail/blocked 视觉区分 */
+/* 思考步骤列表：连续编号；fail/blocked 视觉区分；流式追加淡入 */
 .steps { border-left: 2px solid var(--line); padding-left: 14px; margin: 0; list-style: none; }
-.stp { font-size: 12px; color: var(--sub); margin-bottom: 10px; }
+.stp { font-size: 12px; color: var(--sub); margin-bottom: 10px; animation: fadein 0.25s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 .stp-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .stp-no {
   width: 18px;
@@ -407,17 +441,6 @@ td.num { text-align: right; font-family: Menlo, monospace; font-variant-numeric:
   border-bottom: 1px solid var(--line);
   font-size: 13px;
 }
-.tabs { display: flex; gap: 2px; background: #f4f4f5; padding: 6px 10px 0; }
-.tabs button {
-  border: 0;
-  background: none;
-  padding: 7px 14px;
-  font-size: 12.5px;
-  color: var(--sub);
-  cursor: pointer;
-  border-radius: 7px 7px 0 0;
-}
-.tabs button.on { background: var(--surface); color: var(--ink); font-weight: 600; }
 .drawer-body { padding: 12px 16px; overflow-y: auto; flex: 1; }
 .meta {
   display: grid;
@@ -429,9 +452,23 @@ td.num { text-align: right; font-family: Menlo, monospace; font-variant-numeric:
   margin-bottom: 12px;
   font-size: 12px;
 }
-.meta div { display: flex; gap: 10px; }
+.meta div { display: flex; gap: 10px; align-items: baseline; }
 .meta b { color: var(--sub); font-weight: 600; flex: none; width: 62px; }
-.meta span { font-family: Menlo, monospace; word-break: break-all; }
+.meta span { font-family: Menlo, monospace; word-break: break-all; display: inline-flex; align-items: center; gap: 8px; }
+.meta-copy {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 1px 7px;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: var(--sub);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.meta-copy:hover { border-color: var(--acc); color: var(--acc); }
 .basis { font-size: 12.5px; line-height: 1.9; }
 .basis b { color: var(--ok); }
 .basis-path { color: var(--sub2); font-size: 11.5px; }
@@ -439,6 +476,9 @@ td.num { text-align: right; font-family: Menlo, monospace; font-variant-numeric:
 .basis-checks li { padding: 1px 0; display: flex; align-items: baseline; gap: 5px; }
 .basis-checks .vok { color: var(--ok); }
 .basis-checks .vbad { color: var(--bad); }
+.basis-sql { font-size: 12.5px; margin-top: 12px; }
+.basis-sql b { color: var(--sub); font-weight: 600; display: block; margin-bottom: 6px; }
+.basis-sql pre.sql { margin: 0; }
 
 /* ── 输入区 ──────────────────────────────────── */
 .inputrow { flex: none; padding: 12px 26px 18px; display: flex; gap: 10px; }

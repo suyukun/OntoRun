@@ -71,7 +71,7 @@ function routeStep(rid: string, ok: boolean): StepInfo {
 
 const CALIBER_TOTAL = 'SUM(去重 usr_id)；含子公司同步注册；口径裁决号 2026-09-08-J1';
 
-function buildSpec(sc: DataScenario): Spec {
+function buildSpec(sc: DataScenario, rejectKw?: string): Spec {
   switch (sc) {
     case 'hot_success': {
       const answer = '2026-08 月注册 2,893 人。';
@@ -171,7 +171,8 @@ function buildSpec(sc: DataScenario): Spec {
       };
     }
     case 'rejected': {
-      const answer = '该问题涉及【活跃/转化域】，当前语义范围仅注册域（Jack 2026-09-08 收窄指令）。不生成 SQL、不猜测。扩展范围需先注册对应对象与口径。';
+      // 与后端 build_reject_answer 同思路：命中词 + 已就绪口径引导（无数字，不触 D6 门）
+      const answer = '「' + (rejectKw ?? '这个问题') + '」属于活跃/转化域——这块口径还没注册，我不猜数。现在能答：注册总量、分渠道注册、性别分布，换个问法试试？';
       return {
         path: 'rejected', rule: 'OUT_OF_SCOPE', answer, sql: null, rows: [], tables: [],
         steps: [
@@ -211,10 +212,12 @@ function buildSpec(sc: DataScenario): Spec {
 }
 
 function buildResult(sc: DataScenario, question: string): FinalResult {
-  const s = buildSpec(sc);
+  const rejectKw = question.match(/活跃|活动|日活|抽奖|转化/)?.[0];
+  const s = buildSpec(sc, rejectKw);
   return {
     request_id: 'REQ-2026-09-09-MOCK01',
     started_at: '2026-09-09T13:45:00',
+    total_ms: 1320,
     question,
     rule: s.rule,
     path: s.path,

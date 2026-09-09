@@ -3,11 +3,16 @@
 Engineering upgrades: viz field per rule (product doc D7), PII sensitive-field
 list, and build_profile() for the appendix-C profile schema. Adding a business
 domain = register rules here + a profile; the shell stays untouched (§7 #11).
+Out-of-scope refusals are generated per request (build_reject_answer): variant
+rotation + matched keyword + what IS answerable — never the same canned line.
 """
+
+import hashlib
 
 RULES = {
     "REG_TOTAL": {
         "desc": "注册用户数（自然月去重人数）",
+        "label": "注册总量",
         "keywords": ["注册总数", "注册多少", "注册用户数", "注册量", "注册"],
         "path": "hot",
         "layer": "DWS",
@@ -20,6 +25,7 @@ RULES = {
     },
     "REG_BY_CHANNEL": {
         "desc": "分渠道注册用户数（明细下推聚合）",
+        "label": "分渠道注册",
         "keywords": ["按渠道", "渠道", "分渠道", "各渠道", "来源"],
         "path": "cold_pushdown",
         "layer": "DWD+DIM",
@@ -34,6 +40,7 @@ RULES = {
     },
     "GENDER_RATIO": {
         "desc": "注册用户性别分布（维表属性即席统计）",
+        "label": "性别分布",
         "keywords": ["男女", "性别", "男性", "女性", "比例"],
         "path": "cold_adhoc",
         "layer": "DIM",
@@ -51,11 +58,30 @@ RULES = {
         "desc": "范围外问题（活跃/转化域未注册）",
         "keywords": ["活动", "任务", "抽奖", "奖品", "导流", "日活", "活跃"],
         "path": "rejected",
-        "reject": ("该问题涉及【活跃/转化域】，当前语义范围仅注册域（Jack 2026-09-08 收窄指令）。"
-                  "不生成 SQL、不猜测。扩展范围需先注册对应对象与口径。"),
+        # 话术不再写死：engine 调 build_reject_answer 按命中词+变体池生成（无数字，不触 D6 门）
+        "reject": True,
         "tables": [],
     },
 }
+
+# 拒答句式池：{kw}=命中词，{ready}=当前已注册口径清单；同一问句重试稳定（seed=request_id）
+_REJECT_VARIANTS = (
+    "「{kw}」属于活跃/转化域——这块口径还没注册，我不猜数。现在能答：{ready}，换个问法试试？",
+    "「{kw}」落在活跃/转化域，对应对象与口径尚未注册。宁可不答，不出假数。已就绪的口径：{ready}。",
+    "「{kw}」超出了当前语义范围（活跃/转化域未注册），不生成 SQL、不猜测。已就绪：{ready}；扩展需先注册对象与口径。",
+)
+
+
+def _ready_labels() -> str:
+    """当前可问清单，从规则注册表单一来源生成（新注册规则自动出现在拒答引导里）。"""
+    return "、".join(r["label"] for r in RULES.values() if "label" in r)
+
+
+def build_reject_answer(keyword: str | None, seed: str) -> str:
+    """按命中词 + 句式变体生成拒答（seed 决定变体序，同请求重试稳定）。"""
+    kw = keyword or "这个问题"
+    idx = int(hashlib.sha256(seed.encode("utf-8")).hexdigest(), 16) % len(_REJECT_VARIANTS)
+    return _REJECT_VARIANTS[idx].format(kw=kw, ready=_ready_labels())
 
 # Keyword scan order: reject-first so scope questions never leak into data rules.
 RULE_ORDER = ["OUT_OF_SCOPE", "GENDER_RATIO", "REG_BY_CHANNEL", "REG_TOTAL"]
@@ -77,7 +103,7 @@ def build_profile() -> dict:
     """Appendix-C profile schema. viz_map/rule_hints generated from RULES (single source)."""
     return {
         "name": "fortune-registration",
-        "display": "财富广场 · 注册域",
+        "display": "财富ThoughtSpot",
         "endpoint": "/api/chat",
         "theme": "fortune",
         "panels": ["decision_pipeline", "path_badge", "conclusion_basis", "history"],

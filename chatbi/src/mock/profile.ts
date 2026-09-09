@@ -6,7 +6,7 @@ import type { Profile } from '../types';
  */
 export const MOCK_PROFILE: Profile = {
   name: 'fortune-registration',
-  display: '财富广场 · 注册域',
+  display: '财富ThoughtSpot',
   endpoint: '/api/chat',
   panels: ['decision_pipeline', 'path_badge', 'conclusion_basis', 'history'],
   examples: [

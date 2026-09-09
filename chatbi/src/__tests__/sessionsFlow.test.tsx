@@ -4,7 +4,7 @@ import App from '../App';
 
 afterEach(cleanup); // vitest 未开 globals：显式清理，避免跨用例 DOM 叠加
 
-/** T4 核心不变量：刷新恢复（快照渲染）/ client_request_id 幂等重试 / 历史回放与 404。 */
+/** T4 核心不变量：刷新恢复（快照渲染）/ client_request_id 幂等重试 / 归档与恢复。 */
 
 const PROFILE = {
   name: 'fortune-registration',
@@ -116,36 +116,48 @@ describe('T4 会话恢复与持久化联调', () => {
     expect(bodies[0]['client_request_id']).toBe(bodies[1]['client_request_id']);
   });
 
-  it('历史回放：列表点击 → 快照渲染为消息卡（标注数据截至）；已删条目 404 友好提示', async () => {
-    const okTrace = { ...SNAPSHOT, request_id: 'REQ-OK', started_at: '2026-09-10T07:30:00', answer: '回放回答：2,893 人', question: '可回放的问题' };
+  it('归档：菜单归档 → 主列表消失、归档区出现；恢复 → 回到主列表（PATCH archived）', async () => {
+    let sess = [sessionRaw('s1', '会话A'), sessionRaw('s2', '会话B')];
+    let arch: ReturnType<typeof sessionRaw>[] = [];
+    const patches: Record<string, unknown>[] = [];
     const handlers: Handler[] = [
       (u) => (u === '/api/profile' ? jsonResponse(PROFILE) : undefined),
-      (u) => (u === '/api/sessions' ? jsonResponse([]) : undefined),
-      (u, i) => (u === '/api/sessions' && i?.method === 'POST' ? jsonResponse(sessionRaw('s-new', '新对话')) : undefined),
-      (u) => (u === '/api/sessions/s-new' ? jsonResponse({ conversation: sessionRaw('s-new', '新对话'), messages: [] }) : undefined),
-      (u) =>
-        u === '/api/history'
-          ? jsonResponse([
-              { request_id: 'REQ-GONE', started_at: '2026-09-10T07:00:00', question: '已删条目的问题', path: 'hot', state: 'success', answer: 'a' },
-              { request_id: 'REQ-OK', started_at: '2026-09-10T07:30:00', question: '可回放的问题', path: 'hot', state: 'success', answer: '回放回答' },
-            ])
-          : undefined,
-      (u) => (u === '/api/trace/REQ-GONE' ? jsonResponse({ detail: 'trace not found' }, 404) : undefined),
-      (u) => (u === '/api/trace/REQ-OK' ? jsonResponse(okTrace) : undefined),
+      (u) => (u === '/api/sessions' ? jsonResponse(sess) : undefined),
+      (u) => (u === '/api/sessions?archived=1' ? jsonResponse(arch) : undefined),
+      (u, i) => {
+        // PATCH 必须排在 GET /api/sessions/s1 之前（handler 顺序匹配，GET 分支不区分 method）
+        if (u === '/api/sessions/s1' && i?.method === 'PATCH') {
+          const body = JSON.parse(String(i.body)) as Record<string, unknown>;
+          patches.push(body);
+          if (body['archived'] === true) {
+            sess = sess.filter((s) => s.id !== 's1');
+            arch = [sessionRaw('s1', '会话A')];
+          } else if (body['archived'] === false) {
+            arch = [];
+            sess = [sessionRaw('s1', '会话A'), sessionRaw('s2', '会话B')];
+          }
+          return jsonResponse(sessionRaw('s1', '会话A'));
+        }
+        return undefined;
+      },
+      (u) => (u === '/api/sessions/s1' ? jsonResponse({ conversation: sessionRaw('s1', '会话A'), messages: [] }) : undefined),
     ];
     stubFetch(handlers);
 
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: '查询历史' }));
+    expect(await screen.findByText('会话A')).toBeTruthy();
 
-    // 已删条目 → 404 友好提示
-    fireEvent.click(await screen.findByText('已删条目的问题'));
-    expect(await screen.findByText('该条记录已删除或不存在，无法回放。')).toBeTruthy();
+    // ⋯ 菜单 → 归档
+    fireEvent.click(screen.getAllByRole('button', { name: '更多操作' })[0]);
+    fireEvent.click(screen.getByText('归档'));
+    expect(await screen.findByText(/已归档 · 1/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('会话A')).toBeNull()); // 主列表消失
 
-    // 返回列表 → 正常条目 → 快照回放为消息卡 + 数据截至标注
-    fireEvent.click(screen.getByRole('button', { name: '返回历史列表' }));
-    fireEvent.click(screen.getByText('可回放的问题'));
-    expect(await screen.findByText(/历史回放 · 数据截至 2026-09-10 07:30:00/)).toBeTruthy();
-    expect(await screen.findByText('回放回答：2,893 人')).toBeTruthy();
+    // 展开归档区 → 恢复
+    fireEvent.click(screen.getByText(/已归档 · 1/));
+    fireEvent.click(screen.getByTitle('恢复到会话列表'));
+    await screen.findByText('会话A');
+    expect(patches[0]).toEqual({ archived: true });
+    expect(patches[1]).toEqual({ archived: false });
   });
 });

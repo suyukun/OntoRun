@@ -59,14 +59,13 @@ describe('mock 模式核心流程（验收主链路）', () => {
     expect(screen.getByText('1,240')).toBeTruthy(); // TOP1 APP 数值常显
     expect(screen.queryByRole('table')).toBeNull(); // viz=bar 走图表渲染器，非表格
 
-    // L2：点击 L1 展开步骤列表
-    fireEvent.click(screen.getByText('明细即席计算'));
+    // 思考区：点击「已思考」展开步骤列表
+    fireEvent.click(screen.getByText(/已思考 \d+ 步/));
     expect(screen.getByText(/意图路由/)).toBeTruthy();
 
-    // L3：详情抽屉 + Tab 切换（断言收敛在抽屉内，避免与 L2 步骤详情重复匹配）
+    // 详情抽屉（审计视图，无 tab）：命中规则等一次性可查
     fireEvent.click(screen.getByRole('button', { name: '详情' }));
     const drawer = screen.getByRole('dialog');
-    fireEvent.click(within(drawer).getByRole('button', { name: '结论依据' }));
     expect(within(drawer).getByText(/REG_BY_CHANNEL/)).toBeTruthy();
   });
 

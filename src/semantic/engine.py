@@ -23,10 +23,11 @@ from datetime import date, datetime
 
 from . import config, errors, sanitize, storage, templates
 from .llm_route import llm_route
-from .rules import RULES, SENSITIVE_FIELDS, keyword_route
+from .rules import RULES, SENSITIVE_FIELDS, build_reject_answer, keyword_route
 from .templates import NumberValidationError, validate_numbers
 
 MONTH_RE = re.compile(r"(?:(20\d{2})\s*[-年/])?\s*(\d{1,2})\s*月")
+KW_HIT_RE = re.compile(r"命中「(.+?)」")
 TOKEN_CHUNK = 3
 TOKEN_SLEEP_S = 0.01
 SUCCESS_PATHS = {"hot", "cold_pushdown", "cold_adhoc"}
@@ -83,6 +84,7 @@ class Ctx:
     result: dict
     steps: list = field(default_factory=list)
     _n: int = 0
+    t0: float = 0.0  # 查询起点（iter_query 注入），final 帧计算 total_ms
 
     def __post_init__(self):
         self.result["steps"] = self.steps  # live reference: final payload carries steps
@@ -99,6 +101,8 @@ class Ctx:
             self.result["path"], self.result.get("block_reason"),
             empty=self.result.get("empty", False), degraded=self.result.get("degraded", False),
         )
+        if self.t0:
+            self.result["total_ms"] = round((time.time() - self.t0) * 1000)
         storage.persist_trace(self.result)  # discipline: every path persists + terminates
         return {"kind": "final", "result": self.result}
 
@@ -216,6 +220,8 @@ def _finish_error(ctx: Ctx, code: str, message: str) -> dict:
     ctx.result["error_code"] = code
     ctx.result["answer"] = message
     ctx.result["state"] = resolve_state("error")
+    if ctx.t0:
+        ctx.result["total_ms"] = round((time.time() - ctx.t0) * 1000)
     storage.persist_trace(ctx.result)
     return {"kind": "error", "code": code, "message": message}
 
@@ -245,10 +251,12 @@ def _run_gates(ctx: Ctx):
     ctx.result["path"] = rule["path"]
     ctx.result["tables"] = rule.get("tables", [])
 
-    if "reject" in rule:  # out-of registered scope → refuse, never guess
+    if rule.get("reject"):  # out-of registered scope → refuse, never guess
+        kw = (KW_HIT_RE.search(why) or [None, None])[1]  # 关键词回退路由才有命中词
+        answer = build_reject_answer(kw, ctx.request_id)
         ctx.result["error_code"] = errors.E_SCOPE
-        ctx.result["answer"] = rule["reject"]
-        yield ctx.emit("口径拦截", "blocked", rule["reject"])
+        ctx.result["answer"] = answer
+        yield ctx.emit("口径拦截", "blocked", answer)
         yield ctx.emit("回答", "blocked", ctx.result["answer"])
         yield ctx.final_frame()
         return None, None
@@ -341,7 +349,7 @@ def iter_query(question: str, request_id: str | None = None):
     Frames: {"kind": "step", "step": {...}} | {"kind": "token", "text"} |
     {"kind": "final", "result": {...}} | {"kind": "error", "code", "message"}."""
     rid = request_id or new_request_id()
-    ctx = Ctx(question=question, request_id=rid, result={
+    ctx = Ctx(question=question, request_id=rid, t0=time.time(), result={
         "request_id": rid,
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "question": question,
