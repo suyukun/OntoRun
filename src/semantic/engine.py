@@ -8,6 +8,8 @@ Engineering upgrades:
 - data boundary from semantic-layer metadata (config.data_range), not hardcoded;
 - SQL executed with bound parameters (templates stay :named for display);
 - PII guard on rows, sanitized LLM raw output, E_SQL error frames;
+- D6 hard gate: template answers validated against the traceable number set
+  (untraceable number -> validation_failed, product doc §5-D6/§5-D9);
 - cancel support: client disconnect persists the trace marked canceled.
 """
 
@@ -19,9 +21,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from . import config, errors, sanitize, storage
+from . import config, errors, sanitize, storage, templates
 from .llm_route import llm_route
 from .rules import RULES, SENSITIVE_FIELDS, keyword_route
+from .templates import NumberValidationError, validate_numbers
 
 MONTH_RE = re.compile(r"(?:(20\d{2})\s*[-年/])?\s*(\d{1,2})\s*月")
 TOKEN_CHUNK = 3
@@ -102,32 +105,10 @@ class Ctx:
 
 # ------------------------------------------------------------------- templates
 
-def _answer_reg_total(rows, params):
-    return f"{params['start'][:7]} 月注册 {rows[0]['total']:,} 人。"
-
-
-def _answer_reg_by_channel(rows, params):
-    return (f"共 {sum(r['cnt'] for r in rows):,} 人，TOP3："
-            + "、".join(f"{r['channel']} {r['cnt']:,}" for r in rows[:3]) + "。")
-
-
-def _answer_gender_ratio(rows, params):
-    total = sum(r["cnt"] for r in rows)
-    body = "、".join(f"{r['gender']} {r['cnt']:,}（{100 * r['cnt'] / total:.1f}%）" for r in rows)
-    return body + f"。合计 {total:,} 人。"
-
-
-ANSWER_TEMPLATES = {
-    "REG_TOTAL": _answer_reg_total,
-    "REG_BY_CHANNEL": _answer_reg_by_channel,
-    "GENDER_RATIO": _answer_gender_ratio,
-}
-
-
 def answer_assemble(rule_id: str, rows: list, params: dict) -> str:
-    """Semantic-layer template assembly — the LLM never produces numbers (D6)."""
-    template = ANSWER_TEMPLATES.get(rule_id)
-    return template(rows, params) if template else ""
+    """Semantic-layer template assembly — the LLM never produces numbers (D6).
+    Sentence patterns + slot builders live in templates.py (per-rule registry)."""
+    return templates.render(rule_id, rows, params)
 
 
 def traceable_numbers(rule_id: str, rows: list, params: dict | None) -> set:
@@ -330,6 +311,19 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
     else:
         notice = f"（{rule['notice']}）" if rule.get("notice") else ""
         ctx.result["answer"] = answer_assemble(rule_id, rows, params) + notice
+    try:  # D6 hard gate: every printed number must be traceable (§5-D9)
+        found = validate_numbers(ctx.result["answer"],
+                                 traceable_numbers(rule_id, rows, params))
+    except NumberValidationError as exc:
+        ctx.result["path"] = "validation_failed"
+        ctx.result["error_code"] = errors.E_VALIDATION
+        ctx.result["answer"] = errors.user_message(errors.E_VALIDATION)
+        yield ctx.emit("数字校验", "fail", str(exc))  # 数值对照只进 trace，不进用户文案
+        yield ctx.emit("回答", "blocked", ctx.result["answer"])
+        yield ctx.final_frame()
+        return
+    yield ctx.emit("数字校验", "ok",
+                   f"回答 {len(found)} 个数字全部 ∈ 语义层可溯源集合（D6）")
     yield from _stream_answer(ctx)
     yield ctx.final_frame()
 
