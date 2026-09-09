@@ -41,15 +41,20 @@ describe('思考区（§3.2 #1，Agent 惯例交互）', () => {
     expect(await within(drawer).findByText(/已复制/)).toBeTruthy();
   });
 
-  it('生成期：动态「第 n 步 · 当前步骤名」，不硬编码步数（D6 动态追加校验步，总数未知）', async () => {
-    render(<App />);
+  it('生成期：动态「第 n 步 · 当前步骤名」+ 等待期彩蛋行（星芒脉冲小字），不硬编码步数', async () => {
+    const { container } = render(<App />);
     await ask('8月按渠道的注册用户数？');
     const live = await screen.findByText(/第 \d+ 步 · /, {}, { timeout: 3000 });
     expect(live.textContent).toMatch(/第 \d+ 步 · .+/);
     expect(live.querySelector('svg')).toBeTruthy(); // 进度图标为内联 SVG（去 emoji 本质防御）
     expect(live.textContent).not.toMatch(/\p{Extended_Pictographic}/u); // 不回潮 emoji
     expect(live.textContent).not.toMatch(/\/ \d+ 步/); // 分母在 final 前不可知，不得伪造
+    const egg = container.querySelector('.eggrow'); // 彩蛋行（等待期渲染，回答开始即消失）
+    expect(egg).toBeTruthy();
+    expect(egg?.querySelector('.egg-spark')).toBeTruthy();
+    expect(egg?.textContent?.length ?? 0).toBeGreaterThan(3);
     await screen.findByText('明细即席计算', {}, { timeout: 15000 });
+    expect(container.querySelector('.eggrow')).toBeNull(); // 完成后不留痕
   });
 });
 

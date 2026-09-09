@@ -11,6 +11,7 @@ import {
   RESULT_BADGE_LABELS, copyText,
 } from './labels';
 import { StepList } from './StepList';
+import { WAIT_EGGS } from './eggs';
 
 interface Props {
   msg: ChatMessage;
@@ -59,6 +60,8 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
   const [slow, setSlow] = useState(false);
   /** null=未操作，true/false=最近一次复制成败（三态反馈） */
   const [copiedData, setCopiedData] = useState<boolean | null>(null);
+  /** 等待期彩蛋序号（起点按消息 id 错开，避免多卡同步换句） */
+  const [eggIdx, setEggIdx] = useState((msg.id * 7) % WAIT_EGGS.length);
   const userToggled = useRef(false);
   const dataTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -75,6 +78,13 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
   useEffect(() => {
     if (!streaming) setThinkOpen((v) => (userToggled.current ? v : false));
   }, [streaming]);
+
+  // 等待期彩蛋轮换：仅流式且回答未开始时；1.8s 换句，回答一开始即停（不留痕）
+  useEffect(() => {
+    if (!streaming || msg.streamedText) return;
+    const t = setInterval(() => setEggIdx((i) => i + 1), 1800);
+    return () => clearInterval(t);
+  }, [streaming, msg.streamedText]);
 
   // 呼吸态：本次流式超过阈值后追加「处理中」
   useEffect(() => {
@@ -259,6 +269,14 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
             )}
           </span>
         </div>
+
+        {/* 等待期彩蛋（Jack 2026-09-09）：星芒脉冲 + 轮换小字，回答开始即消失 */}
+        {streaming && !msg.streamedText && (
+          <div className="eggrow">
+            <Icon name="spark" size={11} className="egg-spark" filled />
+            <span>{WAIT_EGGS[eggIdx % WAIT_EGGS.length]}</span>
+          </div>
+        )}
 
         {/* 思考过程：流式时逐步直播追加；完成后默认折叠 */}
         {thinkOpen && msg.steps.length > 0 && (

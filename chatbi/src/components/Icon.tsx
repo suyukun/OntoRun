@@ -22,6 +22,7 @@ export type IconName =
   | 'chevron-left'
   | 'archive'
   | 'rotate'
+  | 'spark'
   | 'more';
 
 const GLYPHS: Record<IconName, ReactNode> = {
@@ -88,6 +89,8 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M21 3v6h-6" />
     </>
   ),
+  /* 四角星芒（Claude Code 式等待标志），配 .egg-spark 呼吸动画使用 */
+  spark: <path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z" />,
   more: (
     <>
       <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
