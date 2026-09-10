@@ -28,12 +28,10 @@ from src.fortune_semantic.compiler import QueryRequest, compile_query
 from src.fortune_semantic.registry import REGISTRY, SemanticError
 
 from . import config, errors, sanitize, storage, templates
-from .llm_route import llm_route
+from .llm_route import guided_reject_answer, keyword_route, llm_route
 from .rules import (
     SENSITIVE_FIELDS,
     RoutePlan,
-    build_reject_answer,
-    keyword_route,
     viz_for,
 )
 from .templates import NumberValidationError, validate_numbers
@@ -160,7 +158,7 @@ def _route(ctx: Ctx):
     llm = llm_route(ctx.question)
     if "error" not in llm:
         return llm["plan"], llm, None, f"DeepSeek 路由 {llm['ms']}ms · 原始输出: {llm['raw']}"
-    plan = keyword_route(ctx.question)
+    plan = keyword_route(ctx.question)  # M5.5 增强版：别名归一 + value_hints 维度补带
     hit = plan.hit or plan.reject_domain or "无命中"
     why = f"LLM 路由不可用（{llm['error']}），退回关键词匹配 → {hit}"
     return plan, None, llm.get("error_code", errors.E_ROUTE_FALLBACK), why
@@ -210,7 +208,7 @@ def _reject_card(domain: str | None, hit: str | None, code: str = "UNREGISTERED_
 
 def _finish_refused(ctx: Ctx, card: dict, keyword: str | None):
     """OUT_OF_SCOPE flow: structured refusal card + variant copy — never numbers."""
-    answer = build_reject_answer(keyword, ctx.request_id)
+    answer = guided_reject_answer(keyword)  # M6.1 拒答文案升级为引导式（注册表现生成）
     ctx.result["path"] = "rejected"
     ctx.result["error_code"] = errors.E_SCOPE
     ctx.result["reject_card"] = card
@@ -256,7 +254,7 @@ def _run_gates(ctx: Ctx):
         ctx.result["error_code"] = errors.E_SCOPE
         ctx.result["reject_card"] = _reject_card(
             None, None, message="问题未映射到任何已注册原语组合")
-        ctx.result["answer"] = "该问题尚未注册口径，可提交为新的派生规则候选。"
+        ctx.result["answer"] = guided_reject_answer(None)  # M6.1：无命中同样给引导式拒答
         yield ctx.emit("回答", "blocked", ctx.result["answer"])
         yield ctx.final_frame()
         return None, None, None
@@ -275,7 +273,12 @@ def _run_gates(ctx: Ctx):
     if blocked:
         yield from _finish_blocked_param(ctx, blocked)
         return None, None, None
-    src_note = "DeepSeek 抽取" if (llm and llm.get("time_from")) else "关键词回退抽取"
+    if llm and llm.get("time_from"):
+        src_note = "DeepSeek 抽取"
+        if llm.get("time_defaulted"):  # M6.2：时间缺失默认最近完整月，假设显式化
+            src_note += f"（默认最近完整月，按 {params['time_from'][:7]} 统计）"
+    else:
+        src_note = "关键词回退抽取"
     yield ctx.emit("参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
     ctx.result["path"] = "semantic_pushdown"
     return plan, llm, params
