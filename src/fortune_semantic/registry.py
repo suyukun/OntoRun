@@ -149,6 +149,7 @@ RULES = {
         id="R1",
         description="直注段渠道排除：注册渠道为麦当劳/中信书院的用户不进直注段（光注册不算 KPI）",
         source_script=f"{WAREHOUSE_SCRIPT_DIR}/CDM层/用户域CU/脚本dwd_cu_rgst_fin_di.sql",
+        status="confirmed",
     ),
     "R2": CaliberRule(
         id="R2",
