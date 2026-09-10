@@ -14,7 +14,10 @@ start() {
   echo "== 2/3 后台管理台 API :8010 =="
   nohup "$VENV/python" -m uvicorn src.fortune_admin.main:app --port 8010 >"$LOGDIR/admin.log" 2>&1 &
   echo "  log=$LOGDIR/admin.log"
-  echo "== 3/3 后台管理台前端 :5174 =="
+  echo "== 3/4 前台 ChatBI 壳 :5173 =="
+  (cd chatbi && nohup npm run dev -- --port 5173 >"$LOGDIR/chatbi.log" 2>&1 &)
+  echo "  log=$LOGDIR/chatbi.log"
+  echo "== 4/4 后台管理台前端 :5174 =="
   (cd ontology-admin && nohup npm run dev -- --port 5174 >"$LOGDIR/admin-fe.log" 2>&1 &)
   echo "  log=$LOGDIR/admin-fe.log"
   sleep 5
