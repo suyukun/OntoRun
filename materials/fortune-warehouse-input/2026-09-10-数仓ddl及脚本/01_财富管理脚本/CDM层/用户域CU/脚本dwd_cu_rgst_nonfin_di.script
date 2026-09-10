@@ -1,0 +1,11 @@
+{
+	"configuration":{},
+	"connectionName":"dws",
+	"currentDatabase":"cfgl",
+	"description":"",
+	"directory":"/01_财富管理/CDM层/用户域CU",
+	"name":"脚本dwd_cu_rgst_nonfin_di",
+	"owner":"CI-zx-18519129105",
+	"templateVersion":"1.0",
+	"type":"DWSSQL"
+}

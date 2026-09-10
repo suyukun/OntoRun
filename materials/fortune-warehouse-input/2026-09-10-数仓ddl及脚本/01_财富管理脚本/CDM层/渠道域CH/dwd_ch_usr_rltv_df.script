@@ -1,0 +1,11 @@
+{
+	"configuration":{},
+	"connectionName":"dws",
+	"currentDatabase":"cfgl",
+	"description":"",
+	"directory":"/01_财富管理/CDM层/渠道域CH",
+	"name":"dwd_ch_usr_rltv_df",
+	"owner":"CI-zx-18610914036",
+	"templateVersion":"1.0",
+	"type":"DWSSQL"
+}

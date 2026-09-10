@@ -1,0 +1,12 @@
+{
+	"configuration":{},
+	"connectionName":"dws",
+	"currentDatabase":"cfgl",
+	"description":"",
+	"directory":"/01_财富管理/CDM层/渠道域CH",
+	"name":"脚本dim_ch_chl_df",
+	"owner":"CI-zx-18519129105",
+	"templateVersion":"1.0",
+	"type":"DWSSQL",
+	"versionDescription":"报送渠道归属及一级二级渠道归属修改"
+}

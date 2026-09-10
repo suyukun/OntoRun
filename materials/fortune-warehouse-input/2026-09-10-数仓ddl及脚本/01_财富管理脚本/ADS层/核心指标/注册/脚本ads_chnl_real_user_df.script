@@ -1,0 +1,11 @@
+{
+	"configuration":{},
+	"connectionName":"dws",
+	"currentDatabase":"cfgl",
+	"description":"",
+	"directory":"/01_财富管理/ADS层/核心指标/注册",
+	"name":"脚本ads_chnl_real_user_df",
+	"owner":"CI-zx-18519129105",
+	"templateVersion":"1.0",
+	"type":"DWSSQL"
+}
