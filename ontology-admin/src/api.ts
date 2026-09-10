@@ -82,6 +82,43 @@ export interface Lineage {
   stats: { nodes: number; edges: number; unconfirmed_edges: number };
 }
 
+export type ObjectKind = "measure" | "dimension" | "table";
+
+export interface ObjectDetail {
+  kind: ObjectKind;
+  id: string;
+  description: string;
+  layer: string | null;
+  unconfirmed: boolean;
+  definition: {
+    expression?: string;
+    source_table?: string;
+    source_alias?: string;
+    time_field?: string;
+    filters?: string[];
+    join?: JoinSpec | null;
+    grains?: Record<string, string> | null;
+    bound_measures?: { id: string; description: string }[];
+    bound_dimensions?: { id: string; description: string }[];
+  };
+  rules: CaliberRule[];
+  upstream: LineageEdge[];
+  downstream: LineageEdge[];
+}
+
+export interface HistoryCommit {
+  short: string;
+  author: string;
+  time: string;
+  human: string;
+  subject: string;
+}
+
+export interface HistoryPayload {
+  commits: HistoryCommit[];
+  count: number;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
@@ -91,6 +128,9 @@ async function getJson<T>(url: string): Promise<T> {
 export const api = {
   ontology: () => getJson<Ontology>("/api/ontology"),
   lineage: () => getJson<Lineage>("/api/lineage"),
+  objectDetail: (kind: ObjectKind, id: string) =>
+    getJson<ObjectDetail>(`/api/objects/${kind}/${encodeURIComponent(id)}`),
+  history: (limit: number) => getJson<HistoryPayload>(`/api/history?limit=${limit}`),
   confirmRule: async (ruleId: string, verdict: string, confirmeer: string) => {
     const res = await fetch(`/api/rules/${ruleId}/confirm`, {
       method: "POST",

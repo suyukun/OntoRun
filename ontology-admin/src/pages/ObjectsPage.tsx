@@ -16,6 +16,16 @@ function Code({ v }: { v: string }) {
 export default function ObjectsPage({ ontology }: { ontology: Ontology | null }) {
   if (!ontology) return <Text>加载中…</Text>;
 
+  const goObject = (kind: "measure" | "dimension", id: string) => {
+    window.location.hash = `#/object/${kind}/${encodeURIComponent(id)}`;
+  };
+  const rowNav =
+    (kind: "measure" | "dimension") => (row: { id: string }) => ({
+      onClick: () => goObject(kind, row.id),
+      style: { cursor: "pointer" as const },
+      title: "查看详情",
+    });
+
   const measureCols: ColumnsType<Measure> = [
     { title: "ID", dataIndex: "id", width: 140 },
     { title: "业务含义", dataIndex: "description" },
@@ -90,6 +100,7 @@ export default function ObjectsPage({ ontology }: { ontology: Ontology | null })
                 dataSource={ontology.measures}
                 pagination={false}
                 size="middle"
+                onRow={(m) => rowNav("measure")(m)}
               />
             ),
           },
@@ -103,6 +114,7 @@ export default function ObjectsPage({ ontology }: { ontology: Ontology | null })
                 dataSource={ontology.dimensions}
                 pagination={false}
                 size="middle"
+                onRow={(d) => rowNav("dimension")(d)}
               />
             ),
           },
@@ -116,6 +128,13 @@ export default function ObjectsPage({ ontology }: { ontology: Ontology | null })
                 dataSource={ontology.rules}
                 pagination={false}
                 size="middle"
+                onRow={() => ({
+                  onClick: () => {
+                    window.location.hash = "#/rules";
+                  },
+                  style: { cursor: "pointer" },
+                  title: "去口径确认页",
+                })}
               />
             ),
           },

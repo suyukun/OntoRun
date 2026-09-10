@@ -239,7 +239,16 @@ export default function GraphHome({
                 ))}
               </div>
             )}
-            <Button block type="primary" onClick={onGoRules}>
+            <Button
+              block
+              type="primary"
+              onClick={() => {
+                window.location.hash = `#/object/table/${encodeURIComponent(node.id)}`;
+              }}
+            >
+              查看详情 →
+            </Button>
+            <Button block onClick={onGoRules}>
               去口径确认页 →
             </Button>
           </Space>

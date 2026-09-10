@@ -5,11 +5,18 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from src.fortune_admin import confirm_store, history, lineage, ontology
+from src.fortune_admin import (
+    confirm_store,
+    history,
+    lineage,
+    object_detail,
+    ontology,
+)
 
 router = APIRouter(prefix="/api")
 
 VALID_VERDICTS = ("confirmed", "rejected")
+VALID_KINDS = ("measure", "dimension", "table")
 
 
 class ConfirmBody(BaseModel):
@@ -32,6 +39,16 @@ def get_lineage() -> dict:
         for t in r["related_tables"]
     ]
     return lineage.lineage_payload(unconfirmed_tables)
+
+
+@router.get("/objects/{kind}/{object_id}")
+def get_object(kind: str, object_id: str) -> dict:
+    if kind not in VALID_KINDS:
+        raise HTTPException(404, f"kind 必须是 {VALID_KINDS} 之一，收到: {kind}")
+    payload = object_detail.object_payload(kind, object_id)
+    if payload is None:
+        raise HTTPException(404, f"对象不存在: {kind}/{object_id}")
+    return payload
 
 
 @router.get("/history")
