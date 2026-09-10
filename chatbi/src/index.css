@@ -320,6 +320,8 @@ header span { font-size: 11.5px; color: #a1a5ad; }
 .path-cold_pushdown .dot, .path-cold_adhoc .dot { background: #94a3b8; }
 .path-validation_failed { border-color: #ecd4d4; color: var(--bad); background: #fdf7f7; }
 .path-validation_failed .dot { background: var(--bad); }
+/* 仿真数据徽标（演示诚信）：final.data_profile="mock" → 琥珀暖色标注数字来自仿真镜像 */
+.badge-mock { border-color: #ead9c8; color: var(--warn); background: #fdf8ee; }
 .evbtn {
   border: 1px solid var(--line);
   background: #fafafa;

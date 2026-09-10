@@ -262,6 +262,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
                   <span className="dot" aria-hidden="true" />
                   {badge}
                 </span>
+                {r?.data_profile === 'mock' && <span className="badge badge-mock">仿真数据</span>}
                 {(status === 'success' || status === 'success_degraded') && checkSteps.length > 0 && (
                   <span className="oktext">{checkSteps.length} 项校验全过</span>
                 )}

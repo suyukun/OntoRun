@@ -218,6 +218,7 @@ function buildResult(sc: DataScenario, question: string): FinalResult {
     request_id: 'REQ-2026-09-09-MOCK01',
     started_at: '2026-09-09T13:45:00',
     total_ms: 1320,
+    data_profile: 'mock', // 演示诚信徽标元数据（对齐 engine.py final 帧）
     question,
     rule: s.rule,
     path: s.path,

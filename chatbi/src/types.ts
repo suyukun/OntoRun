@@ -36,6 +36,8 @@ export interface FinalResult {
   degraded?: boolean;
   /** 决策链总耗时（ms，后端 final 帧注入；思考折叠条显示「已思考 N 步 · X.Xs」） */
   total_ms?: number;
+  /** 演示诚信标记：仿真镜像 final 帧带 data_profile="mock"（engine.py）；="mock" 时卡头元信息行渲染「仿真数据」徽标，旧会话无此字段不渲染 */
+  data_profile?: string;
 }
 
 export interface StreamError {
