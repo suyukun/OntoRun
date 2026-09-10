@@ -1,0 +1,272 @@
+[
+  {
+    "source": "cdm.dim_pb_date_yf",
+    "target": "rec.ads_chnl_auth_qty_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql"
+  },
+  {
+    "source": "cdm.dwd_ch_usr_rltv_df",
+    "target": "rec.ads_chnl_auth_qty_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_fin_di",
+    "target": "rec.ads_chnl_auth_qty_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_nonfin_di",
+    "target": "rec.ads_chnl_auth_qty_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql"
+  },
+  {
+    "source": "cdm.dwd_ch_usr_rltv_df",
+    "target": "rec.ads_chnl_rltv_chnl_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/授权/脚本ads_chnl_rltv_chnl_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_real_df",
+    "target": "rec.ads_chnl_real_info_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_chnl_real_info_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_channel_user_t_df",
+    "target": "rec.ads_chnl_real_info_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_chnl_real_info_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_sub_company_real_name_sync_record_df",
+    "target": "rec.ads_chnl_real_info_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_chnl_real_info_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "rec.ads_chnl_real_user_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_chnl_real_user_df.sql"
+  },
+  {
+    "source": "cdm.dim_pb_date_yf",
+    "target": "rec.ads_chnl_real_user_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_chnl_real_user_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_real_df",
+    "target": "rec.ads_chnl_real_user_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_chnl_real_user_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "rec.ads_rgst_act_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_act_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dim_pb_date_yf",
+    "target": "rec.ads_rgst_act_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_act_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_fin_di",
+    "target": "rec.ads_rgst_act_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_act_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_nonfin_di",
+    "target": "rec.ads_rgst_act_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_act_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "rec.ads_rgst_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dim_pb_date_yf",
+    "target": "rec.ads_rgst_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_fin_di",
+    "target": "rec.ads_rgst_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dim_cu_usr_info_df",
+    "target": "rec.ads_rgst_raw_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_raw_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dim_pb_date_yf",
+    "target": "rec.ads_rgst_raw_chnl_cnt_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/注册/脚本ads_rgst_raw_chnl_cnt_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "cdm.dim_pb_date_yf",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_fin_di",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "cdm.dwd_lm_pv_df",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "rec.ads_chnl_auth_qty_df",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "rec.ads_chnl_real_user_df",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "rec.ads_rgst_chnl_cnt_df",
+    "target": "rec.ads_chnl_rgst_to_real_auth_dau_df",
+    "via_script": "01_财富管理脚本/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "cdm.dwd_ch_usr_rltv_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/dwd_ch_usr_rltv_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_channel_user_t_df",
+    "target": "cdm.dwd_ch_usr_rltv_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/dwd_ch_usr_rltv_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_user_t_df",
+    "target": "cdm.dwd_ch_usr_rltv_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/dwd_ch_usr_rltv_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "cdm.dim_ch_chl_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/脚本dim_ch_chl_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_agreement_version_t_df",
+    "target": "cdm.dim_ch_chl_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/脚本dim_ch_chl_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_channel_base_t_df",
+    "target": "cdm.dim_ch_chl_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/脚本dim_ch_chl_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_channel_group_base_t_df",
+    "target": "cdm.dim_ch_chl_df",
+    "via_script": "01_财富管理脚本/CDM层/渠道域CH/脚本dim_ch_chl_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "cdm.dim_cu_usr_info_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dim_cu_usr_info_df.sql"
+  },
+  {
+    "source": "cdm.dwd_lm_pv_df",
+    "target": "cdm.dim_cu_usr_info_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dim_cu_usr_info_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_user_t_df",
+    "target": "cdm.dim_cu_usr_info_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dim_cu_usr_info_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lml_account_t_df",
+    "target": "cdm.dim_cu_usr_info_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dim_cu_usr_info_df.sql"
+  },
+  {
+    "source": "cdm.dim_ch_chl_df",
+    "target": "cdm.dwd_cu_actv_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_actv_df.sql"
+  },
+  {
+    "source": "cdm.dim_cu_usr_info_df",
+    "target": "cdm.dwd_cu_actv_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_actv_df.sql"
+  },
+  {
+    "source": "ods.ods_lm_user_wechat_t_df",
+    "target": "cdm.dwd_cu_actv_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_actv_df.sql"
+  },
+  {
+    "source": "ods.ods_usms_lm_channel_user_t_df",
+    "target": "cdm.dwd_cu_actv_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_actv_df.sql"
+  },
+  {
+    "source": "cdm.dim_cu_usr_info_df",
+    "target": "cdm.dwd_cu_real_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_real_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_fin_di",
+    "target": "cdm.dwd_cu_real_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_real_df.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_nonfin_di",
+    "target": "cdm.dwd_cu_real_df",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_real_df.sql"
+  },
+  {
+    "source": "cdm.dim_cu_usr_info_df",
+    "target": "cdm.dwd_cu_rgst_fin_di",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_rgst_fin_di.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_actv_df",
+    "target": "cdm.dwd_cu_rgst_fin_di",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_rgst_fin_di.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_fin_di",
+    "target": "cdm.dwd_cu_rgst_fin_di",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_rgst_fin_di.sql"
+  },
+  {
+    "source": "cdm.dim_cu_usr_info_df",
+    "target": "cdm.dwd_cu_rgst_nonfin_di",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_rgst_nonfin_di.sql"
+  },
+  {
+    "source": "cdm.dwd_cu_rgst_nonfin_di",
+    "target": "cdm.dwd_cu_rgst_nonfin_di",
+    "via_script": "01_财富管理脚本/CDM层/用户域CU/脚本dwd_cu_rgst_nonfin_di.sql"
+  },
+  {
+    "source": "cfgl_iml_data.dim_date_holiday",
+    "target": "<default>.dim_pb_date_yf",
+    "via_script": "脚本dim_pb_date_yf.sql"
+  },
+  {
+    "source": "cfgl_iml_data.dim_pb_date_yf",
+    "target": "<default>.dim_pb_date_yf",
+    "via_script": "脚本dim_pb_date_yf.sql"
+  },
+  {
+    "source": "cfgl_itl_data.cwmp_wind_citic_asharecalendar_yf",
+    "target": "<default>.dim_pb_date_yf",
+    "via_script": "脚本dim_pb_date_yf.sql"
+  },
+  {
+    "source": "ods.madp_collect_all",
+    "target": "cdm.dwd_lm_pv_df",
+    "via_script": "脚本dwd_lm_pv_df.sql"
+  }
+]
