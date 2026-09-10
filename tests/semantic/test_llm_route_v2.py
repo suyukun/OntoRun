@@ -352,3 +352,22 @@ def test_enhanced_keyword_route_without_aliases(monkeypatch):
     plan = llm_route.keyword_route("2026年8月各渠道注册用户数")
     assert plan.measure == "reg_user_cnt" and plan.dimensions == ("channel_l2",)
     assert llm_route.keyword_route("抽奖活动效果怎么样").rejected
+
+
+def test_keyword_route_adopts_measure_hints():
+    """真实别名层：关键词表缺口语（"来了多少人"）→ measure_hints 兜底命中。"""
+    plan = llm_route.keyword_route("来了多少人")
+    assert plan.measure == "reg_user_cnt"
+
+
+def test_keyword_route_measure_hints_other_measure():
+    """"实名了多少人" → real_name_user_cnt（已注册度量直接采信）。"""
+    plan = llm_route.keyword_route("实名了多少人")
+    assert plan.measure == "real_name_user_cnt"
+
+
+def test_keyword_route_adopts_dimension_hints():
+    """dimension_hints 同理补维度："男的和女的来了多少人" → reg_user_cnt + gender。"""
+    plan = llm_route.keyword_route("男的和女的来了多少人")
+    assert plan.measure == "reg_user_cnt"
+    assert "gender" in plan.dimensions

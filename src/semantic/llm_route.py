@@ -320,22 +320,35 @@ def _value_hint_dims(value_hints: list) -> list[str]:
 
 def keyword_route(question: str) -> RoutePlan:
     """M5.5 增强版关键词路由（LLM 降级时的兜底，引擎同名调用）：
-    ① 别名层归一后走现有关键词表；② value_hints 命中 → 补带对应维度。
+    ① 别名层归一后走现有关键词表；② 度量关键词未命中时采纳 measure_hints
+    （已注册度量才采信）；③ dimension_hints 补维度；④ value_hints 补渠道维度。
     别名层未就位或异常 → 原样走旧表（无别名层也能跑通基本链路）。"""
     text = question
-    value_hints: list = []
+    hints: dict = {}
     if aliases is not None:
         try:
             text = aliases.normalize_text(question) or question
-            value_hints = (aliases.expand_candidates(question) or {}).get("value_hints") or []
+            hints = aliases.expand_candidates(question) or {}
         except Exception:  # noqa: BLE001 别名层任何异常不得砸断兜底链路
-            text, value_hints = question, []
+            text, hints = question, {}
     plan = rules.keyword_route(text)
-    if plan.measure is None or plan.rejected:
+    if plan.rejected:
         return plan
-    extra = _value_hint_dims(value_hints)
-    if extra:
-        return replace(plan, dimensions=tuple(dict.fromkeys(plan.dimensions + tuple(extra))))
+    if plan.measure is None:
+        # 关键词表缺口语 → 别名度量候选兜底；仅采信已注册度量（比率度量
+        # 不进 RoutePlan，引擎不认）。
+        measure = next((m for m in hints.get("measure_hints") or []
+                        if m in REGISTRY.measures), None)
+        if measure is None:
+            return plan  # 度量仍无命中：维度/值候选单独无意义，维持原判（宁拒不错）
+        plan = replace(plan, measure=measure)
+    dims = list(plan.dimensions)
+    for dim_id in hints.get("dimension_hints") or []:
+        if dim_id in REGISTRY.dimensions:
+            dims.append(dim_id)
+    dims.extend(d for d in _value_hint_dims(hints.get("value_hints") or []) if d not in dims)
+    if dims != list(plan.dimensions):
+        return replace(plan, dimensions=tuple(dict.fromkeys(dims)))
     return plan
 
 
