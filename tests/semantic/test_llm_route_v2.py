@@ -149,23 +149,43 @@ def test_prompt_contains_contract_and_registry_ids():
     few-shot 原语 id 与注册表现值一致（防改名漂移）。"""
     prompt = llm_route._system_prompt()
     for token in ("prev_month", "last_n_days", "absolute", "month_of",
-                  '{"reject": true}', "time_slot", "示例"):
+                  '{"reject": true}', "time_slot", "示例", "filters",
+                  "reg_to_real_rate", "麦当劳"):
         assert token in prompt, token
     ids = llm_route._example_ids()
     assert ids["measure"] in REGISTRY.measures
     assert ids["channel"] in REGISTRY.dimensions
     assert ids["gender"] in REGISTRY.dimensions
+    assert ids["ratio"] in REGISTRY.ratios
     assert f'"dimensions": ["{ids["channel"]}"]' in prompt
     assert config.data_range()["min"] in prompt  # absolute 边界随数据覆盖走
 
 
 def test_validate_plan_still_rejects_invented_primitives():
-    """枚举硬校验行为保持：未注册原语/维度拒绝，reject 与合法组合放行。"""
+    """枚举硬校验：未注册原语/维度拒绝；渠道值条目、filters 数组与比率放行。"""
     assert llm_route.validate_plan({"measure": "aum_total"}) is None
     assert llm_route.validate_plan({"measure": "reg_user_cnt", "dimensions": ["nope"]}) is None
     assert llm_route.validate_plan({"reject": True}).rejected
     plan = llm_route.validate_plan({"measure": "reg_user_cnt", "dimensions": ["time_grain=day"]})
     assert plan.dimensions == ("time_grain=day",)
+    # Gap A：非粒度维度 dim=value 与 filters 数组统一折叠为 "维度=值" 条目
+    arg_plan = llm_route.validate_plan(
+        {"measure": "reg_user_cnt", "dimensions": ["channel_l2=麦当劳"]})
+    assert arg_plan.dimensions == ("channel_l2=麦当劳",)
+    f_plan = llm_route.validate_plan(
+        {"measure": "reg_user_cnt",
+         "filters": [{"dimension": "channel_l2", "value": "麦当劳"}]})
+    assert f_plan.dimensions == ("channel_l2=麦当劳",)
+    assert llm_route.validate_plan(
+        {"measure": "reg_user_cnt", "filters": [{"dimension": "nope", "value": "x"}]}) is None
+    assert llm_route.validate_plan(
+        {"measure": "reg_user_cnt", "filters": [{"dimension": "channel_l2", "value": ""}]}) is None
+    assert llm_route.validate_plan(
+        {"measure": "reg_user_cnt", "filters": [{"dimension": "time_grain", "value": "day"}]}
+    ).dimensions == ()  # 粒度维度不接受值过滤
+    # Gap B：比率度量进枚举
+    ratio_plan = llm_route.validate_plan({"measure": "reg_to_real_rate"})
+    assert ratio_plan.measure == "reg_to_real_rate"
 
 
 # ------------------------------------------------------- M5.2 未知模式 / M5.4 重试
@@ -333,7 +353,7 @@ def test_enhanced_keyword_route_value_hints_forward_compat_dict(monkeypatch):
     monkeypatch.setattr(llm_route, "aliases", fake_aliases)
     plan = llm_route.keyword_route("X渠道注册了多少人")
     assert plan.measure == "reg_user_cnt"
-    assert "channel_l3" in plan.dimensions
+    assert "channel_l3=X" in plan.dimensions
 
 
 def test_enhanced_keyword_route_survives_alias_errors(monkeypatch):
@@ -371,3 +391,82 @@ def test_keyword_route_adopts_dimension_hints():
     plan = llm_route.keyword_route("男的和女的来了多少人")
     assert plan.measure == "reg_user_cnt"
     assert "gender" in plan.dimensions
+
+
+# -------------------------------------------------- Gap A 值过滤端到端 / Gap B 比率
+
+def test_keyword_route_single_value_hint_becomes_filter(monkeypatch):
+    """单一渠道值候选 → "channel_l2=值" 过滤条目（不再是全量细分）。"""
+    fake_aliases = SimpleNamespace(
+        normalize_text=lambda q: q.replace("来了多少人", "注册用户数"),
+        expand_candidates=lambda q: {"measure_hints": ["reg_user_cnt"],
+                                     "dimension_hints": [],
+                                     "value_hints": ["优享+线上"]},
+    )
+    monkeypatch.setattr(llm_route, "aliases", fake_aliases)
+    plan = llm_route.keyword_route("优享+线上来了多少人")
+    assert plan.measure == "reg_user_cnt"
+    assert plan.dimensions == ("channel_l2=优享+线上",)
+
+
+def test_llm_filter_full_chain_sql_and_answer(monkeypatch, normalizer):
+    """验收①：8月麦当劳来了多少人 → 编译 SQL 含 sec_chnl_nm = ? 且参数为麦当劳，
+    交叉校验两侧同滤，state=success（数字全部可溯源）。"""
+    payload = json.dumps({"measure": "reg_user_cnt", "dimensions": [],
+                          "filters": [{"dimension": "channel_l2", "value": "麦当劳"}],
+                          "time_slot": {"mode": "month_of", "ref": "2026-08"}},
+                         ensure_ascii=False)
+    monkeypatch.setattr("openai.OpenAI",
+                        lambda **kwargs: FakeClient([_resp(payload)]))
+    result = _final(list(engine.iter_query("8月麦当劳来了多少人")))
+    assert result["path"] == "semantic_pushdown"
+    assert result["state"] == "success"
+    assert "sec_chnl_nm = ?" in result["sql"]
+    assert "麦当劳" in result["sql_params"]  # 值走绑定参数，永不拼 SQL
+    assert result["filters"] == [{"dimension": "channel_l2", "value": "麦当劳"}]
+    assert result["answer"]  # 有真实数字且通过 D6 溯源门禁
+
+
+def test_llm_filter_with_group_dimension(monkeypatch, normalizer):
+    """验收②：银行App/中信书院类问法 → 维度分组正确（filter 不混入 dimensions）。"""
+    payload = json.dumps({"measure": "reg_user_cnt", "dimensions": ["channel_l1"],
+                          "filters": [{"dimension": "channel_l2", "value": "银行App"}],
+                          "time_slot": {"mode": "month_of", "ref": "2026-08"}},
+                         ensure_ascii=False)
+    monkeypatch.setattr("openai.OpenAI",
+                        lambda **kwargs: FakeClient([_resp(payload)]))
+    result = _final(list(engine.iter_query("银行App上个月注册了多少")))
+    assert result["path"] == "semantic_pushdown"
+    assert result["state"] == "success"
+    # dimensions 留痕含过滤条目（路由决策）；SQL 分组仅 channel_l1，过滤走 WHERE
+    assert result["dimensions"] == ["channel_l1", "channel_l2=银行App"]
+    assert "银行App" in result["sql_params"]
+
+
+def test_llm_unknown_channel_clarify_reject(monkeypatch, normalizer):
+    """验收①反向：编造渠道值 → 澄清式拒答「未找到该渠道」（宁拒不错）。"""
+    payload = json.dumps({"measure": "reg_user_cnt",
+                          "filters": [{"dimension": "channel_l2", "value": "不存在的渠道"}]},
+                         ensure_ascii=False)
+    monkeypatch.setattr("openai.OpenAI",
+                        lambda **kwargs: FakeClient([_resp(payload)]))
+    result = _final(list(engine.iter_query("8月不存在的渠道来了多少人")))
+    assert result["path"] == "rejected"
+    card = result["reject_card"]
+    assert card["code"] == "UNKNOWN_DIMENSION_VALUE"
+    assert "未找到该渠道" in card["message"]
+    assert "不存在的渠道" in result["answer"]
+    assert not any(ch.isdigit() for ch in result["answer"])
+
+
+def test_ratio_measure_routes_and_executes(monkeypatch, normalizer):
+    """验收③：转化率条目路由到 reg_to_real_rate 并全链路执行（表格呈现）。"""
+    payload = json.dumps({"measure": "reg_to_real_rate", "dimensions": []},
+                         ensure_ascii=False)
+    monkeypatch.setattr("openai.OpenAI",
+                        lambda **kwargs: FakeClient([_resp(payload)]))
+    result = _final(list(engine.iter_query("注册到实名的转化率")))
+    assert result["measure"] == "reg_to_real_rate"
+    assert result["path"] == "semantic_pushdown"
+    assert result["state"] == "success"
+    assert "转化率" in result["answer"]

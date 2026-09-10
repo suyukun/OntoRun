@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from src.fortune_semantic.registry import (
     SNAPSHOT_LATEST,
@@ -29,6 +29,15 @@ from src.fortune_semantic.registry import (
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "fortune_mirror.duckdb"
 
 
+class DimensionFilter(BaseModel):
+    """维度值过滤（Gap A 演示版）：值走绑定参数，永不拼 SQL（防注入）。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    dimension: str
+    value: str
+
+
 class QueryRequest(BaseModel):
     """结构化查询请求（无 LLM）：dimensions 条目为 "维度" 或 "维度=参数"。"""
 
@@ -38,6 +47,10 @@ class QueryRequest(BaseModel):
     dimensions: tuple[str, ...] = ()
     time_from: str
     time_to: str
+    filters: tuple[DimensionFilter, ...] = Field(
+        default=(),
+        description="维度值过滤：编译为 维表列=?（绑定参数）；不参与分组",
+    )
 
     @field_validator("time_from", "time_to")
     @classmethod
@@ -160,8 +173,9 @@ def _collect_joins(
     """
     joins: list[JoinSpec] = []
     index: dict[tuple[str, str], int] = {}
-    for entry in request.dimensions:
-        dim_id, _ = _split_dimension_entry(entry)
+    dim_ids = [_split_dimension_entry(entry)[0] for entry in request.dimensions]
+    dim_ids += [item.dimension for item in request.filters]
+    for dim_id in dim_ids:
         dim = registry.get_dimension(dim_id)
         override = measure.dimension_overrides.get(dim_id)
         join = override.join if override is not None else dim.join
@@ -223,6 +237,39 @@ def _measure_where(
     return where_parts, (time_from, time_to)
 
 
+def _filter_clauses(
+    request: QueryRequest,
+    registry: SemanticRegistry,
+    measure: Measure,
+) -> tuple[list[str], list[str]]:
+    """filters → WHERE 谓词（维表列 = ?）与绑定值（值永不拼 SQL，防注入）。
+
+    维度解析与 _resolve_dimensions 同源（度量级覆写优先）：过滤列所在
+    join/别名与该维度参与分组/收集 JOIN 时完全一致。未注册维度结构化报错。
+    """
+    parts: list[str] = []
+    values: list[str] = []
+    for item in request.filters:
+        dim = registry.get_dimension(item.dimension)
+        override = measure.dimension_overrides.get(item.dimension)
+        join = override.join if override is not None else dim.join
+        if dim.grains is not None:
+            raise SemanticError(
+                "INVALID_TIME_GRAIN",
+                f"维度 {item.dimension} 为时间粒度维度，不支持值过滤",
+                dimension=item.dimension,
+            )
+        if join is None:
+            raise SemanticError(
+                "INVALID_REGISTRY_ENTRY",
+                f"维度 {item.dimension} 缺少 join 绑定，无法按值过滤",
+                dimension=item.dimension,
+            )
+        parts.append(f"{dim.expression.format(j=join.alias)} = ?")
+        values.append(item.value)
+    return parts, values
+
+
 def _compile_ratio(
     request: QueryRequest, registry: SemanticRegistry, ratio: RatioMeasure
 ) -> CompiledQuery:
@@ -260,6 +307,9 @@ def _compile_ratio(
         where_parts, side_params = _measure_where(
             side, request.time_from, request.time_to
         )
+        filter_parts, filter_values = _filter_clauses(request, registry, side)
+        where_parts.extend(filter_parts)
+        side_params = (*side_params, *filter_values)
         params.extend(side_params)
         lines.append("WHERE\n  " + "\n  AND ".join(where_parts))
         if dim_cols:
@@ -333,6 +383,8 @@ def compile_query(
         lines.append(_join_sql(measure, join))
 
     where_parts, _ = _measure_where(measure, request.time_from, request.time_to)
+    filter_parts, filter_values = _filter_clauses(request, registry, measure)
+    where_parts.extend(filter_parts)
     lines.append("WHERE\n  " + "\n  AND ".join(where_parts))
 
     if dim_cols:
@@ -341,7 +393,7 @@ def compile_query(
 
     return CompiledQuery(
         sql="\n".join(lines),
-        params=(request.time_from, request.time_to),
+        params=(request.time_from, request.time_to, *filter_values),
         columns=tuple(alias for alias, _ in dim_cols) + (measure.id,),
     )
 

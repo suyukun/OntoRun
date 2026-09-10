@@ -28,7 +28,12 @@ from src.fortune_semantic.compiler import QueryRequest, compile_query
 from src.fortune_semantic.registry import REGISTRY, SemanticError
 
 from . import config, errors, sanitize, storage, templates
-from .llm_route import guided_reject_answer, keyword_route, llm_route
+from .llm_route import (
+    channel_clarify_answer,
+    guided_reject_answer,
+    keyword_route,
+    llm_route,
+)
 from .rules import (
     SENSITIVE_FIELDS,
     RoutePlan,
@@ -183,9 +188,19 @@ def _tables_for(measure_id: str, dimensions) -> list:
         return table.split(".")[-1].split("_")[0].upper()
 
     reg = REGISTRY
-    out = [{"name": reg.measures[measure_id].source_table,
-            "layer": layer_of(reg.measures[measure_id].source_table)}]
-    seen = {reg.measures[measure_id].source_table}
+    measure = reg.measures.get(measure_id)
+    if measure is None:  # 比率度量：分子/分母各自源表都进清单
+        ratio = reg.ratios[measure_id]
+        out = []
+        seen = set()
+        for side_id in (ratio.numerator, ratio.denominator):
+            table = reg.measures[side_id].source_table
+            if table not in seen:
+                seen.add(table)
+                out.append({"name": table, "layer": layer_of(table)})
+    else:
+        out = [{"name": measure.source_table, "layer": layer_of(measure.source_table)}]
+        seen = {measure.source_table}
     for entry in dimensions:
         dim = reg.dimensions.get(entry.split("=")[0])
         if dim is None or dim.join is None or dim.join.table in seen:
@@ -206,9 +221,9 @@ def _reject_card(domain: str | None, hit: str | None, code: str = "UNREGISTERED_
     }
 
 
-def _finish_refused(ctx: Ctx, card: dict, keyword: str | None):
+def _finish_refused(ctx: Ctx, card: dict, keyword: str | None, answer: str | None = None):
     """OUT_OF_SCOPE flow: structured refusal card + variant copy — never numbers."""
-    answer = guided_reject_answer(keyword)  # M6.1 拒答文案升级为引导式（注册表现生成）
+    answer = answer or guided_reject_answer(keyword)  # M6.1 引导式拒答（注册表现生成）
     ctx.result["path"] = "rejected"
     ctx.result["error_code"] = errors.E_SCOPE
     ctx.result["reject_card"] = card
@@ -249,6 +264,21 @@ def _run_gates(ctx: Ctx):
         yield from _finish_refused(ctx, _reject_card(plan.reject_domain, plan.hit), plan.hit)
         return None, None, None
 
+    clarify = (llm or {}).get("filter_clarify")
+    if clarify:  # Gap A：渠道值不在维表成员名单 → 澄清式拒答，宁拒不错
+        card = {
+            "code": "UNKNOWN_DIMENSION_VALUE",
+            "message": f"未找到该渠道「{clarify['value']}」",
+            "details": {"hit": clarify["value"], "domain": "渠道值未注册",
+                        "dimension": clarify["dimension"], "value": clarify["value"],
+                        "suggestions": clarify.get("suggestions") or [],
+                        "available_measures": sorted(REGISTRY.measures)},
+        }
+        yield from _finish_refused(
+            ctx, card, clarify["value"],
+            answer=channel_clarify_answer(clarify["value"], clarify.get("suggestions") or []))
+        return None, None, None
+
     if plan.measure is None:  # no routing hit at all
         ctx.result["path"] = "unregistered"
         ctx.result["error_code"] = errors.E_SCOPE
@@ -259,10 +289,12 @@ def _run_gates(ctx: Ctx):
         yield ctx.final_frame()
         return None, None, None
 
-    measure = REGISTRY.measures[plan.measure]
+    measure = REGISTRY.measures.get(plan.measure)
+    ratio = REGISTRY.ratios.get(plan.measure)
+    caliber = measure.description if measure is not None else ratio.description
     status = ", ".join(f"{rid}({rule.status})" for rid, rule in sorted(REGISTRY.rules.items()))
     yield ctx.emit("口径声明", "ok",
-                   f"{measure.description}；口径规则 {status or '无'}")
+                   f"{caliber}；口径规则 {status or '无'}")
 
     params = None
     if llm and llm.get("time_from") and llm.get("time_to"):
@@ -296,31 +328,45 @@ def _finish_blocked_param(ctx: Ctx, blocked):
     yield ctx.final_frame()
 
 
-def _presentation_order(plan: RoutePlan, rows: list) -> list:
+def _presentation_order(dimensions, rows, measure) -> list:
     """Leaderboard shapes (single non-time dimension) sort by measure DESC for
     the TOP-N answer; the compiler itself only orders by dimension columns."""
-    if len(plan.dimensions) == 1 and not plan.dimensions[0].startswith("time_grain"):
-        return sorted(rows, key=lambda r: r[plan.measure], reverse=True)
+    if len(dimensions) == 1 and not dimensions[0].startswith("time_grain"):
+        return sorted(rows, key=lambda r: r[measure], reverse=True)
     return rows
 
 
-def _execute(conn, compiled, plan: RoutePlan) -> tuple:
+def _execute(conn, compiled, plan: RoutePlan, request: QueryRequest) -> tuple:
     """Pushdown execution + same-source cross check inside one read-only
     mirror connection. Returns (rows-as-dicts, columns, checks, ms)."""
     t0 = time.time()
     cursor = conn.execute(compiled.sql, list(compiled.params))
     columns = [d[0] for d in cursor.description]
-    rows = _presentation_order(plan, [dict(zip(columns, row)) for row in cursor.fetchall()])
+    raw_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    rows = _presentation_order(tuple(request.dimensions), raw_rows, plan.measure)
     ms = round((time.time() - t0) * 1000, 1)
     checks = [(f"列结构与编译产物一致 {list(compiled.columns)}", columns == list(compiled.columns))]
-    if plan.dimensions:  # cross-source invariant: grouped sum == dimensionless total
-        total_req = QueryRequest(measure=plan.measure, dimensions=(),
-                                 time_from=compiled.params[0], time_to=compiled.params[1])
+    if request.dimensions:  # cross-source invariant: grouped sum == dimensionless total (filters 两侧同滤)
+        total_req = request.model_copy(update={"dimensions": ()})  # filters 保留：两侧同滤
         total_sql = compile_query(total_req)
-        total = conn.execute(total_sql.sql, list(total_sql.params)).fetchone()[0]
+        total_row = conn.execute(total_sql.sql, list(total_sql.params)).fetchone()
+        total = dict(zip(total_sql.columns, total_row))[plan.measure]  # 比率度量不在首列
         subtotal = sum(r[plan.measure] for r in rows)
         checks.append((f"同源交叉：分组合计 {subtotal} = 无维度总数 {total}", subtotal == total))
     return rows, columns, checks, ms
+
+
+def _split_dims_filters(dimensions) -> tuple[list[str], list[dict]]:
+    """渠道等 "维度=值" 条目 → 编译器 filters（值走绑定参数）；粒度条目留分组。"""
+    group: list[str] = []
+    filters: list[dict] = []
+    for entry in dimensions:
+        dim_id, _, value = entry.partition("=")
+        if value and dim_id != "time_grain":
+            filters.append({"dimension": dim_id, "value": value})
+        else:
+            group.append(entry)
+    return group, filters
 
 
 def _stream_answer(ctx: Ctx):
@@ -335,9 +381,12 @@ def _run_data_path(ctx: Ctx, plan: RoutePlan, params: dict):
     """Compiler SQL → pushdown → validation → template answer (numbers from rows only)."""
     mcol = plan.measure
     ctx.result["params"] = params
-    ctx.result["viz"] = viz_for(plan.measure, plan.dimensions)  # D7: shape-derived viz (None → table)
-    request = QueryRequest(measure=plan.measure, dimensions=plan.dimensions,
-                           time_from=params["time_from"], time_to=params["time_to"])
+    group_dims, filters = _split_dims_filters(plan.dimensions)  # 值条目不产输出列
+    ctx.result["filters"] = filters  # Gap A：值过滤留痕（dimension+value，走绑定参数）
+    ctx.result["viz"] = viz_for(plan.measure, group_dims)  # D7: shape-derived viz (None → table)
+    request = QueryRequest(measure=plan.measure, dimensions=tuple(group_dims),
+                           time_from=params["time_from"], time_to=params["time_to"],
+                           filters=tuple(filters))
     try:
         compiled = compile_query(request)
     except SemanticError as exc:  # defense in depth: router validated, compiler decides
@@ -345,6 +394,7 @@ def _run_data_path(ctx: Ctx, plan: RoutePlan, params: dict):
                                    exc.details.get("measure") or exc.details.get("dimension"))
         return
     ctx.result["sql"] = compiled.sql
+    ctx.result["sql_params"] = list(compiled.params)  # 绑定参数留痕（含过滤值，未拼 SQL）
     ctx.result["tables"] = _tables_for(plan.measure, plan.dimensions)
     yield ctx.emit("SQL 编译", "ok", "语义层编译器按注册表确定性编译，时间走绑定参数",
                    sql=compiled.sql)
@@ -352,7 +402,7 @@ def _run_data_path(ctx: Ctx, plan: RoutePlan, params: dict):
     try:
         conn = duckdb.connect(str(config.MIRROR_DB), read_only=True)
         try:
-            rows, _columns, checks, ms = _execute(conn, compiled, plan)
+            rows, _columns, checks, ms = _execute(conn, compiled, plan, request)
         finally:
             conn.close()
     except SemanticError as exc:
@@ -377,10 +427,13 @@ def _run_data_path(ctx: Ctx, plan: RoutePlan, params: dict):
         yield ctx.final_frame()
         return
 
-    dim_ids = {d.split("=")[0] for d in plan.dimensions}
+    dim_ids = {d.split("=")[0] for d in group_dims}
     if not rows:
         ctx.result["empty"] = True
         ctx.result["answer"] = EMPTY_ANSWER
+    elif plan.measure in REGISTRY.ratios:
+        # 比率度量（Gap B）：KPI 文案模板是计数口径，比率走表格呈现，不硬套模板。
+        ctx.result["answer"] = "查询完成，转化率结果见下表。"
     elif "gender" in dim_ids and all(r.get("gender") is None for r in rows):
         # Registered dimension, unfilled mirror column → honest degradation, no fake split.
         ctx.result["degraded"] = True
@@ -389,10 +442,10 @@ def _run_data_path(ctx: Ctx, plan: RoutePlan, params: dict):
         yield ctx.emit("降级说明", "warn",
                        "gender 已注册，但镜像 dim_cu_usr_info_df.usr_sex 全为 NULL")
     else:
-        ctx.result["answer"] = answer_assemble(mcol, plan.dimensions, rows, params)
+        ctx.result["answer"] = answer_assemble(mcol, group_dims, rows, params)
     try:  # D6 hard gate: every printed number must be traceable (§5-D9)
         found = validate_numbers(ctx.result["answer"],
-                                 traceable_numbers(mcol, plan.dimensions, rows, params))
+                                 traceable_numbers(mcol, group_dims, rows, params))
     except NumberValidationError as exc:
         ctx.result["path"] = "validation_failed"
         ctx.result["error_code"] = errors.E_VALIDATION
