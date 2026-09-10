@@ -19,7 +19,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005 本地朴素时间，存量格式
 
 
 def migrate() -> None:

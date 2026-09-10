@@ -48,9 +48,15 @@ def _to_dict_single_dim(result):
 
 
 def test_registry_rules_mounted_and_unverified():
-    """口径规则管理台预留字段挂载：R1-R4 在册且全部 unverified（未经数仓确认）。"""
+    """口径规则管理台预留字段挂载：R1-R4 在册、状态合法；未确认项保持 unverified。
+
+    2026-09-11 更新：R1 已由管理台确认流置 confirmed（commit 4e77cc4，Rose 自动验收），
+    断言从"全部 unverified"收敛为"未确认的 R2-R4 保持 unverified"。
+    """
     assert {"R1", "R2", "R3", "R4"} <= set(REGISTRY.rules)
-    assert all(rule.status == "unverified" for rule in REGISTRY.rules.values())
+    assert all(rule.status in ("unverified", "confirmed") for rule in REGISTRY.rules.values())
+    assert REGISTRY.rules["R1"].status == "confirmed"
+    assert all(REGISTRY.rules[rid].status == "unverified" for rid in ("R2", "R3", "R4"))
     assert all(rule.source_script for rule in REGISTRY.rules.values())
 
 

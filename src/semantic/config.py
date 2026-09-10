@@ -1,15 +1,16 @@
 """Central config: paths, .env loading, LLM switches, data coverage metadata."""
 
 import os
-import sqlite3
 from functools import lru_cache
 from pathlib import Path
+
+from src.fortune_semantic.registry import REGISTRY
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data" / "fortune"
 
 # Overridable via env so tests can pin isolated tmp stores.
-FORTUNE_DB = Path(os.environ.get("FORTUNE_DB") or DATA_DIR / "fortune.db")
+MIRROR_DB = Path(os.environ.get("FORTUNE_MIRROR_DB") or ROOT_DIR / "data" / "fortune_mirror.duckdb")
 APP_DB = Path(os.environ.get("SEMANTIC_APP_DB") or DATA_DIR / "app.db")
 TRACE_LOG = Path(os.environ.get("SEMANTIC_TRACE_LOG") or DATA_DIR / "trace_log.jsonl")
 
@@ -51,17 +52,18 @@ def llm_disabled() -> bool:
 
 @lru_cache(maxsize=1)
 def data_range() -> dict:
-    """Sample data coverage derived from the data itself (semantic-layer metadata,
-    not hardcoded) — powers the out_of_range rejection copy (product doc §4.2 #5)."""
-    conn = sqlite3.connect(FORTUNE_DB)
+    """Data coverage from the L2 mirror itself (semantic-layer metadata, table
+    and time field taken from the registry measure) — powers the out_of_range
+    rejection copy (product doc §4.2 #5)."""
+    import duckdb
+
+    measure = next(iter(REGISTRY.measures.values()))
+    conn = duckdb.connect(str(MIRROR_DB), read_only=True)
     try:
         lo, hi = conn.execute(
-            "SELECT MIN(d), MAX(d) FROM ("
-            "  SELECT MIN(data_dt) AS d FROM dwd_tr_rgst_df"
-            "  UNION ALL SELECT MIN(rgst_dt) FROM dim_cu_usr_info_df"
-            "  UNION ALL SELECT MAX(data_dt) FROM dwd_tr_rgst_df"
-            "  UNION ALL SELECT MAX(rgst_dt) FROM dim_cu_usr_info_df)"
+            f"SELECT CAST(MIN({measure.time_field}) AS DATE), "
+            f"CAST(MAX({measure.time_field}) AS DATE) FROM {measure.source_table}"
         ).fetchone()
     finally:
         conn.close()
-    return {"min": lo or "0001-01-01", "max": hi or "9999-12-31"}
+    return {"min": str(lo) if lo else "0001-01-01", "max": str(hi) if hi else "9999-12-31"}

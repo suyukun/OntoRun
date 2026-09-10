@@ -1,7 +1,8 @@
 """T5/D6 tests: template scheme + number-consistency hard gate (§5-D6/§5-D9).
 
-Env overrides mirror test_core (isolated tmp stores, keyword routing); the
-first import pins package config, so these tests never touch real stores.
+Templates are keyed by query shape over the L2 registry output. Env overrides
+mirror test_core (isolated tmp stores, keyword routing); the first import pins
+package config, so these tests never touch real stores.
 """
 
 import os
@@ -21,6 +22,9 @@ from src.semantic.templates import NumberValidationError, validate_numbers
 storage.migrate()
 
 HOT = "2026年8月注册用户数是多少？"
+CHANNEL = "2026年8月分渠道注册用户数"
+GENDER = "2026年8月注册用户男女比例"
+M = "reg_user_cnt"
 
 
 def _final(frames):
@@ -30,26 +34,77 @@ def _final(frames):
 
 
 def test_template_slot_filling():
-    """Registry templates render deterministic sentences; numbers come from rows only."""
-    assert templates.render("REG_TOTAL", [{"total": 1234}],
-                            {"start": "2026-08-01", "end": "2026-08-31"}) \
+    """Shape-keyed templates render deterministic sentences; numbers come from rows only."""
+    assert templates.render(M, (), [{M: 1234}],
+                            {"time_from": "2026-08-01", "time_to": "2026-08-31"}) \
         == "2026-08 月注册 1,234 人。"
-    rows = [{"channel": "app", "cnt": 20}, {"channel": "web", "cnt": 10},
-            {"channel": "h5", "cnt": 6}, {"channel": "mini", "cnt": 4}]
-    assert templates.render("REG_BY_CHANNEL", rows, {}) == "共 40 人，TOP3：app 20、web 10、h5 6。"
-    ratio = [{"gender": "女", "cnt": 24}, {"gender": "男", "cnt": 12}]
-    assert templates.render("GENDER_RATIO", ratio, {}) \
+    rows = [{"channel_l2": "app", M: 20}, {"channel_l2": "web", M: 10},
+            {"channel_l2": "h5", M: 6}, {"channel_l2": "mini", M: 4}]
+    assert templates.render(M, ("channel_l2",), rows, {}) == "共 40 人，TOP3：app 20、web 10、h5 6。"
+    ratio = [{"gender": "女", M: 24}, {"gender": "男", M: 12}]
+    assert templates.render(M, ("gender",), ratio, {}) \
         == "女 24（66.7%）、男 12（33.3%）。合计 36 人。"
-    assert templates.render("UNREGISTERED", ratio, {}) == ""
+    assert templates.render(M, ("region",), ratio, {}) == ""  # unrendered shape -> ''
 
 
 def test_iter_query_answer_is_template_rendered_from_rows():
     """Answer must equal template render over the snapshot rows (no free-text numbers)."""
-    for question in (HOT, "2026年8月分渠道注册用户数", "2026年8月注册用户男女比例"):
+    for question in (HOT, CHANNEL):
         result = _final(list(engine.iter_query(question)))
         assert result["state"] in ("success", "success_warning"), (question, result["state"])
-        expected = templates.render(result["rule"], result["rows"], result["params"])
+        expected = templates.render(result["measure"], result["dimensions"],
+                                    result["rows"], result["params"])
         assert result["answer"].startswith(expected), (question, result["answer"])
+
+
+def test_gender_live_answer_traceable():
+    """当前镜像 usr_sex 已填充（F/M/None）：真实分布 + 每个数字可溯源。"""
+    result = _final(list(engine.iter_query(GENDER)))
+    assert result["path"] == "semantic_pushdown"
+    assert result["state"] in ("success", "success_warning")  # keyword 路由 → warning
+    assert result["rows"] and {r["gender"] for r in result["rows"]} <= {"F", "M", None}
+    allowed = engine.traceable_numbers(
+        result["measure"], result["dimensions"], result["rows"], result["params"])
+    validate_numbers(result["answer"], allowed)  # percents 全部来自 rows
+    assert "未知" in result["answer"]  # NULL 组如实标注，不静默丢弃
+
+
+def test_gender_dimension_degrades_honestly(monkeypatch, tmp_path):
+    """维度已建模、镜像字段未填充（usr_sex 全 NULL）→ 诚实降级，不出假分布。
+
+    用最小 fixture 镜像（注册表原语同构）锁降级路径；真实镜像恢复空值时同路径生效。
+    """
+    import duckdb
+    from src.semantic import config
+
+    fixture = tmp_path / "fixture_mirror.duckdb"
+    conn = duckdb.connect(str(fixture))
+    conn.execute("CREATE SCHEMA cdm")
+    conn.execute(
+        "CREATE TABLE cdm.dwd_cu_rgst_fin_di "
+        "(usr_id VARCHAR, rgst_chnl_id VARCHAR, rgst_dt TIMESTAMP, rgst_num INTEGER)")
+    conn.execute(
+        "CREATE TABLE cdm.dim_cu_usr_info_df (usr_id VARCHAR, usr_sex VARCHAR, ds TIMESTAMP)")
+    conn.execute(
+        "CREATE TABLE cdm.dim_ch_chl_df "
+        "(chnl_id VARCHAR, sec_chnl_nm VARCHAR, ds TIMESTAMP)")
+    conn.execute("INSERT INTO cdm.dwd_cu_rgst_fin_di VALUES "
+                 "('u1', 'CHN01', TIMESTAMP '2026-08-05 10:00:00', 1), "
+                 "('u2', 'CHN02', TIMESTAMP '2026-08-06 11:00:00', 1)")
+    conn.execute("INSERT INTO cdm.dim_cu_usr_info_df VALUES "
+                 "('u1', NULL, TIMESTAMP '2026-08-31 00:00:00'), "
+                 "('u2', NULL, TIMESTAMP '2026-08-31 00:00:00')")
+    conn.close()
+
+    monkeypatch.setattr(config, "MIRROR_DB", fixture)
+    result = _final(list(engine.iter_query(GENDER)))
+    assert result["path"] == "semantic_pushdown"
+    assert result["state"] == "success_warning"  # degraded, not failed
+    assert result["degraded"] is True
+    assert result["degraded_reason"] == "dimension_unfilled"
+    assert "维度已建模、仿真数据未填充" in result["answer"]
+    assert not any(ch.isdigit() for ch in result["answer"])  # 不编造分布
+    assert result["rows"] and all(r["gender"] is None for r in result["rows"])
 
 
 def test_injected_untraceable_number_is_blocked():
@@ -82,11 +137,3 @@ def test_converted_numbers_are_traceable():
     assert exc.value.offender == "999"
     assert "1,234" in exc.value.allowed  # 对照保留原始印出形式
     assert "999" in str(exc.value)
-
-
-def test_live_gender_ratio_percents_traceable():
-    """Live cold-adhoc answer: every percent derives from rows (task case 3)."""
-    result = _final(list(engine.iter_query("2026年8月注册用户男女比例")))
-    assert result["rows"]
-    allowed = engine.traceable_numbers(result["rule"], result["rows"], result.get("params"))
-    validate_numbers(result["answer"], allowed)

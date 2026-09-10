@@ -1,80 +1,125 @@
-"""Rule registry (config-driven), migrated 1:1 from demo RULES.
+"""Primitive catalog + routing helpers, DERIVED from the L2 registry
+(src/fortune_semantic/registry — single source of truth, no local copy).
 
-Engineering upgrades: viz field per rule (product doc D7), PII sensitive-field
-list, and build_profile() for the appendix-C profile schema. Adding a business
-domain = register rules here + a profile; the shell stays untouched (§7 #11).
-Out-of-scope refusals are generated per request (build_reject_answer): variant
-rotation + matched keyword + what IS answerable — never the same canned line.
+The demo RULES dictionary (REG_TOTAL/REG_BY_CHANNEL/GENDER_RATIO/OUT_OF_SCOPE
+with per-rule SQL) is retired: queries are now primitive combinations
+{measure, dimensions} and SQL comes from fortune_semantic.compiler.
+
+- RoutePlan / keyword_route: fallback router mapping keywords to equivalent
+  primitive combinations (e.g. 渠道 → channel_l2); reject domains scanned
+  first so out-of-scope questions never leak into data queries.
+- build_profile: appendix-C schema; viz_map/rule_hints derived from the
+  registry (D7 field names unchanged — frontend untouched).
+- build_reject_answer: refusal copy (variant rotation, seed=request_id;
+  the "ready" list derives from the registry, never hardcoded).
 """
 
 import hashlib
+from dataclasses import dataclass
 
-RULES = {
-    "REG_TOTAL": {
-        "desc": "注册用户数（自然月去重人数）",
-        "label": "注册总量",
-        "keywords": ["注册总数", "注册多少", "注册用户数", "注册量", "注册"],
-        "path": "hot",
-        "layer": "DWS",
-        "viz": "kpi",
-        "caliber": "SUM(去重 usr_id)；含子公司同步注册；口径裁决号 2026-09-08-J1",
-        "params": ["start", "end"],
-        "sql": "SELECT COALESCE(SUM(cnt),0) AS total FROM dws_reg_daily_df WHERE data_dt BETWEEN :start AND :end",
-        "columns": ["total"],
-        "tables": [{"name": "dws_reg_daily_df", "layer": "DWS"}],
-    },
-    "REG_BY_CHANNEL": {
-        "desc": "分渠道注册用户数（明细下推聚合）",
-        "label": "分渠道注册",
-        "keywords": ["按渠道", "渠道", "分渠道", "各渠道", "来源"],
-        "path": "cold_pushdown",
-        "layer": "DWD+DIM",
-        "viz": "bar",
-        "caliber": "明细按 rgst_chnl_id 聚合去重；渠道名 JOIN 渠道维表；与 REG_TOTAL 必须同源一致",
-        "params": ["start", "end"],
-        "sql": ("SELECT ch.chnl_nm AS channel, COUNT(DISTINCT r.usr_id) AS cnt "
-                "FROM dwd_tr_rgst_df r JOIN dim_ch_chl_df ch ON ch.chnl_id = r.rgst_chnl_id "
-                "WHERE r.data_dt BETWEEN :start AND :end GROUP BY 1 ORDER BY 2 DESC"),
-        "columns": ["channel", "cnt"],
-        "tables": [{"name": "dwd_tr_rgst_df", "layer": "DWD"}, {"name": "dim_ch_chl_df", "layer": "DIM"}],
-    },
-    "GENDER_RATIO": {
-        "desc": "注册用户性别分布（维表属性即席统计）",
-        "label": "性别分布",
-        "keywords": ["男女", "性别", "男性", "女性", "比例"],
-        "path": "cold_adhoc",
-        "layer": "DIM",
-        "viz": "pie",
-        "caliber": "维表 usr_sex 属性分布；明细级即席计算，回答必须标注",
-        "params": ["start", "end"],
-        "sql": ("SELECT CASE usr_sex WHEN 1 THEN '男' WHEN 2 THEN '女' ELSE '未知' END AS gender, "
-                "COUNT(DISTINCT u.usr_id) AS cnt FROM dim_cu_usr_info_df u "
-                "WHERE u.rgst_dt BETWEEN :start AND :end GROUP BY 1 ORDER BY 2 DESC"),
-        "columns": ["gender", "cnt"],
-        "notice": "明细级即席计算（未预聚合）：结果为即时快照，非月报口径",
-        "tables": [{"name": "dim_cu_usr_info_df", "layer": "DIM"}],
-    },
-    "OUT_OF_SCOPE": {
-        "desc": "范围外问题（活跃/转化域未注册）",
-        "keywords": ["活动", "任务", "抽奖", "奖品", "导流", "日活", "活跃"],
-        "path": "rejected",
-        # 话术不再写死：engine 调 build_reject_answer 按命中词+变体池生成（无数字，不触 D6 门）
-        "reject": True,
-        "tables": [],
-    },
-}
+from src.fortune_semantic.registry import REGISTRY
 
-# 拒答句式池：{kw}=命中词，{ready}=当前已注册口径清单；同一问句重试稳定（seed=request_id）
-_REJECT_VARIANTS = (
-    "「{kw}」属于活跃/转化域——这块口径还没注册，我不猜数。现在能答：{ready}，换个问法试试？",
-    "「{kw}」落在活跃/转化域，对应对象与口径尚未注册。宁可不答，不出假数。已就绪的口径：{ready}。",
-    "「{kw}」超出了当前语义范围（活跃/转化域未注册），不生成 SQL、不猜测。已就绪：{ready}；扩展需先注册对象与口径。",
+
+@dataclass(frozen=True)
+class RoutePlan:
+    """Routing result: a primitive combination, or a structured reject signal."""
+
+    measure: str | None = None
+    dimensions: tuple[str, ...] = ()
+    reject_domain: str | None = None
+    hit: str | None = None  # matched keyword, feeds the refusal copy
+
+    @property
+    def rejected(self) -> bool:
+        return self.reject_domain is not None
+
+    @property
+    def shape(self) -> str:
+        """Display/trace label of the primitive combination."""
+        if self.measure is None:
+            return self.reject_domain or "无"
+        if not self.dimensions:
+            return self.measure
+        return self.measure + "+" + "+".join(self.dimensions)
+
+
+# Reject-first: unregistered business domains refuse before any data primitive.
+_REJECT_DOMAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("活跃/转化域", ("活动", "任务", "抽奖", "奖品", "导流", "日活", "活跃", "转化")),
+    ("资产/持仓域", ("资产", "持仓", "理财", "收益", "余额", "AUM", "aum")),
 )
+
+# Keyword → primitive fragment (dimension entries may carry a grain argument).
+_DIMENSION_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("channel_l2", ("分渠道", "按渠道", "各渠道", "渠道", "来源")),
+    ("gender", ("男女", "性别", "男性", "女性")),
+    ("time_grain=day", ("按日", "每天", "每日", "逐日")),
+    ("time_grain=week", ("按周", "每周", "逐周")),
+    ("time_grain=month", ("按月", "每月", "逐月", "月度")),
+)
+
+_MEASURE_KEYWORDS = ("注册", "用户数")  # any hit selects the registration measure
+_REGISTRATION_MEASURE = "reg_user_cnt"  # 「注册」关键词的等价原语（未注册则退回首个度量）
+
+
+def keyword_route(question: str) -> RoutePlan:
+    """Fallback router when LLM routing is unavailable: keywords → equivalent
+    primitive combination; unregistered domains → structured reject plan."""
+    for domain, keywords in _REJECT_DOMAINS:
+        for kw in keywords:
+            if kw in question:
+                return RoutePlan(reject_domain=domain, hit=kw)
+    dimensions: list[str] = []
+    hit = None
+    for entry, keywords in _DIMENSION_KEYWORDS:
+        for kw in keywords:
+            if kw in question:
+                dimensions.append(entry)
+                hit = hit or kw
+                break
+    if any(kw in question for kw in _MEASURE_KEYWORDS):
+        measure = _REGISTRATION_MEASURE if _REGISTRATION_MEASURE in REGISTRY.measures \
+            else next(iter(REGISTRY.measures), None)
+        if measure:
+            return RoutePlan(measure=measure, dimensions=tuple(dimensions),
+                             hit=hit or next(kw for kw in _MEASURE_KEYWORDS if kw in question))
+    return RoutePlan()  # no confident mapping → unregistered
+
+
+def viz_for(measure: str, dimensions) -> str | None:
+    """D7 viz contract from query shape: no dimension → kpi; single channel →
+    bar; gender → pie; time grain → line; composites → None (table fallback)."""
+    if not dimensions:
+        return "kpi"
+    if len(dimensions) == 1:
+        first = dimensions[0].split("=")[0]
+        if first.startswith("channel_l"):
+            return "bar"
+        if first == "gender":
+            return "pie"
+        if first == "time_grain":
+            return "line"
+    return None
+
+
+def _short_label(description: str) -> str:
+    return description.split("：", 1)[0]
 
 
 def _ready_labels() -> str:
-    """当前可问清单，从规则注册表单一来源生成（新注册规则自动出现在拒答引导里）。"""
-    return "、".join(r["label"] for r in RULES.values() if "label" in r)
+    """Currently answerable primitives, generated from the registry alone."""
+    reg = REGISTRY
+    labels = [_short_label(m.description) for m in reg.measures.values()]
+    labels += [_short_label(d.description) for d in reg.dimensions.values()]
+    return "、".join(labels)
+
+
+# 拒答句式池：{kw}=命中词，{ready}=当前已注册原语清单；同一问句重试稳定（seed=request_id）
+_REJECT_VARIANTS = (
+    "「{kw}」对应的口径还没有在语义层注册，我不猜数。现在能答：{ready}，换个问法试试？",
+    "「{kw}」超出了当前已注册的语义范围。宁可不答，不出假数。已就绪的口径：{ready}。",
+    "「{kw}」暂无可回答的注册口径，不生成 SQL、不猜测。已就绪：{ready}；扩展需先注册对应度量与维度。",
+)
 
 
 def build_reject_answer(keyword: str | None, seed: str) -> str:
@@ -83,24 +128,25 @@ def build_reject_answer(keyword: str | None, seed: str) -> str:
     idx = int(hashlib.sha256(seed.encode("utf-8")).hexdigest(), 16) % len(_REJECT_VARIANTS)
     return _REJECT_VARIANTS[idx].format(kw=kw, ready=_ready_labels())
 
-# Keyword scan order: reject-first so scope questions never leak into data rules.
-RULE_ORDER = ["OUT_OF_SCOPE", "GENDER_RATIO", "REG_BY_CHANNEL", "REG_TOTAL"]
 
 # PII fields (appendix C sensitive_fields): only encrypted state may leave the layer.
 SENSITIVE_FIELDS = ["usr_phone_erpt", "usr_idcardno_erpt"]
 
 
-def keyword_route(question: str):
-    """Fallback router when LLM routing is unavailable. Returns (rule_id|None, why)."""
-    for rid in RULE_ORDER:
-        for kw in RULES[rid]["keywords"]:
-            if kw in question:
-                return rid, f"命中关键词「{kw}」"
-    return None, "无规则命中"
-
-
 def build_profile() -> dict:
-    """Appendix-C profile schema. viz_map/rule_hints generated from RULES (single source)."""
+    """Appendix-C profile schema; viz_map/rule_hints derived from the registry."""
+    reg = REGISTRY
+    status = ", ".join(f"{rid}({rule.status})" for rid, rule in sorted(reg.rules.items()))
+    rule_hints: dict = {}
+    for mid, m in reg.measures.items():
+        rule_hints[mid] = {"caliber": f"{m.description}；口径规则 {status}" if status else m.description}
+    for did, d in reg.dimensions.items():
+        rule_hints[did] = {"caliber": d.description}
+    viz_map: dict = {}
+    for mid in reg.measures:
+        viz_map[mid] = viz_for(mid, ())
+        for did in reg.dimensions:
+            viz_map[f"{mid}+{did}"] = viz_for(mid, (did,))
     return {
         "name": "fortune-registration",
         "display": "财富ThoughtSpot",
@@ -114,20 +160,14 @@ def build_profile() -> dict:
             "7月注册用户数是多少？",
         ],
         "path_labels": {
-            "hot": "热路径·月报口径",
-            "cold_pushdown": "冷路径·明细下推",
-            "cold_adhoc": "冷路径·即席计算",
+            "semantic_pushdown": "语义下推·镜像库",
             "blocked_param": "参数待补/超边界",
             "unregistered": "未注册口径",
             "rejected": "范围外",
             "validation_failed": "校验未通过",
         },
-        "rule_hints": {
-            rid: {"caliber": rule["caliber"]}
-            for rid, rule in RULES.items()
-            if "caliber" in rule
-        },
-        "viz_map": {rid: rule["viz"] for rid, rule in RULES.items() if "viz" in rule},
+        "rule_hints": rule_hints,
+        "viz_map": viz_map,
         "sensitive_fields": list(SENSITIVE_FIELDS),
         "role_visibility": {"analyst": ["L1", "L2", "L3", "timing"], "viewer": ["L1"]},
     }

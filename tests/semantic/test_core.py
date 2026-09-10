@@ -3,6 +3,7 @@
 Env overrides happen BEFORE importing src.semantic so the package pins the
 isolated tmp stores; SEMANTIC_DISABLE_LLM=1 forces keyword routing (deterministic,
 no network) — which also exercises the degraded-success mapping (§4.2 #2b).
+Queries run against the L2 mirror via fortune_semantic.compiler.
 """
 
 import json
@@ -27,17 +28,17 @@ storage.migrate()
 client = TestClient(app)
 
 QUESTIONS = {
-    "hot": "2026年8月注册用户数是多少？",
-    "cold_pushdown": "2026年8月分渠道注册用户数",
-    "cold_adhoc": "2026年8月注册用户男女比例",
+    "kpi": "2026年8月注册用户数是多少？",
+    "channel": "2026年8月分渠道注册用户数",
+    "gender": "2026年8月注册用户男女比例",
     "rejected": "抽奖活动效果怎么样？",
     "blocked_param": "注册用户数是多少？",
     "out_of_range": "2026年10月注册用户数是多少？",
 }
 EXPECTED = {  # question -> (path, state, block_reason)
-    "hot": ("hot", "success_warning", None),  # degraded: LLM disabled -> keyword route
-    "cold_pushdown": ("cold_pushdown", "success_warning", None),
-    "cold_adhoc": ("cold_adhoc", "success_warning", None),
+    "kpi": ("semantic_pushdown", "success_warning", None),  # degraded: LLM disabled -> keyword route
+    "channel": ("semantic_pushdown", "success_warning", None),
+    "gender": ("semantic_pushdown", "success_warning", None),  # + honest unfilled-dimension degradation
     "rejected": ("rejected", "reject_scope", None),
     "blocked_param": ("blocked_param", "ask_param", "missing_param"),
     "out_of_range": ("blocked_param", "reject_range", "out_of_range"),
@@ -66,6 +67,7 @@ def test_six_paths_each_produce_final_with_structured_state():
         assert result["state"] == expected_state, (key, result["state"])
         assert result.get("block_reason") == expected_block, (key, result.get("block_reason"))
         assert result["request_id"], key
+        assert result["data_profile"] == "mock", key  # every result carries the mock badge
         # steps numbered 1..N continuously (§7 #3)
         nums = [s["n"] for s in result["steps"]]
         assert nums == list(range(1, len(nums) + 1)), (key, nums)
@@ -74,10 +76,11 @@ def test_six_paths_each_produce_final_with_structured_state():
 
 def test_answer_numbers_traceable_to_rows():
     """D6 invariant: every number in the answer derives from rows/params, no hallucination."""
-    for key in ("hot", "cold_pushdown", "cold_adhoc"):
+    for key in ("kpi", "channel", "gender"):
         result = _final(list(engine.iter_query(QUESTIONS[key])))
         assert result["rows"], key
-        allowed = engine.traceable_numbers(result["rule"], result["rows"], result.get("params"))
+        allowed = engine.traceable_numbers(
+            result["measure"], result.get("dimensions") or (), result["rows"], result.get("params"))
         answer_nums = {t.replace(",", "") for t in NUM_RE.findall(result["answer"])}
         assert answer_nums <= allowed, (key, answer_nums - allowed)
 
@@ -89,7 +92,7 @@ def test_client_request_id_idempotent_single_trace():
     for _ in range(2):
         with client.stream(
             "POST", "/api/chat",
-            json={"question": QUESTIONS["hot"], "client_request_id": "CRID-TEST-1"},
+            json={"question": QUESTIONS["kpi"], "client_request_id": "CRID-TEST-1"},
         ) as resp:
             assert resp.status_code == 200
             frames = [
@@ -109,7 +112,7 @@ def test_session_delete_is_hidden_not_physical():
     session_id = client.post("/api/sessions", json={"title": "T1测试会话"}).json()["id"]
     with client.stream(
         "POST", "/api/chat",
-        json={"question": QUESTIONS["hot"], "conversation_id": session_id,
+        json={"question": QUESTIONS["kpi"], "conversation_id": session_id,
               "client_request_id": "CRID-SESS-1"},
     ) as resp:
         assert resp.status_code == 200
@@ -151,7 +154,7 @@ def test_pii_guard_passes_encrypted_masks_plaintext():
 
 
 def test_viz_contract_propagated():
-    """D7: rule viz field must propagate to final.result.viz (None → table fallback)."""
+    """D7: shape-derived viz must propagate to final.result.viz (None → table fallback)."""
     from semantic.engine import iter_query
     for q, expected in [("8月按渠道的注册用户数？", "bar"), ("8月注册用户数是多少？", "kpi")]:
         final = None

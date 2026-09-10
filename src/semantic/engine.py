@@ -1,41 +1,56 @@
-"""Decision-chain engine: iter_query event stream migrated from
-scripts/fortune_demo/semantic_layer.py (logic preserved).
+"""Decision-chain engine over the L2 semantic layer (primitive combinations).
 
-Engineering upgrades:
-- continuous per-query step numbering (product doc §7 #3, no skipped numbers);
-- structured eight-state mapping + block_reason (missing_param / out_of_range);
-- generic month parameter parsing (out_of_range reachable without the LLM);
-- data boundary from semantic-layer metadata (config.data_range), not hardcoded;
-- SQL executed with bound parameters (templates stay :named for display);
-- PII guard on rows, sanitized LLM raw output, E_SQL error frames;
-- D6 hard gate: template answers validated against the traceable number set
-  (untraceable number -> validation_failed, product doc §5-D6/§5-D9);
-- cancel support: client disconnect persists the trace marked canceled.
+Routing (LLM, registry-constrained) → structured plan {measure, dimensions};
+the keyword router falls back to equivalent primitive combinations. Execution
+delegates to fortune_semantic.compiler: deterministic SQL bound to the
+registry, executed with time parameters against the DuckDB mirror.
+
+- answers render through D6 templates; every printed number must trace to
+  rows/params (hard gate, §5-D9);
+- SemanticError(UNREGISTERED_*) from the compiler and reject plans from the
+  routers both end in the structured refusal card (reject_scope flow);
+- a registered dimension whose mirror column is unfilled (usr_sex all NULL)
+  degrades with honest copy instead of inventing a distribution;
+- every result carries data_profile="mock" (answers come from the 仿真镜像);
+- continuous step numbering, idempotent traces, cancel-on-disconnect preserved.
 """
 
 import calendar
 import re
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+import duckdb
+
+from src.fortune_semantic.compiler import QueryRequest, compile_query
+from src.fortune_semantic.registry import REGISTRY, SemanticError
+
 from . import config, errors, sanitize, storage, templates
 from .llm_route import llm_route
-from .rules import RULES, SENSITIVE_FIELDS, build_reject_answer, keyword_route
+from .rules import (
+    SENSITIVE_FIELDS,
+    RoutePlan,
+    build_reject_answer,
+    keyword_route,
+    viz_for,
+)
 from .templates import NumberValidationError, validate_numbers
 
 MONTH_RE = re.compile(r"(?:(20\d{2})\s*[-年/])?\s*(\d{1,2})\s*月")
-KW_HIT_RE = re.compile(r"命中「(.+?)」")
 TOKEN_CHUNK = 3
 TOKEN_SLEEP_S = 0.01
-SUCCESS_PATHS = {"hot", "cold_pushdown", "cold_adhoc"}
+SUCCESS_PATHS = {"semantic_pushdown"}
 EMPTY_ANSWER = "该范围内无数据，请调整时间范围后重试。"
+DIMENSION_UNFILLED_ANSWER = (
+    "该维度已在语义层建模，但仿真镜像数据未填充对应字段，无法给出真实分布——"
+    "维度已建模、仿真数据未填充，如实告知，不猜测。"
+)
 
 
 def new_request_id() -> str:
-    return f"REQ-{date.today().isoformat()}-{uuid.uuid4().hex[:6].upper()}"
+    return f"REQ-{date.today().isoformat()}-{uuid.uuid4().hex[:6].upper()}"  # noqa: DTZ011 本地日
 
 
 def resolve_state(path: str, block_reason: str | None = None,
@@ -57,22 +72,15 @@ def resolve_state(path: str, block_reason: str | None = None,
 
 
 def extract_params(question: str) -> dict | None:
-    """Generic 「(YYYY)M月」 parsing; out-of-calendar months flow into the range check."""
+    """Generic 「(YYYY)M月」 parsing → compiler time bounds; out-of-calendar
+    months flow into the range check."""
     match = MONTH_RE.search(question)
     if not match:
         return None
     year = int(match.group(1) or 2026)
     month = int(match.group(2))
     last = calendar.monthrange(year, month)[1] if 1 <= month <= 12 else 31
-    return {"start": f"{year:04d}-{month:02d}-01", "end": f"{year:04d}-{month:02d}-{last:02d}"}
-
-
-def compile_sql(template: str, params: dict) -> str:
-    """Human-readable SQL for display/trace. Execution itself uses bound parameters."""
-    sql = template
-    for key, val in params.items():
-        sql = sql.replace(":" + key, f"'{val}'")
-    return sql
+    return {"time_from": f"{year:04d}-{month:02d}-01", "time_to": f"{year:04d}-{month:02d}-{last:02d}"}
 
 
 @dataclass
@@ -109,13 +117,13 @@ class Ctx:
 
 # ------------------------------------------------------------------- templates
 
-def answer_assemble(rule_id: str, rows: list, params: dict) -> str:
+def answer_assemble(measure_col: str, dims, rows: list, params: dict) -> str:
     """Semantic-layer template assembly — the LLM never produces numbers (D6).
-    Sentence patterns + slot builders live in templates.py (per-rule registry)."""
-    return templates.render(rule_id, rows, params)
+    Shapes without a template fall back to a number-free sentence (table renders)."""
+    return templates.render(measure_col, dims, rows, params) or "查询完成，结果见下表。"
 
 
-def traceable_numbers(rule_id: str, rows: list, params: dict | None) -> set:
+def traceable_numbers(measure_col: str, dims, rows: list, params: dict | None) -> set:
     """Every number the templates may print, derived from rows/params only.
     Invariant (D6 / test): numbers(answer) ⊆ traceable_numbers(...)."""
     allowed: set = set()
@@ -129,14 +137,13 @@ def traceable_numbers(rule_id: str, rows: list, params: dict | None) -> set:
         for value in row.values():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 add(value)
-    for col in ("cnt", "total"):
-        vals = [r[col] for r in rows if col in r]
-        if vals:
-            add(sum(vals))
-    if rule_id == "GENDER_RATIO" and rows:
-        total = sum(r["cnt"] for r in rows)
+    if dims and rows:
+        add(sum(r[measure_col] for r in rows))
+    dim_ids = {d.split("=")[0] for d in dims}
+    if "gender" in dim_ids and rows:
+        total = sum(r[measure_col] for r in rows)
         for r in rows:
-            allowed.add(f"{100 * r['cnt'] / total:.1f}")
+            allowed.add(f"{100 * r[measure_col] / total:.1f}")
     for bound in (params or {}).values():
         for part in re.split(r"\D", str(bound)):
             if part:
@@ -148,19 +155,21 @@ def traceable_numbers(rule_id: str, rows: list, params: dict | None) -> set:
 # ----------------------------------------------------------------- chain steps
 
 def _route(ctx: Ctx):
-    """LLM routing (enum-restricted) with keyword fallback. Returns (rule_id, llm, route_code, why)."""
+    """LLM routing (registry-constrained) with keyword fallback.
+    Returns (plan, llm, route_code, why)."""
     llm = llm_route(ctx.question)
     if "error" not in llm:
-        return llm["rule_id"], llm, None, f"DeepSeek 路由 {llm['ms']}ms · 原始输出: {llm['raw']}"
-    rule_id, kw = keyword_route(ctx.question)
-    why = f"LLM 路由不可用（{llm['error']}），退回关键词匹配 → 命中「{kw}」"
-    return rule_id, None, llm.get("error_code", errors.E_ROUTE_FALLBACK), why
+        return llm["plan"], llm, None, f"DeepSeek 路由 {llm['ms']}ms · 原始输出: {llm['raw']}"
+    plan = keyword_route(ctx.question)
+    hit = plan.hit or plan.reject_domain or "无命中"
+    why = f"LLM 路由不可用（{llm['error']}），退回关键词匹配 → {hit}"
+    return plan, None, llm.get("error_code", errors.E_ROUTE_FALLBACK), why
 
 
 def _check_params(params: dict | None):
     """Returns (block_reason, answer, detail) when the query must stop, else None."""
     rng = config.data_range()
-    if params and (params["start"] < rng["min"] or params["end"] > rng["max"]):
+    if params and (params["time_from"] < rng["min"] or params["time_to"] > rng["max"]):
         return ("out_of_range",
                 f"当前数据仅覆盖 {rng['min']} ~ {rng['max']}，该时间段无数据。",
                 f"时间范围超出数据边界 {rng} → 如实说明，不硬答")
@@ -170,48 +179,45 @@ def _check_params(params: dict | None):
     return None
 
 
-def _checks(conn: sqlite3.Connection, rule_id: str, rows: list, params: dict) -> list:
-    """Result validation (demo logic): column shape + cross-source consistency."""
-    rule = RULES[rule_id]
-    checks = []
-    actual_cols = list(rows[0].keys()) if rows else rule["columns"]
-    checks.append(("列结构与规则声明一致", actual_cols == rule["columns"]))
-    if rule_id == "REG_BY_CHANNEL":
-        channels = {r[0] for r in conn.execute("SELECT chnl_nm FROM dim_ch_chl_df")}
-        checks.append(("渠道枚举 ⊆ 渠道维表", all(r["channel"] in channels for r in rows)))
-        subtotal = sum(r["cnt"] for r in rows)
-        total = conn.execute(
-            "SELECT COALESCE(SUM(cnt),0) FROM dws_reg_daily_df WHERE data_dt BETWEEN ? AND ?",
-            (params["start"], params["end"]),
-        ).fetchone()[0]
-        checks.append((f"同源交叉：分渠道合计 {subtotal} = 热路径总数 {total}", subtotal == total))
-    if rule_id == "GENDER_RATIO":
-        checks.append(("冷路径免责声明已附加", True))
-    return checks
+def _tables_for(measure_id: str, dimensions) -> list:
+    """Queried tables with their warehouse layer, derived from the registry."""
+    def layer_of(table: str) -> str:
+        return table.split(".")[-1].split("_")[0].upper()
+
+    reg = REGISTRY
+    out = [{"name": reg.measures[measure_id].source_table,
+            "layer": layer_of(reg.measures[measure_id].source_table)}]
+    seen = {reg.measures[measure_id].source_table}
+    for entry in dimensions:
+        dim = reg.dimensions.get(entry.split("=")[0])
+        if dim is None or dim.join is None or dim.join.table in seen:
+            continue
+        seen.add(dim.join.table)
+        out.append({"name": dim.join.table, "layer": layer_of(dim.join.table)})
+    return out
 
 
-def _execute(rule: dict, rule_id: str, params: dict):
-    """Pushdown execution + checks inside one connection (single executor step)."""
-    conn = sqlite3.connect(config.FORTUNE_DB)
-    conn.row_factory = sqlite3.Row
-    try:
-        t0 = time.time()
-        rows = [dict(r) for r in conn.execute(rule["sql"], params)]
-        ms = round((time.time() - t0) * 1000, 1)
-        checks = _checks(conn, rule_id, rows, params)
-        return rows, checks, ms
-    finally:
-        conn.close()
+def _reject_card(domain: str | None, hit: str | None, code: str = "UNREGISTERED_MEASURE",
+                 message: str | None = None, **extra_details) -> dict:
+    """Structured refusal card: machine-readable reason + what IS answerable."""
+    return {
+        "code": code,
+        "message": message or f"未注册域「{domain}」：当前语义层无可回答的注册口径",
+        "details": {"hit": hit, "domain": domain,
+                    "available_measures": sorted(REGISTRY.measures), **extra_details},
+    }
 
 
-# ------------------------------------------------------------------ end states
-
-def _stream_answer(ctx: Ctx):
-    yield ctx.emit("回答", "ok", ctx.result["answer"])
-    answer = ctx.result["answer"]
-    for i in range(0, len(answer), TOKEN_CHUNK):
-        yield {"kind": "token", "text": answer[i:i + TOKEN_CHUNK]}
-        time.sleep(TOKEN_SLEEP_S)
+def _finish_refused(ctx: Ctx, card: dict, keyword: str | None):
+    """OUT_OF_SCOPE flow: structured refusal card + variant copy — never numbers."""
+    answer = build_reject_answer(keyword, ctx.request_id)
+    ctx.result["path"] = "rejected"
+    ctx.result["error_code"] = errors.E_SCOPE
+    ctx.result["reject_card"] = card
+    ctx.result["answer"] = answer
+    yield ctx.emit("口径拦截", "blocked", f"结构化拒答 [{card['code']}] {card['message']}")
+    yield ctx.emit("回答", "blocked", answer)
+    yield ctx.final_frame()
 
 
 def _finish_error(ctx: Ctx, code: str, message: str) -> dict:
@@ -229,48 +235,50 @@ def _finish_error(ctx: Ctx, code: str, message: str) -> dict:
 # ------------------------------------------------------------------- main flow
 
 def _run_gates(ctx: Ctx):
-    """Route → scope/param gates. Yields gate frames; returns (rule, params), or
-    (None, None) when the chain already terminated (unregistered/rejected/blocked)."""
-    rule_id, llm, route_code, why = _route(ctx)
-    ctx.result["rule"] = rule_id
+    """Route → reject/param gates. Yields gate frames; returns (plan, llm, params),
+    or (None, None, None) when the chain already terminated."""
+    plan, llm, route_code, why = _route(ctx)
+    ctx.result["measure"] = plan.measure
+    ctx.result["dimensions"] = list(plan.dimensions)
+    ctx.result["rule"] = plan.shape if plan.measure else None
     if route_code:
         ctx.result["degraded"] = True
         ctx.result["route_code"] = route_code
-    yield ctx.emit("意图路由", "ok" if rule_id else "fail",
-                   f"选定规则 = {rule_id or '无'}（{why}）")
+    yield ctx.emit("意图路由", "ok" if (plan.measure or plan.rejected) else "fail",
+                   f"选定查询 = {plan.shape}（{why}）")
 
-    if rule_id is None:
+    if plan.rejected:  # unregistered business domain → structured refusal card
+        yield from _finish_refused(ctx, _reject_card(plan.reject_domain, plan.hit), plan.hit)
+        return None, None, None
+
+    if plan.measure is None:  # no routing hit at all
         ctx.result["path"] = "unregistered"
         ctx.result["error_code"] = errors.E_SCOPE
+        ctx.result["reject_card"] = _reject_card(
+            None, None, message="问题未映射到任何已注册原语组合")
         ctx.result["answer"] = "该问题尚未注册口径，可提交为新的派生规则候选。"
         yield ctx.emit("回答", "blocked", ctx.result["answer"])
         yield ctx.final_frame()
-        return None, None
+        return None, None, None
 
-    rule = RULES[rule_id]
-    ctx.result["path"] = rule["path"]
-    ctx.result["tables"] = rule.get("tables", [])
+    measure = REGISTRY.measures[plan.measure]
+    status = ", ".join(f"{rid}({rule.status})" for rid, rule in sorted(REGISTRY.rules.items()))
+    yield ctx.emit("口径声明", "ok",
+                   f"{measure.description}；口径规则 {status or '无'}")
 
-    if rule.get("reject"):  # out-of registered scope → refuse, never guess
-        kw = (KW_HIT_RE.search(why) or [None, None])[1]  # 关键词回退路由才有命中词
-        answer = build_reject_answer(kw, ctx.request_id)
-        ctx.result["error_code"] = errors.E_SCOPE
-        ctx.result["answer"] = answer
-        yield ctx.emit("口径拦截", "blocked", answer)
-        yield ctx.emit("回答", "blocked", ctx.result["answer"])
-        yield ctx.final_frame()
-        return None, None
-
-    yield ctx.emit("口径声明", "ok", rule["caliber"])
-
-    params = (llm.get("params") if llm else None) or extract_params(ctx.question)
+    params = None
+    if llm and llm.get("time_from") and llm.get("time_to"):
+        params = {"time_from": llm["time_from"], "time_to": llm["time_to"]}
+    if params is None:
+        params = extract_params(ctx.question)
     blocked = _check_params(params)
     if blocked:
         yield from _finish_blocked_param(ctx, blocked)
-        return None, None
-    src_note = "DeepSeek 抽取" if (llm and llm.get("params")) else "关键词回退抽取"
+        return None, None, None
+    src_note = "DeepSeek 抽取" if (llm and llm.get("time_from")) else "关键词回退抽取"
     yield ctx.emit("参数抽取+校验", "ok", f"{params} ✓（{src_note}）")
-    return rule, params
+    ctx.result["path"] = "semantic_pushdown"
+    return plan, llm, params
 
 
 def _finish_blocked_param(ctx: Ctx, blocked):
@@ -285,23 +293,75 @@ def _finish_blocked_param(ctx: Ctx, blocked):
     yield ctx.final_frame()
 
 
-def _run_data_path(ctx: Ctx, rule: dict, params: dict):
-    """SQL compile → pushdown → validation → template answer (numbers from rows only)."""
-    rule_id = ctx.result["rule"]
+def _presentation_order(plan: RoutePlan, rows: list) -> list:
+    """Leaderboard shapes (single non-time dimension) sort by measure DESC for
+    the TOP-N answer; the compiler itself only orders by dimension columns."""
+    if len(plan.dimensions) == 1 and not plan.dimensions[0].startswith("time_grain"):
+        return sorted(rows, key=lambda r: r[plan.measure], reverse=True)
+    return rows
+
+
+def _execute(conn, compiled, plan: RoutePlan) -> tuple:
+    """Pushdown execution + same-source cross check inside one read-only
+    mirror connection. Returns (rows-as-dicts, columns, checks, ms)."""
+    t0 = time.time()
+    cursor = conn.execute(compiled.sql, list(compiled.params))
+    columns = [d[0] for d in cursor.description]
+    rows = _presentation_order(plan, [dict(zip(columns, row)) for row in cursor.fetchall()])
+    ms = round((time.time() - t0) * 1000, 1)
+    checks = [(f"列结构与编译产物一致 {list(compiled.columns)}", columns == list(compiled.columns))]
+    if plan.dimensions:  # cross-source invariant: grouped sum == dimensionless total
+        total_req = QueryRequest(measure=plan.measure, dimensions=(),
+                                 time_from=compiled.params[0], time_to=compiled.params[1])
+        total_sql = compile_query(total_req)
+        total = conn.execute(total_sql.sql, list(total_sql.params)).fetchone()[0]
+        subtotal = sum(r[plan.measure] for r in rows)
+        checks.append((f"同源交叉：分组合计 {subtotal} = 无维度总数 {total}", subtotal == total))
+    return rows, columns, checks, ms
+
+
+def _stream_answer(ctx: Ctx):
+    yield ctx.emit("回答", "ok", ctx.result["answer"])
+    answer = ctx.result["answer"]
+    for i in range(0, len(answer), TOKEN_CHUNK):
+        yield {"kind": "token", "text": answer[i:i + TOKEN_CHUNK]}
+        time.sleep(TOKEN_SLEEP_S)
+
+
+def _run_data_path(ctx: Ctx, plan: RoutePlan, params: dict):
+    """Compiler SQL → pushdown → validation → template answer (numbers from rows only)."""
+    mcol = plan.measure
     ctx.result["params"] = params
-    ctx.result["viz"] = rule.get("viz")  # D7: visualization contract from rule registry (None → table fallback)
-    ctx.result["sql"] = compile_sql(rule["sql"], params)
-    yield ctx.emit("SQL 编译", "ok", "按命中规则的模板编译，参数已绑定", sql=ctx.result["sql"])
+    ctx.result["viz"] = viz_for(plan.measure, plan.dimensions)  # D7: shape-derived viz (None → table)
+    request = QueryRequest(measure=plan.measure, dimensions=plan.dimensions,
+                           time_from=params["time_from"], time_to=params["time_to"])
+    try:
+        compiled = compile_query(request)
+    except SemanticError as exc:  # defense in depth: router validated, compiler decides
+        yield from _finish_refused(ctx, dict(exc.to_dict()["error"]),
+                                   exc.details.get("measure") or exc.details.get("dimension"))
+        return
+    ctx.result["sql"] = compiled.sql
+    ctx.result["tables"] = _tables_for(plan.measure, plan.dimensions)
+    yield ctx.emit("SQL 编译", "ok", "语义层编译器按注册表确定性编译，时间走绑定参数",
+                   sql=compiled.sql)
 
     try:
-        rows, checks, ms = _execute(rule, rule_id, params)
-    except sqlite3.Error:
+        conn = duckdb.connect(str(config.MIRROR_DB), read_only=True)
+        try:
+            rows, _columns, checks, ms = _execute(conn, compiled, plan)
+        finally:
+            conn.close()
+    except SemanticError as exc:
+        yield from _finish_refused(ctx, dict(exc.to_dict()["error"]), None)
+        return
+    except duckdb.Error:
         yield _finish_error(ctx, errors.E_SQL,
                             errors.user_message(errors.E_SQL, request_id=ctx.request_id))
         return
 
     ctx.result["rows"] = sanitize.apply_pii_policy(rows, SENSITIVE_FIELDS)
-    yield ctx.emit("下推执行", "ok", f"sqlite → {len(rows)} 行 · {ms}ms",
+    yield ctx.emit("下推执行", "ok", f"duckdb 镜像 → {len(rows)} 行 · {ms}ms",
                    ms=ms, row_count=len(rows))
     for name, ok in checks:
         yield ctx.emit("结果校验", "ok" if ok else "fail", f"{'✓' if ok else '✗'} {name}")
@@ -314,15 +374,22 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
         yield ctx.final_frame()
         return
 
+    dim_ids = {d.split("=")[0] for d in plan.dimensions}
     if not rows:
         ctx.result["empty"] = True
         ctx.result["answer"] = EMPTY_ANSWER
+    elif "gender" in dim_ids and all(r.get("gender") is None for r in rows):
+        # Registered dimension, unfilled mirror column → honest degradation, no fake split.
+        ctx.result["degraded"] = True
+        ctx.result["degraded_reason"] = "dimension_unfilled"
+        ctx.result["answer"] = DIMENSION_UNFILLED_ANSWER
+        yield ctx.emit("降级说明", "warn",
+                       "gender 已注册，但镜像 dim_cu_usr_info_df.usr_sex 全为 NULL")
     else:
-        notice = f"（{rule['notice']}）" if rule.get("notice") else ""
-        ctx.result["answer"] = answer_assemble(rule_id, rows, params) + notice
+        ctx.result["answer"] = answer_assemble(mcol, plan.dimensions, rows, params)
     try:  # D6 hard gate: every printed number must be traceable (§5-D9)
         found = validate_numbers(ctx.result["answer"],
-                                 traceable_numbers(rule_id, rows, params))
+                                 traceable_numbers(mcol, plan.dimensions, rows, params))
     except NumberValidationError as exc:
         ctx.result["path"] = "validation_failed"
         ctx.result["error_code"] = errors.E_VALIDATION
@@ -337,10 +404,10 @@ def _run_data_path(ctx: Ctx, rule: dict, params: dict):
 
 
 def _run(ctx: Ctx):
-    rule, params = yield from _run_gates(ctx)
-    if rule is None:
+    plan, _llm, params = yield from _run_gates(ctx)
+    if plan is None:
         return
-    yield from _run_data_path(ctx, rule, params)
+    yield from _run_data_path(ctx, plan, params)
 
 
 def iter_query(question: str, request_id: str | None = None):
@@ -350,9 +417,12 @@ def iter_query(question: str, request_id: str | None = None):
     rid = request_id or new_request_id()
     ctx = Ctx(question=question, request_id=rid, t0=time.time(), result={
         "request_id": rid,
-        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "started_at": datetime.now().isoformat(timespec="seconds"),  # noqa: DTZ005 与 storage 同格式
         "question": question,
         "rule": None,
+        "measure": None,
+        "dimensions": [],
+        "data_profile": "mock",  # 仿真镜像数据徽标元数据（D7 下一步前端消费）
         "path": "unknown",
         "state": None,
         "answer": "",

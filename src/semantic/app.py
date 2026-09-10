@@ -8,7 +8,7 @@ frames while a blocking engine step runs (product doc appendix A).
 
 import asyncio
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -110,10 +110,8 @@ async def _sse_stream(gen):
                 break
             yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
     finally:
-        try:
-            gen_iter.close()  # engine records a canceled trace on client disconnect
-        except Exception:
-            pass
+        with suppress(Exception):  # engine records a canceled trace on client disconnect
+            gen_iter.close()
 
 
 @app.post("/api/chat")

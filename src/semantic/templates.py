@@ -1,50 +1,62 @@
 """D6 answer layer (P0 template scheme, product doc §5-D6/§5-D9).
 
-Per-rule sentence templates with number slots + the number-consistency
-validator. Slot values are computed from rows/params only — neither the LLM
-nor glue code may invent a number. validate_numbers is the hard gate: every
-number printed in an answer must be traceable to the semantic-layer number
-set (percent/unit conversions allowed), otherwise the whole answer is
-rejected and the caller routes to validation_failed.
+Templates are keyed by query SHAPE (dimension set over the L2 registry
+output), not by legacy rule ids. Slot values are computed from rows/params
+only — neither the LLM nor glue code may invent a number. validate_numbers
+is the hard gate: every number printed in an answer must be traceable to
+the semantic-layer number set (percent/unit conversions allowed), otherwise
+the whole answer is rejected and the caller routes to validation_failed.
 """
 
 import re
 
 
-# Answer templates per rule: (sentence pattern with {slots}, slot builder).
-# Slot builders receive the post-PII rows and query params; they format the
-# numbers for display and return placeholder -> rendered-text dicts.
-def _slots_reg_total(rows, params):
-    return {"month": params["start"][:7], "total": f"{rows[0]['total']:,}"}
+def _slots_total(rows, params, mcol, _dim):
+    return {"month": params["time_from"][:7], "total": f"{rows[0][mcol]:,}"}
 
 
-def _slots_reg_by_channel(rows, params):
-    total = sum(r["cnt"] for r in rows)
-    top3 = "、".join(f"{r['channel']} {r['cnt']:,}" for r in rows[:3])
+def _slots_channel(rows, _params, mcol, dim):
+    total = sum(r[mcol] for r in rows)
+    top3 = "、".join(f"{r[dim]} {r[mcol]:,}" for r in rows[:3])
     return {"total": f"{total:,}", "top3": top3}
 
 
-def _slots_gender_ratio(rows, params):
-    total = sum(r["cnt"] for r in rows)
+def _slots_gender(rows, _params, mcol, dim):
+    total = sum(r[mcol] for r in rows)
     distribution = "、".join(
-        f"{r['gender']} {r['cnt']:,}（{100 * r['cnt'] / total:.1f}%）" for r in rows)
+        f"{r[dim] or '未知'} {r[mcol]:,}（{100 * r[mcol] / total:.1f}%）" for r in rows)
     return {"distribution": distribution, "total": f"{total:,}"}
 
 
-TEMPLATES = {
-    "REG_TOTAL": ("{month} 月注册 {total} 人。", _slots_reg_total),
-    "REG_BY_CHANNEL": ("共 {total} 人，TOP3：{top3}。", _slots_reg_by_channel),
-    "GENDER_RATIO": ("{distribution}。合计 {total} 人。", _slots_gender_ratio),
-}
+_GRAIN_LABEL = {"day": "日", "week": "周", "month": "月"}
 
 
-def render(rule_id: str, rows: list, params: dict) -> str:
-    """Template selection + number-slot filling (D6 P0). Unknown rule -> ''."""
-    entry = TEMPLATES.get(rule_id)
-    if entry is None:
+def _slots_trend(rows, _params, mcol, dim):
+    grain = dim.split("=", 1)[1]
+    points = "、".join(f"{r[dim]} {r[mcol]:,}" for r in rows)
+    return {"grain": _GRAIN_LABEL.get(grain, grain), "points": points}
+
+
+def render(measure_col: str, dims, rows: list, params: dict) -> str:
+    """Shape-keyed template selection + number-slot filling (D6 P0).
+    Unknown shape or empty rows -> '' (caller falls back to a number-free
+    sentence; the table itself renders the rows)."""
+    if not rows:
         return ""
-    pattern, slots = entry
-    return pattern.format(**slots(rows, params))
+    if not dims:
+        return "{month} 月注册 {total} 人。".format(
+            **_slots_total(rows, params, measure_col, None))
+    first = dims[0]
+    if first.startswith("channel_l"):
+        return "共 {total} 人，TOP3：{top3}。".format(
+            **_slots_channel(rows, params, measure_col, first))
+    if first == "gender":
+        return "{distribution}。合计 {total} 人。".format(
+            **_slots_gender(rows, params, measure_col, first))
+    if first.startswith("time_grain"):
+        return "按{grain}趋势：{points}。".format(
+            **_slots_trend(rows, params, measure_col, first))
+    return ""
 
 
 # --------------------------------------------------------------- number gate
