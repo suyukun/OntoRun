@@ -164,11 +164,22 @@ export const api = {
   objectDetail: (kind: ObjectKind, id: string) =>
     getJson<ObjectDetail>(`/api/objects/${kind}/${encodeURIComponent(id)}`),
   history: (limit: number) => getJson<HistoryPayload>(`/api/history?limit=${limit}`),
-  confirmRule: async (ruleId: string, verdict: string, confirmeer: string) => {
+  // decision 可选（T203 R8 裁决）：带 decision:{option_key} 时后端按裁决处理
+  // （account/user/both=三选一落 confirmed；escalate=只留痕不翻转，A4-7）。
+  confirmRule: async (
+    ruleId: string,
+    verdict: string,
+    confirmeer: string,
+    decision?: { option_key: DecisionOptionKey }
+  ) => {
     const res = await fetch(`/api/rules/${ruleId}/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ verdict, confirmeer }),
+      body: JSON.stringify({
+        verdict,
+        confirmeer,
+        ...(decision ? { decision } : {}),
+      }),
     });
     if (!res.ok) {
       const text = await res.text();

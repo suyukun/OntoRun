@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { api, type CaliberRule, type TrialResult } from "../api";
 import { Button, Card, Collapse, Modal, Space, Tag, Typography, message } from "antd";
+import DivergenceCard from "./DivergenceCard";
 
 const { Text, Paragraph } = Typography;
 
@@ -182,6 +183,10 @@ export default function RuleCard({
         <Text type="secondary" style={{ fontSize: 12 }}>
           去口径确认页处理 →
         </Text>
+      ) : rule.divergence && rule.divergence.length > 0 && rule.status === "unverified" ? (
+        // R8 分歧裁决（T203）：有双口径对照且未决时，行动区换成裁决卡而非是非题按钮；
+        // 已确认（三选一落定）后回到普通卡走「可驳回」流，escalate 后仍待确认可再次裁决
+        <DivergenceCard rule={rule} confirmer={confirmer} onDone={onDone} />
       ) : (
         <>
           <Space wrap style={{ marginTop: 8 }}>
