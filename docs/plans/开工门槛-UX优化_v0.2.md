@@ -35,8 +35,9 @@ L 级，填全表。不做降级。
   - T-U2 [US2] src/semantic/insights.py（三条规则＋常量）＋GET /api/insights＋洞察卡组件＋常用查询兜底。判据：pytest test_insights_rules 绿（命中/不命中/兜底三态）。
   - T-U3 [US3][P] 节奏补间＋话术模板池。判据：vitest 补间断言绿＋假步骤零（断言步骤集合⊆真实 SSE 事件）。
   - T-U4 [US4][P] 改写并行＋模板兜底＋数字相等断言。判据：vitest 绿＋offline 冒烟回退路径绿。
+  - T-U5 [安全，TD-17 并入（Jack 2026-09-11）] src/semantic/llm_route.py 提示词硬化＋rules.py 差分特征拒绝规则（记录级/再识别问句→REJECT，如「哪天注册数正好是1」），tests/semantic 增 2~3 条断言。判据：GLM-safety_pii-002 真跑转 PASS＋tests/semantic 全绿。
 - **C2 前置**：无内部前置；**派活时机=引擎改动单收口后**（app.py 独占写）。
-- **C3 并行**：T-U1 ∥ T-U3 ∥ T-U4（前端）＋T-U2（后端），并发 4 ≤4。
+- **C3 并行**：T-U1 ∥ T-U3 ∥ T-U4（前端）＋T-U2（后端），并发 4 ≤4；T-U5 在首批任一完成后续派（含 src 改动，与 T-U2 同族串行更稳）。对抗块回归复跑压后至 T-U5 落地（llm_route 变更影响回归数字）。
 - **C4 止损**：各任务预期 1 轮；返工 ≥2 轮停回 B 修 spec。子代理派发单注明 bash timeoutMs ≥120000、禁全量 pytest。
 
 ## D. 验收
