@@ -335,6 +335,7 @@ RULES = {
             "转化链口径锚 ads_chnl_rgst_to_real_auth_dau_df（注册→实名→授权）"
         ),
         source_script=f"{WAREHOUSE_SCRIPT_DIR}/ADS层/核心指标/综合/脚本ads_chnl_rgst_to_real_auth_dau_df.sql",
+        status="confirmed",
     ),
 }
 
