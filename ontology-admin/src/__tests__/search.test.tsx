@@ -197,4 +197,18 @@ describe("T301 顶栏全局搜索 search_direct_hit", () => {
       expect(window.location.hash).toBe("#/object/table/ads_chnl_auth_qty_df"),
     );
   });
+
+  it("T-U1 搜索引导：placeholder 白话 + 无结果时有出路提示", async () => {
+    window.location.hash = "#/rules";
+    render(<App />);
+    const input = within(screen.getByRole("banner")).getByRole(
+      "combobox"
+    ) as HTMLInputElement;
+    // antd v6 占位符渲染为独立节点 .ant-select-placeholder（不在 input 属性上）
+    const phText = document.querySelector(".ant-select-placeholder")?.textContent;
+    expect(phText).toBe("搜数字、规则或表名");
+    fireEvent.mouseDown(input);
+    fireEvent.change(input, { target: { value: "绝对不存在的关键词xyzq" } });
+    expect(await screen.findByText(/没找到？换个词试试/)).toBeTruthy();
+  });
 });

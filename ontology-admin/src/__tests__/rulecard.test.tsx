@@ -90,7 +90,7 @@ describe("RuleCard v2 (T205)", () => {
     renderCard();
     // 默认收起：出处脚本不在 DOM
     expect(screen.queryByText("ads_chnl_auth_qty_df.sql")).toBeNull();
-    fireEvent.click(screen.getByText("技术细节"));
+    fireEvent.click(screen.getByText("技术细节（给工程师看的）"));
     expect(await screen.findByText("ads_chnl_auth_qty_df.sql")).toBeTruthy();
   });
 
@@ -99,7 +99,7 @@ describe("RuleCard v2 (T205)", () => {
     const expr = "COUNT(DISTINCT user_id) WHERE auth_flag = 'Y'";
     renderCard({ expression: expr });
     expect(screen.queryByText(expr)).toBeNull();
-    fireEvent.click(screen.getByText("技术细节"));
+    fireEvent.click(screen.getByText("技术细节（给工程师看的）"));
     expect(await screen.findByText(expr)).toBeTruthy();
   });
 
@@ -107,7 +107,7 @@ describe("RuleCard v2 (T205)", () => {
     stubFetch({ trial: { ok: true, body: trialOk } });
     renderCard();
     expect(
-      await screen.findByText(/按此口径跑 2026 年 8 月 = 552 人/)
+      await screen.findByText(/按这条计算规则跑 2026 年 8 月 = 552 人/)
     ).toBeTruthy();
   });
 
@@ -186,5 +186,14 @@ describe("RuleCard v2 (T205)", () => {
     expect(
       screen.queryByRole("button", { name: "✓ 对，就这样算" })
     ).toBeNull();
+  });
+
+  it("T-U1 三问人话分区：①是什么数/②怎么算的/③影响哪些表，技术细节标注给工程师", () => {
+    stubFetch({ trial: { ok: false } });
+    renderCard();
+    expect(screen.getByText(/① 是什么数？/)).toBeTruthy();
+    expect(screen.getByText(/② 怎么算的？/)).toBeTruthy();
+    expect(screen.getByText(/③ 影响哪些表？/)).toBeTruthy();
+    expect(screen.getByText("技术细节（给工程师看的）")).toBeTruthy();
   });
 });

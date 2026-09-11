@@ -61,13 +61,16 @@ export default function RuleCard({
 
   const submit = async (verdict: "confirmed" | "rejected") => {
     if (!confirmer.trim()) {
-      message.warning("请先在页首填写确认人（确认要落身份，进 git 历史）");
+      message.warning("请先在页首填写你的名字（确认要留名，日后可查）");
       return;
     }
     setLoading(verdict);
     try {
       const res = await api.confirmRule(rule.id, verdict, confirmer.trim());
-      message.success(`${res.message}（commit ${res.record.commit ?? "无"}）`, 5);
+      message.success(
+        `${res.message}（存档编号 ${res.record.commit ?? "无"}）`,
+        5,
+      );
       setRejecting(false);
       onDone();
     } catch (e) {
@@ -100,7 +103,7 @@ export default function RuleCard({
       <Text type="secondary" style={{ fontSize: 12 }}>
         上次确认：
         {last
-          ? `${last.confirmer} ${last.time.replace("T", " ").slice(0, 16)}（${last.verdict === "confirmed" ? "确认" : "驳回"}，commit ${last.commit ?? "-"}）`
+          ? `${last.confirmer} ${last.time.replace("T", " ").slice(0, 16)}（${last.verdict === "confirmed" ? "确认" : "驳回"}，存档编号 ${last.commit ?? "无"}）`
           : "无"}
       </Text>
     </Space>
@@ -109,13 +112,17 @@ export default function RuleCard({
   return (
     <Card
       title={
-        <Space size={8}>
-          {rule.status === "confirmed" ? (
-            <Tag color="green">已确认</Tag>
-          ) : (
-            <Tag color="orange">待确认</Tag>
-          )}
-          {/* 问① 是什么数：人话标题首行，规则号只作右侧元信息（qc4_plain_first_line） */}
+        <Space direction="vertical" size={2} style={{ width: "100%" }}>
+          <Space size={8}>
+            {rule.status === "confirmed" ? (
+              <Tag color="green">已确认</Tag>
+            ) : (
+              <Tag color="orange">待确认</Tag>
+            )}
+            {/* 三问① 区块标题：问题打头，紧跟下方人话答案（T-U1） */}
+            <Text type="secondary" style={{ fontSize: 12 }}>① 是什么数？</Text>
+          </Space>
+          {/* 人话标题首行，规则号只作右侧元信息（qc4_plain_first_line） */}
           <Text strong>{rule.description}</Text>
         </Space>
       }
@@ -129,9 +136,9 @@ export default function RuleCard({
         height: "100%",
       }}
     >
-      {/* 问② 怎么算的 + 试算证据（数字是唯一能拿去对账的东西） */}
+      {/* 三问② 区块标题（T-U1 人话降维）；试算行紧随其后即证据 */}
       <Text type="secondary" style={{ fontSize: 12 }}>
-        ② 怎么算的 + 证据
+        ② 怎么算的？
       </Text>
       <div style={{ margin: "4px 0 8px" }}>
         {trialFailed ? (
@@ -149,7 +156,7 @@ export default function RuleCard({
           </div>
         ) : trial ? (
           <Text>
-            📊 试算：按此口径跑 {formatMonth(trial.month)} = {trial.value}
+            📊 试算：按这条计算规则跑 {formatMonth(trial.month)} = {trial.value}
             {trial.unit}
           </Text>
         ) : (
@@ -159,11 +166,16 @@ export default function RuleCard({
         )}
       </div>
 
-      {/* 问③ 确认后影响谁：关联表/对象（表名只在此处出现，定位用） */}
+      {/* 三问③ 区块标题（T-U1 人话降维）+ 一句引导：这些表按此规则出数 */}
       <Text type="secondary" style={{ fontSize: 12 }}>
-        ③ 确认后影响谁
+        ③ 影响哪些表？
       </Text>
       <div style={{ margin: "4px 0 8px" }}>
+        <div>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            确认后，下面这些表就按上面的算法出数：
+          </Text>
+        </div>
         {rule.related_tables.length > 0 ? (
           rule.related_tables.map((t) => <Tag key={t}>{t}</Tag>)
         ) : (
@@ -176,7 +188,13 @@ export default function RuleCard({
       {/* 技术细节默认折叠（qc3_default_collapsed）：表达式原文可展开（expression_expandable） */}
       <Collapse
         ghost
-        items={[{ key: "tech", label: "技术细节", children: techDetails }]}
+        items={[
+          {
+            key: "tech",
+            label: "技术细节（给工程师看的）",
+            children: techDetails,
+          },
+        ]}
       />
 
       {readOnly ? (
@@ -228,7 +246,7 @@ export default function RuleCard({
           cancelText="取消"
         >
           <Paragraph type="secondary">
-            驳回会回到待确认队列并留痕（新 commit）。确认人取页首填写：
+            驳回会回到待确认队列并留档（会产生新的存档编号）。确认人取页首填写：
             <Text strong>{confirmer.trim() || "（未填）"}</Text>
           </Paragraph>
         </Modal>

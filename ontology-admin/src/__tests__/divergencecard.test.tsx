@@ -106,8 +106,8 @@ describe("DivergenceCard (T203)", () => {
     render(<DivergenceCard rule={rule} confirmer="王工" onDone={() => {}} />);
     const account = screen.getByRole("radio", { name: /按账户计数/ }) as HTMLInputElement;
     const user = screen.getByRole("radio", { name: /按用户去重/ }) as HTMLInputElement;
-    const both = screen.getByRole("radio", { name: /双口径并存/ }) as HTMLInputElement;
-    const escalate = screen.getByRole("radio", { name: /升级老板裁决/ }) as HTMLInputElement;
+    const both = screen.getByRole("radio", { name: /两种算法并存/ }) as HTMLInputElement;
+    const escalate = screen.getByRole("radio", { name: /上报老板/ }) as HTMLInputElement;
     expect(both.checked).toBe(true); // NC-Q2 双口径并存默认预选
     expect(account.checked).toBe(false);
     expect(user.checked).toBe(false);
@@ -147,6 +147,13 @@ describe("DivergenceCard (T203)", () => {
     fireEvent.click(btn);
     expect(confirmCalls(fetchFn)).toHaveLength(0);
   });
+
+  it("T-U1 引导语：两种算法人话引导 + 上报老板副标签说明", () => {
+    stubFetch();
+    render(<DivergenceCard rule={rule} confirmer="王工" onDone={() => {}} />);
+    expect(screen.getByText(/这个数有两种算法，都对，用途不同/)).toBeTruthy();
+    expect(screen.getByText(/拿不准时用：只记录，不定论/)).toBeTruthy();
+  });
 });
 
 describe("RuleCard 接线（T203）", () => {
@@ -155,7 +162,7 @@ describe("RuleCard 接线（T203）", () => {
     const fetchFn = stubFetch({ confirm: { ok: true, body: confirmOk } });
     const onDone = vi.fn();
     render(<RuleCard rule={rule} confirmer="王工" onDone={onDone} />);
-    fireEvent.click(screen.getByRole("radio", { name: /升级老板裁决/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /上报老板/ }));
     fireEvent.click(screen.getByRole("button", { name: /✓ 提交裁决/ }));
     // toast 文案精确匹配（王工走查修订第 5 条）
     await waitFor(() =>
@@ -163,7 +170,7 @@ describe("RuleCard 接线（T203）", () => {
     );
     // 状态不翻转：仍待确认，裁决卡留在原位（onDone 未触发刷新）
     expect(screen.getByText("待确认")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: /双口径并存/ })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /两种算法并存/ })).toBeTruthy();
     expect(onDone).not.toHaveBeenCalled();
     const calls = confirmCalls(fetchFn);
     expect(calls).toHaveLength(1);
@@ -192,7 +199,7 @@ describe("RuleCard 接线（T203）", () => {
   it("接线：divergence 非空渲染对照卡（三问确认按钮退位）", () => {
     stubFetch();
     render(<RuleCard rule={rule} confirmer="王工" onDone={() => {}} />);
-    expect(screen.getByText(/两口径对照/)).toBeTruthy();
+    expect(screen.getByText(/两种算法对照/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "✓ 对，就这样算" })).toBeNull();
     expect(screen.getAllByRole("radio")).toHaveLength(4);
   });
@@ -201,7 +208,7 @@ describe("RuleCard 接线（T203）", () => {
     stubFetch();
     const plain: CaliberRule = { ...rule, id: "R7", divergence: null, decision: null };
     render(<RuleCard rule={plain} confirmer="王工" onDone={() => {}} />);
-    expect(screen.queryByText(/两口径对照/)).toBeNull();
+    expect(screen.queryByText(/两种算法对照/)).toBeNull();
     expect(screen.queryByText(/按账户计数（授权账户数）/)).toBeNull();
     expect(screen.queryAllByRole("radio")).toHaveLength(0);
     expect(

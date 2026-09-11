@@ -7,15 +7,15 @@ import { useState } from "react";
 import { api, type CaliberRule, type DecisionOptionKey } from "../api";
 import { Button, Radio, Space, Tag, Typography, message } from "antd";
 
-const { Text } = Typography;
+const { Text, Paragraph } = Typography;
 
 // 四选项是固定契约（DecisionOptionKey，A8/PC-3 逃生口）；两口径的人话全称
 // 在上方对照区（来自 payload），此处用短标签避免重复长句。
 const VERDICT_OPTIONS: { key: DecisionOptionKey; label: string }[] = [
   { key: "account", label: "按账户计数" },
   { key: "user", label: "按用户去重" },
-  { key: "both", label: "双口径并存" },
-  { key: "escalate", label: "升级老板裁决" },
+  { key: "both", label: "两种算法并存" },
+  { key: "escalate", label: "上报老板" },
 ];
 
 export default function DivergenceCard({
@@ -33,7 +33,7 @@ export default function DivergenceCard({
 
   const submit = async () => {
     if (!confirmer.trim()) {
-      message.warning("请先在页首填写确认人（确认要落身份，进 git 历史）");
+      message.warning("请先在页首填写你的名字（确认要留名，日后可查）");
       return;
     }
     setLoading(true);
@@ -50,7 +50,10 @@ export default function DivergenceCard({
         const res = await api.confirmRule(rule.id, "confirmed", confirmer.trim(), {
           option_key: option,
         });
-        message.success(`${res.message}（commit ${res.record.commit ?? "无"}）`, 5);
+        message.success(
+          `${res.message}（存档编号 ${res.record.commit ?? "无"}）`,
+          5,
+        );
         onDone();
       }
     } catch (e) {
@@ -65,9 +68,13 @@ export default function DivergenceCard({
 
   return (
     <div>
-      {/* 对照区：两口径并列，数字证据是唯一能拿去对账的东西 */}
+      {/* 引导语（T-U1）：外行一句话明白这卡干什么、自己该做什么 */}
+      <Paragraph type="secondary" style={{ marginBottom: 4 }}>
+        这个数有两种算法，都对，用途不同——选一个作为标准，或者上报老板定。
+      </Paragraph>
+      {/* 对照区：两种算法并列，数字证据是唯一能拿去对账的东西 */}
       <Text type="secondary" style={{ fontSize: 12 }}>
-        ⚖ 两口径对照——这不是是非题，先对数再裁决
+        ⚖ 两种算法对照：
       </Text>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
         {options.map((opt) => (
@@ -108,6 +115,11 @@ export default function DivergenceCard({
                   推荐
                 </Tag>
               )}
+              {key === "escalate" && (
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                  拿不准时用：只记录，不定论
+                </Text>
+              )}
             </Radio>
           ))}
         </Radio.Group>
@@ -132,7 +144,7 @@ export default function DivergenceCard({
       )}
       <div>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          裁决落 git 留痕，确认后可驳回；升级裁决只留痕不改状态，可再次裁决
+          你的选择会存档留痕，确认后可驳回；上报老板只做记录、不下结论，之后仍可再选
         </Text>
       </div>
     </div>

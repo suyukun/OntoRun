@@ -87,8 +87,9 @@ export default function RulesPage({
   return (
     <div style={{ padding: 24, overflow: "auto", height: "100%" }}>
       <Paragraph className="page-intro" type="secondary">
-        每张卡是一条口径的是非题：这条口径现在还成立吗？确认 = 一次带身份的 git commit，
-        版本可追溯。当前待确认 {pendingShown} 条 / 列表共 {shown.length} 条。
+        这里列出系统里所有数字的计算规则。没核对过的排前面——看懂了就在上方填上名字，
+        点卡上的「对，就这样算」确认；拿不准的选「上报老板」，都会存档留痕、随时可查。
+        当前待确认 {pendingShown} 条 / 列表共 {shown.length} 条。
       </Paragraph>
       <div
         style={{
@@ -101,7 +102,7 @@ export default function RulesPage({
       >
         <Text strong>确认人：</Text>
         <Input
-          placeholder="你的名字（落 git 历史，如：王工）"
+          placeholder="你的名字（确认记录会写上它，如：王工）"
           value={confirmer}
           onChange={(e) => setConfirmer(e.target.value)}
           style={{ width: 280 }}
@@ -141,7 +142,7 @@ export default function RulesPage({
         }}
       >
         {shown.length === 0 ? (
-          <Empty description="当前筛选下没有规则——换个筛选条件试试">
+          <Empty description="当前筛选下没有匹配的计算规则——换个筛选条件试试">
             <Button onClick={clearFilters}>清除筛选，看全部</Button>
           </Empty>
         ) : (

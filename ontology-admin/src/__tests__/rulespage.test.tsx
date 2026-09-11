@@ -166,7 +166,7 @@ describe("RulesPage 确认队列 (T101)", () => {
     clickOption("scripts/refund.sql");
     openSelect(1);
     clickOption("ads_chnl_auth_qty_df"); // 与 refund.sql 无交集
-    expect(screen.getByText(/当前筛选下没有规则/)).toBeTruthy();
+    expect(screen.getByText(/当前筛选下没有匹配的计算规则/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /清除筛选/ }));
     expect(screen.getByText("R1 从未处理过")).toBeTruthy();
     expect(screen.getByText(/当前待确认 4 条 \/ 列表共 6 条/)).toBeTruthy();
@@ -191,5 +191,13 @@ describe("RulesPage 确认队列 (T101)", () => {
     expect(text).toContain("已确认");
     expect(text).not.toContain("钉死");
     expect(text).not.toContain("未确认");
+  });
+
+  it("T-U1 页头引导语自解释：这页列什么、先看什么、拿不准怎么办", () => {
+    stubFetch();
+    render(<RulesPage ontology={payload} reload={() => {}} />);
+    expect(screen.getByText(/这里列出系统里所有数字的计算规则/)).toBeTruthy();
+    expect(screen.getByText(/没核对过的排前面/)).toBeTruthy();
+    expect(screen.getByText(/上报老板/)).toBeTruthy();
   });
 });

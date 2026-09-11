@@ -37,7 +37,7 @@ export function go(page: Page) {
 
 // ---- 顶栏全局搜索（T301/US4）----
 // 来源=当前 /api/ontology payload（measures/rules/related_tables），纯前端过滤，不建新后端。
-const SEARCH_PLACEHOLDER = "搜索数字 / 规则 / 表，直达";
+const SEARCH_PLACEHOLDER = "搜数字、规则或表名";
 
 function matchKeyword(kw: string, ...texts: string[]): boolean {
   return texts.some((t) => t.toLowerCase().includes(kw));
@@ -159,12 +159,17 @@ export default function App() {
           }}
           onSelect={onSearchSelect}
           filterOption={false}
+          notFoundContent={
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              没找到？换个词试试——可以用数字名、计算规则或表名
+            </Text>
+          }
           style={{ width: 280 }}
           placeholder={SEARCH_PLACEHOLDER}
           allowClear
         />
         <Text type="secondary" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-          财富广场语义层 · 数据源：registry + lineage（真实数据）
+          财富广场 · 数字与计算规则均来自真实数据，有据可查
         </Text>
       </Header>
       <Content style={{ overflow: "hidden" }}>
