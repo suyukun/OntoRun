@@ -304,6 +304,7 @@ RULES = {
             "脚本含 grant_dt>='2022-12-26' 上线下界（镜像 0 行命中，惰性保留）"
         ),
         source_script=f"{WAREHOUSE_SCRIPT_DIR}/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql",
+        status="unverified",
     ),
     "R8": CaliberRule(
         id="R8",

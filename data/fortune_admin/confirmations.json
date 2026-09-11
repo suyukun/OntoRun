@@ -39,5 +39,12 @@
       "time": "2026-09-11T16:04:28+08:00",
       "commit": null
     }
+  },
+  {
+    "rule_id": "R7",
+    "verdict": "rejected",
+    "confirmer": "苏",
+    "code": "272c67",
+    "time": "2026-09-11T16:04:30+08:00"
   }
 ]
