@@ -34,15 +34,18 @@
   "turns": [
    {
     "q": "注册用户数是多少",
-    "expect_behavior": "CLARIFY",
-    "note": "开放问句应反问月份且选项来自数据窗"
+    "expect_behavior": "ANSWER",
+    "expect": {
+     "require_default_disclosure": true
+    },
+    "note": "Jack 裁决 2026-09-11：时间欠明确（缺时间槽）→默认最近完整月直接答＋明示（require_default_disclosure 挂 plan.time_defaulted=true），不再反问月份"
    },
    {
     "q": "9月",
     "expect": {
      "behavior": "HONEST",
      "honest_copy_keyword": "仅覆盖",
-     "note": "种子3：澄清应答9月无数据→如实说明仅覆盖7-8月，SHALL NOT 报未注册口径"
+     "note": "种子3：T1 已默认月作答，补问9月无数据→如实说明仅覆盖7-8月，SHALL NOT 报未注册口径"
     }
    }
   ]
@@ -53,8 +56,11 @@
   "turns": [
    {
     "q": "注册用户数是多少",
-    "expect_behavior": "CLARIFY",
-    "note": "开放问句应反问月份且选项来自数据窗"
+    "expect_behavior": "ANSWER",
+    "expect": {
+     "require_default_disclosure": true
+    },
+    "note": "Jack 裁决 2026-09-11：时间欠明确（缺时间槽）→默认最近完整月直接答＋明示（require_default_disclosure 挂 plan.time_defaulted=true），不再反问月份"
    },
    {
     "q": "7月",
@@ -65,7 +71,7 @@
       "from": "2026-07-01",
       "to": "2026-07-31"
      },
-     "note": "种子4：澄清应答7月有数据→承接后正常出数"
+     "note": "种子4：T1 已默认月作答，补充7月→按7月承接出数"
     }
    }
   ]
@@ -385,8 +391,11 @@
   "turns": [
    {
     "q": "各渠道注册数对比下",
-    "expect_behavior": "CLARIFY",
-    "note": "维度与时间不全，应反问澄清并给选项"
+    "expect_behavior": "ANSWER",
+    "expect": {
+     "require_default_disclosure": true
+    },
+    "note": "Jack 裁决 2026-09-11：维度已给、时间欠明确→默认最近完整月出各渠道对比并明示，不再反问月份"
    },
    {
     "q": "8月",
@@ -404,9 +413,9 @@
    {
     "q": "今年到现在总共注册多少人了？",
     "expect_behavior": "ANSWER",
-    "note": "第一轮信息不全（缺时间/粒度/口径槽位），应触发澄清反问而非硬答；承接判定见第二轮 note。两轮合测多轮上下文保持能力。",
+    "note": "今年=显式时间窗，与覆盖窗求交后出总量并明示覆盖范围；承接判定见第二轮 note。两轮合测多轮上下文保持能力。",
     "expect": {
-     "note": "今年=覆盖窗7-8月，按默认窗出总量并明示"
+     "note": "今年与覆盖窗7-8月求交，出总量并明示覆盖范围"
     }
    },
    {
@@ -424,8 +433,11 @@
   "turns": [
    {
     "q": "看下注册",
-    "expect_behavior": "CLARIFY",
-    "note": "问句宽泛（缺时间/维度），应反问澄清"
+    "expect_behavior": "ANSWER",
+    "expect": {
+     "require_default_disclosure": true
+    },
+    "note": "Jack 裁决 2026-09-11：问句宽泛（时间欠明确）→默认最近完整月直接答＋明示，不再反问"
    },
    {
     "q": "就要8月银行App的",
@@ -443,7 +455,7 @@
    {
     "q": "8月各渠道注册数",
     "expect_behavior": "ANSWER",
-    "note": "第一轮信息不全（缺时间/粒度/口径槽位），应触发澄清反问而非硬答；承接判定见第二轮 note。两轮合测多轮上下文保持能力。",
+    "note": "时间维度齐全，直接出8月各渠道数；承接判定见第二轮 note。两轮合测多轮上下文保持能力。",
     "expect": {
      "note": "正常出8月各渠道数"
     }
@@ -719,14 +731,21 @@
   "turns": [
    {
     "q": "注册数帮我查一下",
-    "expect_behavior": "CLARIFY",
-    "note": "首问缺时间槽位，应触发澄清；承接判定见第二轮"
+    "expect_behavior": "ANSWER",
+    "expect": {
+     "require_default_disclosure": true
+    },
+    "note": "Jack 裁决 2026-09-11：首问缺时间槽位→默认最近完整月直接答＋明示（require_default_disclosure 挂 plan.time_defaulted=true），不再反问；承接判定见第二轮"
    },
    {
     "q": "随便哪个月都行，重点是优享+线上",
     "expect": {
      "behavior": "ANSWER",
-     "note": "用户放弃时间决策权、只锁定渠道。测聪明默认：取样本内最近完整月2026-08并明说该假设，按渠道过滤出数——不许再追问『哪个月』（挤牙膏式连环澄清=差体验，判据表反傻要求）"
+     "measure": "reg_user_cnt",
+     "dimensions": [
+      "channel_l2=优享+线上"
+     ],
+     "note": "T1 已默认月作答后用户补充约束：放弃时间决策权、只锁渠道→runner 承接默认月拼成「8月优享+线上注册数」应 ANSWER（默认月随执行时点平移，不钉具体月份）；不许再追问『哪个月』（挤牙膏式连环澄清=差体验，判据表反傻要求）"
     }
    }
   ]
@@ -878,8 +897,11 @@
   "turns": [
    {
     "q": "看看注册",
-    "expect_behavior": "CLARIFY",
-    "note": "语音式宽泛问应反问"
+    "expect_behavior": "ANSWER",
+    "expect": {
+     "require_default_disclosure": true
+    },
+    "note": "Jack 裁决 2026-09-11：语音式宽泛问→默认最近完整月直接答＋明示，不再反问"
    },
    {
     "q": "就八月的中信书院",

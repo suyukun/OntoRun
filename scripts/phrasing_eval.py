@@ -6,10 +6,13 @@ v0 runner（40 行）升级版：
 - 判定只挂 llm_route 结构化返回（plan / time_from / time_to / filter_clarify），
   废除 v0 的 repr 字符串嗅探；
 - 真断言：time 窗 / filter_values（维度+值）/ must_answer_directly /
-  no_numbers_in_copy（复用引擎生产文案函数，通用红线：拒答/澄清文案无数字）；
-- turns 多轮序列：前轮 CLARIFY（引擎 blocked_param 在路由层的近似）时，后轮
-  短答「拼回上轮问题再路由」（B3 承接模拟）；断言打每轮 expect_behavior +
-  末轮 expect（末轮自带 expect 时优先生效）；
+  no_numbers_in_copy（复用引擎生产文案函数，通用红线：拒答/澄清文案无数字）/
+  require_default_disclosure（T-N6：「默认最近月直接答＋明示」的可验形态，
+  挂 plan.time_defaulted 结构化标记）；
+- turns 多轮序列：前轮有承接上下文（CLARIFY 澄清句或 ANSWER 答句上下文——
+  含 T-N6 裁决的「默认最近月答句」）时，后轮短答「拼回上轮问题再路由」
+  （B3 承接模拟，不再要求前轮必须先 CLARIFY）；REJECT=线程终止不承接；
+  断言打每轮 expect_behavior + 末轮 expect（末轮自带 expect 时优先生效）；
 - CLI：--category / --id / --offline（SEMANTIC_DISABLE_LLM=1 → 关键词降级）；
 - JSON 报告 → scripts/out/phrasing_eval_report.json（分类红绿灯 + 分层计数）；
 - 输出级不泄露断言（契约补充 v0.2.1，TD-14）：expect.no_leak_markers 启用时，
@@ -315,7 +318,8 @@ def judge_legacy(expect: dict, route: dict) -> tuple[str, str, list]:
 
 def judge_contract(expect: dict, route: dict) -> tuple[str, str, list]:
     """v0.2 契约判定：behavior 四值 + time / filter_values / dimensions（含值）/
-    must_answer_directly / no_numbers_in_copy 真断言（B3 契约冻结版）。"""
+    must_answer_directly / require_default_disclosure / no_numbers_in_copy
+    真断言（B3 契约冻结版 + T-N6 默认最近月明示）。"""
     plan = route["plan"]
     got = behavior_of(route)
     want = str(expect.get("behavior") or "").upper()
@@ -348,6 +352,19 @@ def judge_contract(expect: dict, route: dict) -> tuple[str, str, list]:
 
     # ② ANSWER：结构化字段真断言
     if got == "ANSWER":
+        # ②-0 默认最近月明示（T-N6：「默认最近月直接答＋明示」机器可验形态）。
+        # 问句未给时间时产品行为=默认最近完整月作答并回显假设；plan.time_defaulted
+        # 是引擎结构化标记（回答明示由该标记驱动，llm_route._resolve_window），
+        # 判 PASS 须其为真。offline 关键词降级路径无该行为 → SKIP 如实降级不误判。
+        if expect.get("require_default_disclosure"):
+            if route["degraded"]:
+                return "SKIP", ("require_default_disclosure 需 LLM plan 标记"
+                                "（offline 关键词路径无默认最近月行为）"), checks
+            if not route["time_defaulted"]:
+                return fail("require_default_disclosure",
+                            "问句未明说时间，应默认最近完整月作答并明示"
+                            "（plan.time_defaulted=False）")
+            ok("require_default_disclosure", "plan.time_defaulted=True（默认月明示）")
         if expect.get("measure"):
             if plan.measure != expect["measure"]:
                 return fail("measure", f"{plan.measure} ≠ {expect['measure']}")
@@ -421,17 +438,19 @@ def judge_contract(expect: dict, route: dict) -> tuple[str, str, list]:
 # ------------------------------------------------------------- case running
 
 def run_case(case: dict) -> dict:
-    """跑一条 case：单轮 1 次路由；多轮逐轮执行，前轮 CLARIFY（引擎
-    blocked_param 的路由层近似）时后轮短答拼回上轮问题再路由（B3 承接模拟）。"""
+    """跑一条 case：单轮 1 次路由；多轮逐轮执行，前轮有承接上下文（CLARIFY
+    澄清句或 ANSWER 答句上下文，含 T-N6 裁决的「默认最近月答句」——其月份由
+    plan.time_defaulted 记录进报告作审计依据）时，后轮短答拼回上轮问题再路由
+    （B3 承接模拟，不再要求前轮必须 CLARIFY）；REJECT=线程终止不承接。"""
     turn_results = []
-    prev_clarify_q = None
+    carry_q = None  # 承接上下文：上轮问句（CLARIFY 澄清句或 ANSWER 答句上下文）
     last = len(case["turns"]) - 1
     for i, turn in enumerate(case["turns"]):
         asked = turn["q"]
         composed_from = None
-        if prev_clarify_q is not None:
-            asked = f"{prev_clarify_q} {asked}"
-            composed_from = prev_clarify_q
+        if carry_q is not None:
+            asked = f"{carry_q} {asked}"
+            composed_from = carry_q
         route = route_question(asked)
         applicable = turn.get("expect") or (case["expect"] if i == last else {})
         expect = dict(applicable)
@@ -446,8 +465,10 @@ def run_case(case: dict) -> dict:
             "checks": checks, "ms": route["ms"], "model": route["model"],
             "degraded": route["degraded"], "route_error": route["route_error"],
             "plan_shape": route["plan"].shape, "params": route["params"],
+            "time_defaulted": route["time_defaulted"],  # T-N6：默认月承接的 plan 审计依据
         })
-        prev_clarify_q = asked if behavior_of(route) == "CLARIFY" else None
+        # 承接更新：REJECT=线程终止不承接；CLARIFY/ANSWER（含默认月答句）都保留上下文
+        carry_q = asked if behavior_of(route) != "REJECT" else None
     verdicts = [t["verdict"] for t in turn_results]
     if "FAIL" in verdicts:
         verdict = "FAIL"
@@ -554,7 +575,7 @@ def main() -> int:
     degraded = sum(1 for r in results for t in r["turns"] if t["degraded"])
     total_routes = sum(len(r["turns"]) for r in results)
     meta: dict = {
-        "runner": "phrasing_eval v0.2.1 (T002)",
+        "runner": "phrasing_eval v0.2.2 (T002; T-N6 承接模拟重写+默认月明示判定)",
         "fixtures": str(fixtures),
         "format_counts": {
             "v0.1": sum(1 for c in cases if c["format"] == "v0.1"),
