@@ -485,7 +485,7 @@ td.num { text-align: right; font-family: Menlo, monospace; font-variant-numeric:
 .basis-checks li { padding: 1px 0; display: flex; align-items: baseline; gap: 5px; }
 .basis-checks .vok { color: var(--ok); }
 .basis-checks .vbad { color: var(--bad); }
-/* ── T-U1 口径溯源（US1 汇总级穿透）：回答数字可点击＋面板确认历史 ── */
+/* ── T-U1 口径溯源（US1 汇总级穿透）：回答数字可点击＋口径面板 ── */
 .numlink {
   border: none;
   background: none;
@@ -498,8 +498,6 @@ td.num { text-align: right; font-family: Menlo, monospace; font-variant-numeric:
   text-underline-offset: 3px;
 }
 .numlink:hover { color: var(--acc); }
-.basis-confirm { margin-top: 12px; font-size: 12.5px; }
-.basis-confirm > b { color: var(--sub); font-weight: 600; display: block; margin-bottom: 6px; }
 
 /* ── 输入区 ──────────────────────────────────── */
 .inputrow { flex: none; padding: 12px 26px 18px; display: flex; gap: 10px; }

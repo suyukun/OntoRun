@@ -3,19 +3,17 @@ import { Icon } from './Icon';
 import type { ChatMessage, StepInfo } from '../types';
 
 /**
- * T-U1 口径溯源面板（UX v0.2 · US1 溯源穿透·汇总级，Jack 裁决 2026-09-11）：
- * 点答案中任一数字 → 口径卡（这句数怎么算的人话＋规则状态）＋确认历史（谁何时确认）。
- * 产品红线：汇总级穿透，不含 SQL / 表结构 / 来源明细行；SQL 仅留审计层内部。
+ * T-U1 口径溯源面板（UX v0.2 · US1 溯源穿透·汇总级，Jack 裁决 2026-09-11）＋ T-N7 本体级改版：
+ * 点答案中任一数字 → 口径卡（这句数怎么算的人话＋规则状态）。
+ * 确认历史设计整个砍除（Jack 2026-09-11 裁决 T-N7）：面板只留口径卡，不做确认数据管道。
+ * 产品红线：汇总级穿透，不含 SQL / 表结构 / 来源明细行 / 层·表名；SQL 仅留审计层内部。
  * 数据只来自现有服务返回（steps 的「口径声明」步骤）；不足处显式空态（宁缺毋滥）。
  */
 
-/** B3 契约：穿透面板数据 = { caliber_card, confirm_history }（汇总级）。
- * 现有服务返回未携带确认记录（谁/何时），确认历史一律渲染显式空态，
- * 待后端下发 confirm_history 后在此接线（不自行加端点）。 */
-
 /** 「口径声明」步骤 detail → 人话口径＋规则状态。
  * 后端格式："{口径人话}；口径规则 {规则状态}"（engine.py 口径声明帧）；
- * 无后缀（如 mock 流）时规则状态为 null → 面板显式空态。 */
+ * 无后缀（如 mock 流）时规则状态为 null → 面板显式空态。
+ * 详情抽屉复用本解析（T-N7：规则状态同源，抽屉不重复实现）。 */
 export function parseCaliber(steps: StepInfo[]): { text: string; ruleStatus: string | null } {
   const detail = steps.find((s) => s.title === '口径声明')?.detail?.trim();
   if (!detail) return { text: '', ruleStatus: null };
@@ -54,7 +52,7 @@ export function AnswerText({ text, onNumber }: { text: string; onNumber: () => v
   );
 }
 
-/** 口径溯源面板（汇总级）：口径卡＋确认历史；复用详情抽屉的 drawer 视觉，不新增样式体系。 */
+/** 口径溯源面板（汇总级）：口径卡（口径说明＋规则状态）；复用详情抽屉的 drawer 视觉，不新增样式体系。 */
 export function CaliberPanel({ msg, onClose }: { msg: ChatMessage; onClose: () => void }) {
   // Esc 关闭（与详情抽屉一致的键盘可达性）
   useEffect(() => {
@@ -83,10 +81,6 @@ export function CaliberPanel({ msg, onClose }: { msg: ChatMessage; onClose: () =
             <div>
               <b>规则状态：</b>{caliber.ruleStatus ?? '暂无规则状态记录'}
             </div>
-          </div>
-          <div className="basis-confirm">
-            <b>确认历史</b>
-            <div className="hint">暂无确认记录。口径确认在管理台完成后，这里将显示谁在何时确认。</div>
           </div>
           <p className="hint">
             汇总级口径说明；完整过程复现请用「详情」中的证据编号。

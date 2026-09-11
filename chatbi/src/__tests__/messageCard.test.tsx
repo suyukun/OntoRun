@@ -73,7 +73,7 @@ describe('思考过程区（§3.2 #4，默认收起）', () => {
 });
 
 describe('详情抽屉（§3.2 #5，审计视图重定位）', () => {
-  it('口径说明 + 命中规则 + 数据路径 + 校验记录（无重复 tab；用户可见层零 SQL，Jack 2026-09-11 裁决）', async () => {
+  it('口径说明 + 命中规则 + 校验记录（无重复 tab；用户可见层零 SQL、零表名/层名，Jack 2026-09-11 裁决）', async () => {
     render(<App />);
     await ask('8月按渠道的注册用户数？');
     await screen.findByText('明细即席计算', {}, { timeout: 15000 });
@@ -82,7 +82,8 @@ describe('详情抽屉（§3.2 #5，审计视图重定位）', () => {
     const text = drawer.textContent ?? '';
     expect(/口径说明/.test(text)).toBeTruthy();
     expect(/REG_BY_CHANNEL/.test(text)).toBeTruthy();
-    expect(/DWD · dwd_tr_rgst_df/.test(text)).toBeTruthy();
+    // Jack 2026-09-11 裁决：表名移出用户层（规格适配）——「数据路径」行砍除，表名/层名零渲染
+    expect(/DWD · dwd_tr_rgst_df/.test(text)).toBe(false);
     expect(/同源交叉/.test(text)).toBeTruthy();
     expect(/执行 SQL/.test(text)).toBeFalsy(); // 用户可见层零 SQL（Jack 2026-09-11 裁决：SQL 仅留审计层）
     expect(drawer.querySelectorAll('.tabs button').length).toBe(0); // 双 tab 已移除

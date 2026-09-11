@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { BUSINESS_PATH_LABELS, REQ_ID_HINT, copyText } from './labels';
+import { parseCaliber } from './CaliberPanel';
 import type { ChatMessage } from '../types';
 
 const COPIED_RESET_MS = 1600;
@@ -9,6 +10,8 @@ const COPIED_RESET_MS = 1600;
  * 详情抽屉 = 审计视图（UX 2026-09-09 重定位）：回答「凭什么信/怎么复现」。
  * 决策步骤已在消息卡思考区展示，此处不再重复；这里收口径与校验、证据编号与元信息。
  * 用户可见层零 SQL（Jack 2026-09-11 裁决）：result.sql 仅存于审计链数据结构，不再渲染。
+ * 本体级溯源（Jack 2026-09-11 裁决 T-N7）：层·表名移出用户层，原「数据路径」行不再渲染；
+ * 改显规则状态（取自「口径声明」detail 的「口径规则 {状态}」后缀，mock 流无后缀则不显示该段）。
  */
 export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () => void }) {
   const r = msg.result;
@@ -37,9 +40,8 @@ export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () =
     });
   };
 
-  const caliber = msg.steps.find((s) => s.title === '口径声明')?.detail;
+  const { text: caliberText, ruleStatus } = parseCaliber(msg.steps);
   const validations = msg.steps.filter((s) => s.title.includes('校验'));
-  const pathText = (r?.tables ?? []).map((t) => t.layer + ' · ' + t.name).join('，') || '—';
 
   return (
     <>
@@ -65,17 +67,17 @@ export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () =
             </div>
             <div><b>发起时间</b><span>{r?.started_at || '—'}</span></div>
             {r?.total_ms != null && <div><b>总耗时</b><span>{(r.total_ms / 1000).toFixed(2)}s</span></div>}
-            <div><b>数据路径</b><span>{pathText}</span></div>
           </div>
 
           <div className="basis">
             <div>
-              <b>口径说明：</b>{caliber ?? '—'}
+              <b>口径说明：</b>{caliberText || '—'}
             </div>
             <div>
               <b>命中规则：</b>{r?.rule ?? '—'}
               {r && r.path && <span className="basis-path">（{BUSINESS_PATH_LABELS[r.path] ?? r.path}）</span>}
             </div>
+            {ruleStatus && <div><b>规则状态：</b>{ruleStatus}</div>}
             <div className="basis-checks">
               <b>校验记录：</b>
               {validations.length > 0 ? (
