@@ -101,3 +101,15 @@
   须在 Store 连接层统一开启（主要工作量）且属破坏性变更（dry_run 空串→NULL、
   API 返回 '' vs null 需同步）；当前对账已有测试锁定，收益 < 成本。
 - 本次未改 TD-10 相关 DDL（保持 `audit_ref TEXT NOT NULL DEFAULT ''` 不变）。
+
+### TD-11（2026-09-11，对抗case块 T003 发现，待 Jack 拍板）
+
+- 现状：sanitize_llm_text 的键值对脱敏模式只吞单 token，Authorization Bearer 后的 JWT（含非 hex 字符）不被脱敏。若 LLM 原始输出回显该形态，JWT 会带进 trace。
+- 建议：扩脱敏模式（Bearer 整段吞）；涉及脱敏契约变更，待 Jack 拍板是否扩。
+- 来源：T003 遗留观察（test_adversarial_cases.py 交付报告）。
+
+### TD-12（2026-09-11，T003 发现；已派修复单，此处留痕）
+
+- 现状：tests/semantic 同会话全跑 4 failed（test_core x2 / test_l2_switch / test_t4_persistence）——根因 = config.py import 期锚定 APP_DB/TRACE_LOG 环境变量，各测试文件又在自身 import 期 setenv 并假设自己是首位收集者（字母序），非首位者锚定失效读空库。
+- 证据：加不加新测试文件 FAILED 集合逐字节相同（非新文件引入）；隔离跑单文件全绿。
+- 处置：派 conftest 统一前置 pin 修复单（修复后本条留痕不删）。
