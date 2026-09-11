@@ -1,8 +1,9 @@
 // 壳：顶栏导航（首页 / 数字与口径 / 口径确认 / 变更历史）+ hash 路由 + 全局数据装载 + 顶栏全局搜索（T301）。
 // 对象详情页不入导航：从列表行 / 图谱节点进入（#/object/{kind}/{id}）。
+// T503 域图下钻路由：#/graph（域图）→ #/graph/{domainKey}（域内图，drilldown_breadcrumb 第二级）。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AutoComplete, Badge, Layout, Menu, Typography } from "antd";
-import { api, type Lineage, type ObjectKind, type Ontology } from "./api";
+import { api, type ObjectKind, type Ontology } from "./api";
 import GraphHome from "./pages/GraphHome";
 import HistoryPage from "./pages/HistoryPage";
 import ObjectDetailPage from "./pages/ObjectDetailPage";
@@ -13,7 +14,9 @@ const { Header, Content } = Layout;
 const { Text } = Typography;
 
 type Page = "graph" | "objects" | "rules" | "history";
-type Route = { page: Page } | { page: "object"; kind: ObjectKind; id: string };
+type Route =
+  | { page: Page; domain?: string }
+  | { page: "object"; kind: ObjectKind; id: string };
 
 function isObjectKind(v: string): v is ObjectKind {
   return v === "measure" || v === "dimension" || v === "table";
@@ -28,6 +31,9 @@ function routeFromHash(): Route {
   if (parts[0] === "history") return { page: "history" };
   if (parts[0] === "objects") return { page: "objects" };
   if (parts[0] === "rules") return { page: "rules" };
+  if (parts[0] === "graph" && parts[1] !== undefined) {
+    return { page: "graph", domain: parts[1] };
+  }
   return { page: "graph" };
 }
 
@@ -80,11 +86,10 @@ function buildSearchOptions(ontology: Ontology | null, keyword: string) {
 export default function App() {
   const [route, setRoute] = useState<Route>(routeFromHash);
   const [ontology, setOntology] = useState<Ontology | null>(null);
-  const [lineage, setLineage] = useState<Lineage | null>(null);
 
+  // T503 后首页域图/域内图组件自取 /api/lineage，App 只装 ontology。
   const reload = useCallback(() => {
     api.ontology().then(setOntology).catch((e) => console.error(e));
-    api.lineage().then(setLineage).catch((e) => console.error(e));
   }, []);
   useEffect(reload, [reload]);
 
@@ -174,12 +179,7 @@ export default function App() {
       </Header>
       <Content style={{ overflow: "hidden" }}>
         {route.page === "graph" && (
-          <GraphHome
-            lineage={lineage}
-            ontology={ontology}
-            onGoRules={() => go("rules")}
-            reload={reload}
-          />
+          <GraphHome ontology={ontology} domain={route.domain} />
         )}
         {route.page === "objects" && <ObjectsPage ontology={ontology} />}
         {route.page === "rules" && <RulesPage ontology={ontology} reload={reload} />}
