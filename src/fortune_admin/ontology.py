@@ -9,11 +9,70 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+from datetime import datetime
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "src/fortune_semantic/registry.py"
 CONFIRMATIONS_PATH = REPO_ROOT / "data/fortune_admin/confirmations.json"
+
+
+class DivergenceOption(BaseModel):
+    """口径分歧候选：同一口径的另一种合法解释及其证据。"""
+
+    key: str = Field(description="选项键，与 Decision.option_key 对应")
+    label: str = Field(description="选项显示名（如“计法人账/计个人账”）")
+    value_evidence: str = Field(description="该解释下的指标值及出处脚本证据")
+    applies_to: str = Field(description="适用范围：该解释对哪类口径/场景成立")
+
+
+class Decision(BaseModel):
+    """裁决记录：人对分歧的裁决结果（落 git commit，不可回退）。"""
+
+    option_key: str = Field(description="所选选项键；escalate 表示已升级留痕（线下处理，状态不翻转）")
+    decided_by: str = Field(description="裁决人（落 commit message）")
+    time: datetime = Field(description="裁决时间")
+    commit: str = Field(description="承载该裁决的 git commit 短哈希")
+
+
+class TrialResult(BaseModel):
+    """试算行：规则在指定月份的数值（只读试算，与图表同源，禁手填假数字）。"""
+
+    rule_id: str = Field(description="口径规则 id")
+    month: str = Field(description="统计月份，YYYY-MM")
+    value: float = Field(description="试算数值")
+    unit: str = Field(description="数值单位（如 万元 / 户）")
+    generated_at: datetime = Field(description="数值生成时间")
+    source: Literal["semantic_query", "cache"] = Field(description="来源：语义查询实时计算或当日缓存")
+
+
+class CaliberRule(BaseModel):
+    """管理台侧口径规则 payload 模型：镜像 ontology_payload 的 rules 项。"""
+
+    id: str = Field(description="口径规则 id")
+    description: str = Field(description="人话描述")
+    source_script: str = Field(description="出处脚本（数仓证据文件）")
+    status: str = Field(default="unverified", description="确认状态：unverified | confirmed")
+    related_tables: list[str] = Field(
+        default_factory=list,
+        description="关联表名（从出处脚本提取）",
+    )
+    last_record: dict | None = Field(
+        default=None,
+        description="最近一次确认记录（含关联 commit）",
+    )
+    divergence: list[DivergenceOption] | None = Field(
+        default=None,
+        description="分歧候选列表，仅当该规则存在多种合法解释时给出",
+    )
+    decision: Decision | None = Field(
+        default=None,
+        description="裁决记录，仅当分歧已被裁决后给出",
+    )
+
 
 # code -> commit 短哈希缓存（commit message 含 [code:xxxxxx]，用 grep 反查）。
 _commit_cache: dict[str, str | None] = {}

@@ -39,6 +39,20 @@ export interface ConfirmRecord {
   mode: string;
 }
 
+export interface DivergenceOption {
+  key: string;
+  label: string;
+  value_evidence: string;
+  applies_to: string;
+}
+
+export interface Decision {
+  option_key: string;
+  decided_by: string;
+  time: string;
+  commit: string;
+}
+
 export interface CaliberRule {
   id: string;
   description: string;
@@ -46,6 +60,8 @@ export interface CaliberRule {
   status: RuleStatus;
   related_tables: string[];
   last_record: ConfirmRecord | null;
+  divergence?: DivergenceOption[] | null;
+  decision?: Decision | null;
 }
 
 export interface Ontology {
@@ -117,6 +133,23 @@ export interface HistoryCommit {
 export interface HistoryPayload {
   commits: HistoryCommit[];
   count: number;
+}
+
+export type DecisionOptionKey = "account" | "user" | "both" | "escalate";
+
+export interface TrialResult {
+  rule_id: string;
+  month: string;
+  value: number;
+  unit: string;
+  generated_at: string;
+  source: "semantic_query" | "cache";
+}
+
+export interface ConfirmBody {
+  verdict: string;
+  confirmeer: string;
+  decision?: { option_key: DecisionOptionKey };
 }
 
 async function getJson<T>(url: string): Promise<T> {
