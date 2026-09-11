@@ -72,8 +72,13 @@ def get_object(kind: str, object_id: str) -> dict:
 
 
 @router.get("/history")
-def get_history(limit: int = 20) -> dict:
-    return history.history_payload(min(max(limit, 1), 50))
+def get_history(
+    limit: int = 20, rule_id: str | None = None, object: str | None = None
+) -> dict:
+    # T102：rule_id/object 过滤透传（语义见 history.history_payload）
+    return history.history_payload(
+        min(max(limit, 1), 50), rule_id=rule_id, object=object
+    )
 
 
 @router.post("/rules/{rule_id}/confirm")

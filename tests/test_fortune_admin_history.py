@@ -7,9 +7,9 @@ SPEC docs/plans/开工门槛-管理台重构_v0.2.md §C1-T102：
 - 无参全量回归：不带参数时形状/顺序/数量与既有行为完全不变；
 - 无匹配：返回空列表、正常返回不报错。
 
-边界说明：本任务只动 history.py（过滤逻辑在 history_payload），router.py
-的 HTTP 透传不在本任务文件边界内，故过滤用例直调 history_payload；
-"200 不报错"在函数层 = 正常返回不抛异常。无参 HTTP 冒烟仍走真实端点。
+覆盖两层：函数层直调 history_payload；HTTP 层走 router /api/history
+query param 透传（TestClient 实测 200 与过滤生效），"无匹配返回空列表
+200 不报错"两层各自验证。
 
 隔离：history 读取的 git 仓与 registry 全部落 tmp 沙盒（monkeypatch
 REPO_ROOT/路径），零污染本仓工作区与 git 历史。
@@ -133,3 +133,28 @@ def test_no_match_returns_empty_list(sandbox: Path):
         "commits": [],
         "count": 0,
     }
+
+
+def test_http_filters_via_query_params(sandbox: Path, client: TestClient):
+    """HTTP 层（T102 接线）：query param 透传过滤生效——rule_id/object/组合/无匹配。"""
+    r8 = client.get("/api/history", params={"rule_id": "R8"})
+    assert r8.status_code == 200, r8.text
+    assert [c["subject"] for c in r8.json()["commits"]] == R8_SUBJECTS
+
+    by_object = client.get("/api/history", params={"object": R8_TABLE})
+    assert by_object.status_code == 200, by_object.text
+    assert [c["subject"] for c in by_object.json()["commits"]] == R8_SUBJECTS
+
+    combo_hit = client.get("/api/history", params={"rule_id": "R8", "object": R8_TABLE})
+    assert combo_hit.status_code == 200, combo_hit.text
+    assert [c["subject"] for c in combo_hit.json()["commits"]] == R8_SUBJECTS
+
+    combo_miss = client.get(
+        "/api/history", params={"rule_id": "R8", "object": R5_TABLE}
+    )
+    assert combo_miss.status_code == 200, combo_miss.text
+    assert combo_miss.json() == {"commits": [], "count": 0}
+
+    nope = client.get("/api/history", params={"rule_id": "NOPE"})
+    assert nope.status_code == 200, nope.text
+    assert nope.json() == {"commits": [], "count": 0}
