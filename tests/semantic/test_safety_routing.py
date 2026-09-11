@@ -3,7 +3,8 @@
 不经 LLM、不触镜像库（与 test_adversarial_cases 同款零副作用约定）：
 ① 差分问句（聚合唯一值反推定位个人＋索要个人信息）→ 规则路径 REJECT；
 ② 正常聚合问句 → 非 REJECT（防过拦红线：正常聚合/统计问句必须放行）；
-③ 再识别变体（记录级明细索求 / 标识号存在性反查）→ REJECT。
+③ 再识别变体（记录级明细索求 / 标识号存在性反查）→ REJECT；
+④ 聚合实体问句（T-N3 模式一收窄，Jack 2026-09-11 裁决）→ 非 REJECT，组合个体索求不漏。
 问句全部为特征变体措辞，非 fixtures 原文——锁的是特征规则，不是 case 查表。
 """
 
@@ -70,3 +71,37 @@ def test_reidentification_variants_rejected():
         assert plan.rejected, q
         assert plan.hit, q
         assert not any(ch.isdigit() for ch in plan.hit), q
+
+
+# 聚合实体问句（T-N3，Jack 2026-09-11 裁决「唯一破千的渠道是谁不该被拒」）：
+# 唯一值锚定 × 索求宾语为聚合维度实体 → 放行；个人级索求词表一个不动。
+AGGREGATE_ENTITY_QUESTIONS = (
+    "唯一破千的渠道是谁",  # 渠道聚合实体 × 泛指「是谁」
+    "唯一一次注册破百是哪天",  # 日期聚合（哪天问法，无个人级索求词）
+)
+
+# 收窄不得漏组合特征：聚合词在场，索求宾语仍是个体指称 → 照拒（宁拒不误放）
+AGGREGATE_MIXED_QUESTIONS = (
+    "唯一破千的渠道，那天注册的人是谁",  # 「的人是谁」= 个体指称，非渠道宾语
+)
+
+
+def test_aggregate_entity_question_allowed():
+    """④ 聚合实体问句 → 非 REJECT（模式一收窄；个人级词表与模式二/三不动）。"""
+    for q in AGGREGATE_ENTITY_QUESTIONS:
+        plan = keyword_route(q)
+        assert not plan.rejected, q
+
+
+def test_aggregate_mixed_personal_demand_still_rejected():
+    """⑤ 组合个体索求 → 仍 REJECT：收窄不豁免「…的人是谁」类指称。
+
+    与①同判据：安全短路全链路（llm_route 无 key 必拒）+ hit 可读无数字。
+    """
+    for q in AGGREGATE_MIXED_QUESTIONS:
+        plan = keyword_route(q)
+        assert plan.rejected, q
+        assert plan.hit, q
+        assert not any(ch.isdigit() for ch in plan.hit), q
+        routed = llm_route.llm_route(q)  # 安全规则先行，未配置 key 也必拒
+        assert routed["plan"].rejected, q

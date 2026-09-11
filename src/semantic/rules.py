@@ -77,6 +77,33 @@ _DIFF_INFO_WORDS = (
     "注册时间",
 )
 
+# 模式一收窄（T-N3，Jack 2026-09-11 裁决：「唯一破千的渠道是谁」不该被拒）：
+# 唯一值锚定 × 索求宾语为聚合维度实体 → 放行。放行条件从严（宁拒不误放）：
+# ① 索求词仅认泛指代词「是谁」——_DIFF_INFO_WORDS 其余 15 个个人级词
+#    （手机号/注册人/姓名…）任一在场即照拒，个人级索求词表一个不动；
+# ② 聚合实体词须紧邻「是谁」（可隔「的」）——「那天注册的人是谁」类个体
+#    指称不豁免。模式二/三不收窄。
+_AGGREGATE_ENTITY_WORDS = (
+    "渠道",  # 渠道维度（裁决原句宾语）
+    "天",
+    "日",
+    "日期",
+    "周",
+    "月",
+    "月份",
+    "年",
+    "年份",
+    "总数",
+    "总量",
+    "总计",
+    "合计",
+    "排名",
+    "排行",
+    "名次",
+)
+_AGG_PERSONAL_INFO_WORDS = tuple(w for w in _DIFF_INFO_WORDS if w != "是谁")
+_AGG_DEMAND_RE = re.compile("(?:" + "|".join(_AGGREGATE_ENTITY_WORDS) + ")(?:的)?是谁")
+
 # 模式二（记录级出口）：记录粒度/导出形态 × PII 字段（「小区/年龄段」这类聚合
 # 统计维度不入字段清单——GLM-safety_pii-003 类统计问必须放行；「明细/导出」
 # 不入粒度词——多轮承接会把历史问句拼进路由文本，宽词在合法链路上误伤
@@ -117,13 +144,30 @@ def _any_word_in(text: str, words: tuple[str, ...]) -> bool:
     return any(w in text for w in words)
 
 
+def _aggregate_entity_demand(question: str) -> bool:
+    """模式一放行通道：索求宾语是聚合维度实体 → True（T-N3 收窄）。
+
+    从严两条件（见 _AGGREGATE_ENTITY_WORDS 块注释）：索求词仅为「是谁」（任一
+    个人级词在场即 False）；每个「是谁」都紧邻聚合实体词。拿不准 → False 照拒
+    （宁拒不误放）。
+    """
+    if _any_word_in(question, _AGG_PERSONAL_INFO_WORDS):
+        return False
+    pronouns = question.count("是谁")
+    return pronouns > 0 and pronouns == len(_AGG_DEMAND_RE.findall(question))
+
+
 def differential_attack_hit(question: str) -> str | None:
     """差分攻击/再识别特征判定（T-U5）：命中 → 返回可读命中理由（人话、不含
     数字，可安全拼进拒答文案——文案无数字红线）；未命中 → None。
     三组模式均为 AND 组合（见上方块注释），规则可解释、特征收窄防误伤。"""
+    # T-N3 收窄：唯一值锚定 × 索求宾语是聚合维度实体（「唯一破千的渠道是谁」）
+    # → 放行，落回模式二/三继续判；个人级索求/个体指称照拒（宁拒不误放）。
     if (
-        _DIFF_UNIQUE_RE.search(question) or _any_word_in(question, _DIFF_UNIQUE_WORDS)
-    ) and _any_word_in(question, _DIFF_INFO_WORDS):
+        (_DIFF_UNIQUE_RE.search(question) or _any_word_in(question, _DIFF_UNIQUE_WORDS))
+        and _any_word_in(question, _DIFF_INFO_WORDS)
+        and not _aggregate_entity_demand(question)
+    ):
         return "聚合唯一值反推定位个人（差分攻击特征）"
     if (
         _any_word_in(question, _DIFF_RECORD_WORDS) or _DIFF_RECORD_RE.search(question)
