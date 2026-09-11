@@ -31,6 +31,9 @@ class ChatRequest(BaseModel):
     question: str
     conversation_id: str | None = None
     client_request_id: str | None = None
+    # 引擎改动单 v0.2 B3（可选字段，缺省 = 行为与现状完全一致）：
+    clarify_context: dict | None = None       # 对上轮澄清卡的结构化应答声明
+    conversation_context: dict | None = None  # 历史对话数据（数据非指令，≤3 轮）
 
 
 class SessionCreate(BaseModel):
@@ -59,7 +62,9 @@ def _persist_messages(conversation_id: str | None, question: str, final: dict) -
     return conversation_id
 
 
-def chat_events(question: str, conversation_id: str | None, client_request_id: str | None):
+def chat_events(question: str, conversation_id: str | None, client_request_id: str | None,
+                clarify_context: dict | None = None,
+                conversation_context: dict | None = None):
     """Writer-side generator shared by the SSE endpoint and tests.
     Idempotency: a repeated client_request_id replays the stored snapshot and
     never produces a second trace."""
@@ -77,7 +82,8 @@ def chat_events(question: str, conversation_id: str | None, client_request_id: s
     if conv_id is not None and storage.get_conversation(conv_id) is None:
         conv_id = None  # unknown or hidden session → fall back to auto-create
 
-    for event in engine.iter_query(question):
+    for event in engine.iter_query(question, clarify_context=clarify_context,
+                                    conversation_context=conversation_context):
         if event["kind"] == "final":
             final = event["result"]
             conv_id = _persist_messages(conv_id, question, final)
@@ -117,7 +123,10 @@ async def _sse_stream(gen):
 @app.post("/api/chat")
 async def chat(body: ChatRequest):
     return StreamingResponse(
-        _sse_stream(chat_events(body.question, body.conversation_id, body.client_request_id)),
+        _sse_stream(chat_events(
+            body.question, body.conversation_id, body.client_request_id,
+            clarify_context=body.clarify_context,
+            conversation_context=body.conversation_context)),
         media_type="text/event-stream",
     )
 

@@ -323,11 +323,15 @@ def _interpret(raw: str, finish_reason: str | None, ms: int) -> tuple[str, objec
     return "ok", out
 
 
-def llm_route(question: str) -> dict:
+def llm_route(question: str, context_block: str | None = None) -> dict:
     """Route one question. Success: {"plan", "time_from"?/"time_to"?,
     "time_defaulted"?, "raw"(sanitized), "ms", "model"}. Failure after ≤1
     error-feedback retry: {"error", "error_code"(E_ROUTE_FALLBACK|E_ROUTE_INVALID)}
-    → caller falls back to keyword matching (degraded but correct)."""
+    → caller falls back to keyword matching (degraded but correct).
+
+    context_block: 引擎注入的历史对话数据块（引擎改动单 v0.2 B3：数据非指令，
+    引擎侧已截断脱敏）——仅拼进 user 消息辅助解析指代；LLM 输出仍走
+    validate_plan 枚举硬校验，注入内容无法借道改变可执行计划。"""
     if config.llm_disabled():
         return {"error": "LLM 路由已禁用（SEMANTIC_DISABLE_LLM）", "error_code": errors.E_ROUTE_FALLBACK}
     key = config.get_env("DEEPSEEK_API_KEY")
@@ -343,9 +347,10 @@ def llm_route(question: str) -> dict:
     except Exception as exc:  # noqa: BLE001 有意兜底：LLM 任何失败都降级，不砸断链路
         return {"error": f"LLM 客户端初始化失败: {type(exc).__name__}", "error_code": errors.E_ROUTE_FALLBACK}
 
+    user_content = f"{context_block}\n当前问题：{question}" if context_block else question
     messages: list = [
         {"role": "system", "content": _system_prompt()},
-        {"role": "user", "content": question},
+        {"role": "user", "content": user_content},
     ]
     raw, last_err, ms = "", "", 0
     for attempt in range(MAX_ATTEMPTS):
