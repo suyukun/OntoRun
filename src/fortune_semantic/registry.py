@@ -323,7 +323,7 @@ RULES = {
             "ADS 脚本用 fin∪nonfin 注册表联合推导（fin 优先，row_number rn=1）"
         ),
         source_script=f"{WAREHOUSE_SCRIPT_DIR}/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql",
-        status="unverified",
+        status="confirmed",
     ),
     "R10": CaliberRule(
         id="R10",
