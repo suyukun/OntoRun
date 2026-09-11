@@ -11,12 +11,12 @@ L 级，填全表。不做降级。
 ## A. 需求
 - **A1 一句话命题**：给数仓同学与演示对象：打开产品，值得看的自己先开口（洞察卡），每个数字点得穿、敢相信（溯源穿透）——从问答计算器变成先开口、可信任的数据分析师。
 - **A2 用户故事**：
-  - **US1 (P1) 溯源穿透**：点答案里任一数字 → 口径卡（这句数怎么算的，人话＋规则状态）→ 来源明细行样例 → 确认历史（谁何时确认）。**SQL 与表结构不出用户层**（Jack 裁决：对客户无意义＋攻击面）。
+  - **US1 (P1) 溯源穿透（汇总级，Jack 裁决 2026-09-11）**：点答案里任一数字 → 口径卡（这句数怎么算的，人话＋规则状态）→ 确认历史（谁何时确认）。**来源明细行、SQL、表结构一律不出用户层**（明细未来量大难处理＋无意义＋攻击面）。
   - **US2 (P1) 主动洞察**：打开产品，规则命中才出洞察卡（渠道日环比突变/总量突变/贡献度突变），卡带「看分解」走现有语义接口；**没有发现不出卡**，退化为常用查询入口（Jack 裁决：宁缺毋滥不强行加戏）。
   - **US3 (P2) 思考节奏与话术**：最短 2.5s 真实时钟补间（演示模式可配，节拍器由真实 SSE 步骤事件驱动）＋思考流话术模板池随机化；**假步骤零容忍**。
   - **US4 (P2) 拒答话术改写**：REJECT/CLARIFY 文案 flash 模型并行改写＋模板兜底；数字与事实永远由结构化字段回填，LLM 只改措辞。
 - **A3 验收标准（EARS）**：
-  - WHEN 用户点击答案中任一数字 THEN 系统 SHALL 展示口径卡＋来源明细样例＋确认历史，SHALL NOT 展示 SQL/表结构（vitest test_trace_penetration）。
+  - WHEN 用户点击答案中任一数字 THEN 系统 SHALL 展示口径卡＋确认历史（汇总级），SHALL NOT 展示 SQL/表结构/**来源明细行**（vitest test_trace_penetration）。
   - WHEN 洞察规则命中（|日环比|≥30% 且近 7 日样本≥5 日）THEN 打开页 SHALL 置顶洞察卡并带「看分解」动作；WHEN 无命中 THEN SHALL 显示常用查询入口，SHALL NOT 出现凑数洞察卡（pytest test_insights_rules + vitest）。
   - WHEN SSE 全程 <2.5s 且演示模式开 THEN 前端 SHALL 按真实步骤事件补间至 2.5s，SHALL NOT 插入不存在步骤（vitest test_pacing_fake_step_zero）。
   - WHEN REJECT/CLARIFY 产生 THEN 改写并行发起（超时 2s 回退模板），文案中数字 SHALL 与结构化字段逐一相等（test_rewrite_fallback + 数字相等断言）。
@@ -26,12 +26,12 @@ L 级，填全表。不做降级。
 ## B. 设计
 - **B1 技术上下文**：动 chatbi/src/（穿透面板组件、洞察卡、节奏补间、话术池）、src/semantic/insights.py（新，规则引擎读镜像库）、src/semantic/app.py（+GET /api/insights，只读）、tests/。预期 diff：净增 600~900 行。
 - **B2 关键决策**：①洞察=统计规则非 LLM（Tableau Pulse 模式；备选 LLM 生成洞察被否：幻觉＋费用＋不可审计）②用户可见层零 SQL（Jack 裁决；备选展示 SQL 被否：无意义＋攻击面）③改写并行＋模板兜底（月 0.4 元实证；备选同步改写被否：白加时延）④补间由真实 SSE 事件驱动（NN/g 三限值＋Devin/o1 反例；备选固定 sleep 被否：表演式进度）。
-- **B3 契约（T-U1 前冻结）**：GET /api/insights → {"insights":[{type, channel, metric, current, baseline, delta_pct, drilldown:{measure,dimensions,time}}]} | {"insights":[], "fallback":"common_queries"}；穿透面板数据 = {caliber_card, sample_rows(≤5), confirm_history}（字段不含 SQL）。
+- **B3 契约（T-U1 前冻结）**：GET /api/insights → {"insights":[{type, channel, metric, current, baseline, delta_pct, drilldown:{measure,dimensions,time}}]} | {"insights":[], "fallback":"common_queries"}；穿透面板数据 = {caliber_card, confirm_history}（汇总级：不含 SQL、不含来源明细行）。
 - **B4 宪法门禁**：①MVP 三小件先跑通 ✅ ②规则与断言机器可验证 ✅ ③单一事实来源（本稿+调研文档）✅；安全：/api/insights 只读、无 SQL 回显、阈值常量防注入（数值白名单）。
 
 ## C. 计划
 - **C1 任务**：
-  - T-U1 [US1][P] chatbi 穿透面板（口径卡/来源行样例≤5/确认历史；数字可点击）。判据：vitest 穿透断言绿＋用户层零 SQL 断言绿。
+  - T-U1 [US1][P] chatbi 穿透面板（口径卡/确认历史；数字可点击，汇总级）。判据：vitest 穿透断言绿＋用户层零 SQL、零来源明细行断言绿。
   - T-U2 [US2] src/semantic/insights.py（三条规则＋常量）＋GET /api/insights＋洞察卡组件＋常用查询兜底。判据：pytest test_insights_rules 绿（命中/不命中/兜底三态）。
   - T-U3 [US3][P] 节奏补间＋话术模板池。判据：vitest 补间断言绿＋假步骤零（断言步骤集合⊆真实 SSE 事件）。
   - T-U4 [US4][P] 改写并行＋模板兜底＋数字相等断言。判据：vitest 绿＋offline 冒烟回退路径绿。
@@ -48,9 +48,9 @@ L 级，填全表。不做降级。
 ## NC 登记（NEEDS CLARIFICATION；清零才派活）
 | 编号 | 问题 | Rose 建议 | 状态 |
 |---|---|---|---|
-| NC-U1 | 来源明细行展示深度：样例 5 行还是可展开全量？ | 样例 5 行＋总数计数 | NC-OPEN |
-| NC-U2 | 洞察阈值 30%/近 7 日均值/最小样本 5 日，默认合理？ | 按此默认，常量可配 | NC-OPEN |
-| NC-U3 | 话术改写用哪个模型？ | zai glm-5.3-flash（套餐内免费，与路由同源但改写为旁路小调用） | NC-OPEN |
-| NC-U4 | 2.5s 节奏开关默认值？ | 配置文件开关，演示默认开 | NC-OPEN |
+| NC-U1 | 来源明细行展示深度：样例 5 行还是可展开全量？ | 样例 5 行＋总数计数 | NC-RESOLVED: Jack 裁决砍掉——来源明细行一律不给，穿透改汇总级（口径卡＋确认历史） |
+| NC-U2 | 洞察阈值 30%/近 7 日均值/最小样本 5 日，默认合理？ | 按此默认，常量可配 | NC-RESOLVED: 按默认 |
+| NC-U3 | 话术改写用哪个模型？ | zai glm-5.3-flash（套餐内免费，与路由同源但改写为旁路小调用） | NC-RESOLVED: 按建议 |
+| NC-U4 | 2.5s 节奏开关默认值？ | 配置文件开关，演示默认开 | NC-RESOLVED: 按建议 |
 
-派活前检查：grep -c 'NC-OPEN' 本文件 = 0。
+派活前检查：上表 NC 状态列存在未解决项时禁止派活（机器检查：状态列仅允许 RESOLVED / N-A）。
