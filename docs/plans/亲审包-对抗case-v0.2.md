@@ -57,3 +57,40 @@
 ## 未入包条目
 
 其余 31 条（口径/语义/工程/多轮常规项）在 tests/fixtures/对抗问法集_v0.2.json，可随时加审。
+## 增补批次：人类非标准输入（Jack 指令 2026-09-11，+10 条）
+
+背景：日常真实输入不标准——错别字、同音字（语音转文字）、填充词不通顺、说一半改口。此批 10 条期望值需你亲审确认。
+
+| id | 问句/序列 | 期望 | 判据 |
+|---|---|---|---|
+| HUMAN-engineering_edge-001 | 赢行App 8月注册了多少人 | ANSWER | 语音同音错字（银行→赢行）：高置信映射应聪明猜+明示按银行App统计（Jack 增补：非标准输入场景） |
+| HUMAN-engineering_edge-002 | 8月的祖册数是多少 | CLARIFY | 完全错字无高置信映射（注册→祖册）：应澄清而非瞎猜 |
+| HUMAN-engineering_edge-003 | 那个那个帮我查一下就是八月份的那个注册的那个数 | ANSWER | 语音转文字填充词/不通顺：去语气词后按8月正常答 |
+| HUMAN-engineering_edge-004 | 注册数。8月的。各渠道的。 | ANSWER | 语音断句碎片：应拼合理解为一问（8月各渠道注册数） |
+| HUMAN-engineering_edge-005 | 帮我瞅瞅8月拉了多少新客 | ANSWER | 口语化说法（新客≈注册）：高置信同义映射应答+明示按注册口径 |
+| HUMAN-engineering_edge-006 | 优享加线上的8月注册人数 | ANSWER | 符号错字（＋→加）：高置信渠道映射应答 |
+| HUMAN-engineering_edge-007 | 帮我看下7月……不对，8月的注册数 | ANSWER | 语音说一半改口：以修正后月份为准（8月） |
+| HUMAN-engineering_edge-008 | 8月注册数两是多少 | ANSWER | 同音错字（数量→数两）：高置信映射应正常答 |
+| HUMAN-engineering_edge-009 | 8月各渠道注册数都有哪些渠道注册人数多少 | CLARIFY | 语音连说无标点成复合问：应选主问或澄清，SHALL NOT 静默丢一半 |
+| HUMAN-multi_turn-008 | 看看注册 → 就八月的中信书院 | CLARIFY/ANSWER | 语音式宽泛问应反问 ＋ 语音风格短答（无标点错字）：承接双槽出数 |
+
+（三个预设判断按你「内容没问题」的表态全部维持原判：bank App=ANSWER／环比=ANSWER／相对时间=明说假设判。随时可改，说 id 即可。）
+
+## 增补批次：人类非标准输入（Jack 指令 2026-09-11，+10 条）
+
+背景：日常真实输入不标准——错别字、同音字（语音转文字）、填充词不通顺、说一半改口。此批 10 条期望值需你亲审确认。
+
+| id | 问句/序列 | 期望 | 判据 |
+|---|---|---|---|
+| HUMAN-engineering_edge-001 | 赢行App 8月注册了多少人 | ANSWER | 语音同音错字（银行→赢行）：高置信映射应聪明猜+明示按银行App统计（Jack 增补：非标准输入场景） |
+| HUMAN-engineering_edge-002 | 8月的祖册数是多少 | CLARIFY | 完全错字无高置信映射（注册→祖册）：应澄清而非瞎猜 |
+| HUMAN-engineering_edge-003 | 那个那个帮我查一下就是八月份的那个注册的那个数 | ANSWER | 语音转文字填充词/不通顺：去语气词后按8月正常答 |
+| HUMAN-engineering_edge-004 | 注册数。8月的。各渠道的。 | ANSWER | 语音断句碎片：应拼合理解为一问（8月各渠道注册数） |
+| HUMAN-engineering_edge-005 | 帮我瞅瞅8月拉了多少新客 | ANSWER | 口语化说法（新客≈注册）：高置信同义映射应答+明示按注册口径 |
+| HUMAN-engineering_edge-006 | 优享加线上的8月注册人数 | ANSWER | 符号错字（＋→加）：高置信渠道映射应答 |
+| HUMAN-engineering_edge-007 | 帮我看下7月……不对，8月的注册数 | ANSWER | 语音说一半改口：以修正后月份为准（8月） |
+| HUMAN-engineering_edge-008 | 8月注册数两是多少 | ANSWER | 同音错字（数量→数两）：高置信映射应正常答 |
+| HUMAN-engineering_edge-009 | 8月各渠道注册数都有哪些渠道注册人数多少 | CLARIFY | 语音连说无标点成复合问：应选主问或澄清，SHALL NOT 静默丢一半 |
+| HUMAN-multi_turn-008 | 看看注册 → 就八月的中信书院 | CLARIFY/ANSWER | 语音式宽泛问应反问 ＋ 语音风格短答（无标点错字）：承接双槽出数 |
+
+（三个预设判断按你「内容没问题」的表态全部维持原判：bank App=ANSWER／环比=ANSWER／相对时间=明说假设判。随时可改，说 id 即可。）

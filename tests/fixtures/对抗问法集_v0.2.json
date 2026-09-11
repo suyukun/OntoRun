@@ -742,5 +742,157 @@
     }
    }
   ]
+ },
+ {
+  "id": "HUMAN-engineering_edge-001",
+  "category": "engineering_edge",
+  "q": "赢行App 8月注册了多少人",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "dimensions": [
+    "channel_l2"
+   ],
+   "filter_values": {
+    "channel_l2": "银行App"
+   },
+   "note": "语音同音错字（银行→赢行）：高置信映射应聪明猜+明示按银行App统计（Jack 增补：非标准输入场景）"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-002",
+  "category": "engineering_edge",
+  "q": "8月的祖册数是多少",
+  "expect": {
+   "behavior": "CLARIFY",
+   "note": "完全错字无高置信映射（注册→祖册）：应澄清而非瞎猜"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-003",
+  "category": "engineering_edge",
+  "q": "那个那个帮我查一下就是八月份的那个注册的那个数",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "time": {
+    "from": "2026-08-01",
+    "to": "2026-08-31"
+   },
+   "note": "语音转文字填充词/不通顺：去语气词后按8月正常答"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-004",
+  "category": "engineering_edge",
+  "q": "注册数。8月的。各渠道的。",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "dimensions": [
+    "channel_l2"
+   ],
+   "time": {
+    "from": "2026-08-01",
+    "to": "2026-08-31"
+   },
+   "note": "语音断句碎片：应拼合理解为一问（8月各渠道注册数）"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-005",
+  "category": "engineering_edge",
+  "q": "帮我瞅瞅8月拉了多少新客",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "time": {
+    "from": "2026-08-01",
+    "to": "2026-08-31"
+   },
+   "note": "口语化说法（新客≈注册）：高置信同义映射应答+明示按注册口径"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-006",
+  "category": "engineering_edge",
+  "q": "优享加线上的8月注册人数",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "dimensions": [
+    "channel_l2"
+   ],
+   "filter_values": {
+    "channel_l2": "优享+线上"
+   },
+   "note": "符号错字（＋→加）：高置信渠道映射应答"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-007",
+  "category": "engineering_edge",
+  "q": "帮我看下7月……不对，8月的注册数",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "time": {
+    "from": "2026-08-01",
+    "to": "2026-08-31"
+   },
+   "note": "语音说一半改口：以修正后月份为准（8月）"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-008",
+  "category": "engineering_edge",
+  "q": "8月注册数两是多少",
+  "expect": {
+   "behavior": "ANSWER",
+   "measure": "reg_user_cnt",
+   "time": {
+    "from": "2026-08-01",
+    "to": "2026-08-31"
+   },
+   "note": "同音错字（数量→数两）：高置信映射应正常答"
+  }
+ },
+ {
+  "id": "HUMAN-engineering_edge-009",
+  "category": "engineering_edge",
+  "q": "8月各渠道注册数都有哪些渠道注册人数多少",
+  "expect": {
+   "behavior": "CLARIFY",
+   "note": "语音连说无标点成复合问：应选主问或澄清，SHALL NOT 静默丢一半"
+  }
+ },
+ {
+  "id": "HUMAN-multi_turn-008",
+  "category": "multi_turn",
+  "turns": [
+   {
+    "q": "看看注册",
+    "expect_behavior": "CLARIFY",
+    "note": "语音式宽泛问应反问"
+   },
+   {
+    "q": "就八月的中信书院",
+    "expect": {
+     "behavior": "ANSWER",
+     "measure": "reg_user_cnt",
+     "dimensions": [
+      "channel_l2"
+     ],
+     "filter_values": {
+      "channel_l2": "中信书院"
+     },
+     "time": {
+      "from": "2026-08-01",
+      "to": "2026-08-31"
+     },
+     "note": "语音风格短答（无标点错字）：承接双槽出数"
+    }
+   }
+  ]
  }
 ]
