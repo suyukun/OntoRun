@@ -94,3 +94,11 @@
 | HUMAN-multi_turn-008 | 看看注册 → 就八月的中信书院 | CLARIFY/ANSWER | 语音式宽泛问应反问 ＋ 语音风格短答（无标点错字）：承接双槽出数 |
 
 （三个预设判断按你「内容没问题」的表态全部维持原判：bank App=ANSWER／环比=ANSWER／相对时间=明说假设判。随时可改，说 id 即可。）
+
+## 修订记录（2026-09-11 晚，「赢行/新客」裁决）
+
+你裁决：**语义/业务映射须确认式澄清**——先把理解翻译出来（如「按银行App查？」）向用户确认一次，得到确认后再查询，不自作主张出数。
+
+据此 **4 条已改 CLARIFY**：HUMAN-engineering_edge-001（赢行）、HUMAN-engineering_edge-005（新客）、GLM-semantic_edge-002（bank App，预设#1 废止）、GLM-caliber_trap-001（新增用户）。
+纯语音同音唯一读法（HUMAN-engineering_edge-008「数两→数量」）保留直接答＋明示（确认=傻问），如不认同说 id。
+该模式已固化进分类学判据（确认式澄清：行为值记 CLARIFY，澄清卡携带系统猜测供一键确认）。

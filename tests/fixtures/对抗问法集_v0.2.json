@@ -550,8 +550,8 @@
   "category": "caliber_trap",
   "q": "8月新增用户数是多少？",
   "expect": {
-   "behavior": "ANSWER",
-   "note": "『新增用户』是数仓同事的日常叫法，语义上应聪明映射到已注册的 reg_user_cnt 并明说假设。测反向风险：不许因字面没出现『注册』就拒答——这是『要智能感』的样板题"
+   "behavior": "CLARIFY",
+   "note": "Jack 裁决 同口径：新增用户≈注册但语义解释需确认（按注册口径理解？），确认后出数"
   }
  },
  {
@@ -604,8 +604,8 @@
   "category": "semantic_edge",
   "q": "bank App 渠道8月注册了多少人？",
   "expect": {
-   "behavior": "ANSWER",
-   "note": "渠道英文别名，高置信映射到已注册值『银行App』。按『能聪明猜就聪明猜』应出数并明说按『银行App』处理——与凭空捏造的『拼多多』（应澄清）形成同族对照，测别名与幻觉的区分度"
+   "behavior": "CLARIFY",
+   "note": "Jack 裁决 同口径：别名映射（bank App→银行App）属语义解释，应确认式澄清而非直接出数（原 ANSWER 判据废止）"
   }
  },
  {
@@ -748,7 +748,7 @@
   "category": "engineering_edge",
   "q": "赢行App 8月注册了多少人",
   "expect": {
-   "behavior": "ANSWER",
+   "behavior": "CLARIFY",
    "measure": "reg_user_cnt",
    "dimensions": [
     "channel_l2"
@@ -756,7 +756,7 @@
    "filter_values": {
     "channel_l2": "银行App"
    },
-   "note": "语音同音错字（银行→赢行）：高置信映射应聪明猜+明示按银行App统计（Jack 增补：非标准输入场景）"
+   "note": "Jack 裁决：赢行应理解为银行，但须先向用户确认（确认式澄清：按银行App查？）得到确认后再查询，不自作主张出数"
   }
  },
  {
@@ -804,13 +804,13 @@
   "category": "engineering_edge",
   "q": "帮我瞅瞅8月拉了多少新客",
   "expect": {
-   "behavior": "ANSWER",
+   "behavior": "CLARIFY",
    "measure": "reg_user_cnt",
    "time": {
     "from": "2026-08-01",
     "to": "2026-08-31"
    },
-   "note": "口语化说法（新客≈注册）：高置信同义映射应答+明示按注册口径"
+   "note": "Jack 裁决：新客≈注册但语境不完全等同——应把理解翻译出来（按注册口径理解？）确认后再查，不直接返回数据"
   }
  },
  {
@@ -854,7 +854,7 @@
     "from": "2026-08-01",
     "to": "2026-08-31"
    },
-   "note": "同音错字（数量→数两）：高置信映射应正常答"
+   "note": "纯语音同音（数量→数两）唯一合理读法：直接答+明示，不确认（确认=傻问）；若 Jack 认为也应确认改 CLARIFY"
   }
  },
  {
