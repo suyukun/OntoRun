@@ -336,6 +336,75 @@ RULES = {
 }
 
 
+# ---- 业务域登记块（管理台 M1 前置 T0c，DX-1 已批）----
+# 表→域 = 登记制元数据（docs/design/管理台重设计-域级总览图专项_v0.1.md §1.3，
+# 7 域框架 Jack 已认可；DX-2 一表唯一主域，转化链主表归注册域）。
+# 表 id 与 lineage_edges.json 实盘一致（含 schema 前缀），禁表名前缀猜测兜底。
+
+
+class Domain(BaseModel):
+    """业务域：域图节点元数据（key 供 TABLE_DOMAINS 值域引用）。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str = Field(description="域唯一键")
+    name: str = Field(description="人话名")
+    description: str = Field(description="一句话简介")
+
+
+DOMAINS: list[Domain] = [
+    Domain(key="reg", name="注册域", description="用户从注册到激活进 KPI 的全过程"),
+    Domain(key="real", name="实名认证域", description="完成实名的人口与渠道分布"),
+    Domain(
+        key="auth", name="授权域", description="客户授权开户与账户口径（R8 所在域）"
+    ),
+    Domain(key="chnl", name="渠道域", description="渠道主数据与渠道-客户关系"),
+    Domain(key="cust", name="客户主数据域", description="客户统一视图与触点"),
+    Domain(key="pub", name="公共维表域", description="日期/节假日/交易日历等公共维度"),
+    Domain(key="behav", name="行为埋点域", description="页面浏览与采集行为明细"),
+]
+
+TABLE_DOMAINS: dict[str, str] = {
+    # reg 注册域（7）：注册/激活明细 + 渠道注册三张 ADS + 转化链主表（DX-2 主域）
+    "cdm.dwd_cu_rgst_fin_di": "reg",
+    "cdm.dwd_cu_rgst_nonfin_di": "reg",
+    "cdm.dwd_cu_actv_df": "reg",
+    "rec.ads_rgst_chnl_cnt_df": "reg",
+    "rec.ads_rgst_raw_chnl_cnt_df": "reg",
+    "rec.ads_rgst_act_chnl_cnt_df": "reg",
+    "rec.ads_chnl_rgst_to_real_auth_dau_df": "reg",
+    # real 实名认证域（4）
+    "cdm.dwd_cu_real_df": "real",
+    "ods.ods_usms_sub_company_real_name_sync_record_df": "real",
+    "rec.ads_chnl_real_info_df": "real",
+    "rec.ads_chnl_real_user_df": "real",
+    # auth 授权域（4）：R8 所在域
+    "ods.ods_usms_lml_account_t_df": "auth",
+    "ods.ods_usms_lm_agreement_version_t_df": "auth",
+    "rec.ads_chnl_auth_qty_df": "auth",
+    "rec.ads_chnl_rltv_chnl_df": "auth",
+    # chnl 渠道域（5）：渠道维 + 用户关系 + 渠道主数据三张 ODS
+    "cdm.dim_ch_chl_df": "chnl",
+    "cdm.dwd_ch_usr_rltv_df": "chnl",
+    "ods.ods_usms_lm_channel_base_t_df": "chnl",
+    "ods.ods_usms_lm_channel_group_base_t_df": "chnl",
+    "ods.ods_usms_lm_channel_user_t_df": "chnl",
+    # cust 客户主数据域（3）
+    "cdm.dim_cu_usr_info_df": "cust",
+    "ods.ods_usms_lm_user_t_df": "cust",
+    "ods.ods_lm_user_wechat_t_df": "cust",
+    # pub 公共维表域（5）：日期维三份镜像（cdm/<default>/cfgl_iml_data）+ 节假日 + 交易日历
+    "cdm.dim_pb_date_yf": "pub",
+    "<default>.dim_pb_date_yf": "pub",
+    "cfgl_iml_data.dim_pb_date_yf": "pub",
+    "cfgl_iml_data.dim_date_holiday": "pub",
+    "cfgl_itl_data.cwmp_wind_citic_asharecalendar_yf": "pub",
+    # behav 行为埋点域（2）
+    "cdm.dwd_lm_pv_df": "behav",
+    "ods.madp_collect_all": "behav",
+}
+
+
 class SemanticError(Exception):
     """结构化语义层错误（禁止静默兜底）。"""
 
