@@ -5,5 +5,12 @@
     "confirmer": "Rose(自动验收)",
     "code": "5835da",
     "time": "2026-09-10T17:13:06+08:00"
+  },
+  {
+    "rule_id": "R9",
+    "verdict": "rejected",
+    "confirmer": "苏",
+    "code": "6b5b45",
+    "time": "2026-09-11T16:04:18+08:00"
   }
 ]
