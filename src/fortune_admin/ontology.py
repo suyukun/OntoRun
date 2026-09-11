@@ -120,6 +120,33 @@ def _commit_for_code(code: str) -> str | None:
     return commit
 
 
+# ---- 分歧对照装配数据（T201）----
+# registry.py 规则块中 R8 的双口径实证（595/552/55）只有描述文本、无结构化
+# 数据可读（语义层只读不改），故在管理台装配层落结构；数字为 2026-08 镜像
+# 库实证（registry R8 描述原文），非手填假数字。
+_DIVERGENCES: dict[str, list[DivergenceOption]] = {
+    "R8": [
+        DivergenceOption(
+            key="account",
+            label="按账户计数（授权账户数）",
+            value_evidence=(
+                "595（2026-08 镜像实证：ADS 脚本按行计数，一人多渠道授权重复计入）"
+            ),
+            applies_to="与 ADS 报表/脚本逐格对账场景：逐格相等仅在账户口径下成立",
+        ),
+        DivergenceOption(
+            key="user",
+            label="按用户去重（授权用户数）",
+            value_evidence=(
+                "552（2026-08 镜像实证：语义层 auth_user_cnt 按用户去重；"
+                "另 55 名无金融注册授权用户被内联注册表丢弃）"
+            ),
+            applies_to="业务统计授权用户数场景：一人多渠道授权不重复计",
+        ),
+    ],
+}
+
+
 def ontology_payload() -> dict:
     registry = load_registry()
     confirmations = load_confirmations()
@@ -170,6 +197,7 @@ def ontology_payload() -> dict:
 
     rules = []
     for r in registry.rules.values():
+        divergence = _DIVERGENCES.get(r.id)
         rules.append(
             {
                 "id": r.id,
@@ -178,6 +206,13 @@ def ontology_payload() -> dict:
                 "status": r.status,
                 "related_tables": _tables_from_script(r.source_script),
                 "last_record": last_by_rule.get(r.id),
+                # T201：R8 双口径对照（无分歧规则为 None）；decision 随 T202 裁决写入。
+                "divergence": (
+                    [opt.model_dump(mode="json") for opt in divergence]
+                    if divergence
+                    else None
+                ),
+                "decision": None,
             }
         )
 
