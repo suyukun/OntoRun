@@ -7,6 +7,8 @@ import type { ChatEvent, EndReason, FinalResult, StepInfo, StreamError } from '.
 const FRAME_TIMEOUT_MS = 30_000;
 const MOCK_STEP_DELAY_MS = 120;
 const MOCK_TOKEN_DELAY_MS = 10;
+/** 相邻步骤最小可读间隔（ms）：同批到达快于它的步骤稍候错开，防思考区一帧闪跳；自然到达慢于它则零延迟 */
+const MIN_STEP_GAP_MS = 150;
 
 export interface StreamCallbacks {
   onStep: (s: StepInfo) => void;
@@ -33,8 +35,9 @@ export interface ChatStream {
  * - AbortController：stop() 用户取消；30s 无帧看门狗超时
  * - 断连/无 final 帧 → interrupted；error 帧 → error
  * - mock 模式不发起请求，按事件序列延时回放（独立开发不依赖后端）
- * - US3 演示节奏补间（cfg.pacing）：SSE 全程快于 MIN_THINKING_MS 时，按真实步骤事件节拍补间展示至最短时长；
- *   节拍器只释放真实收到的事件（展示步骤 ⊆ SSE 事件，假步骤零容忍），关掉开关即纯真实节奏
+ * - US3 演示节奏（cfg.pacing，总时长兜底制）：步骤按到达自然速度释放，仅当整个思考流快于 MIN_THINKING_MS
+ *   时把 final 展示落点兜底至最短时长（Jack 2026-09-11 裁决）；只释放真实收到的事件（展示步骤 ⊆ SSE 事件，
+ *   假步骤零容忍），关掉开关即纯真实节奏
  */
 export function useChatStream(cfg: {
   endpoint: string;
@@ -104,23 +107,26 @@ type Terminal = (why: EndReason, err?: StreamError) => void;
 type Dispatch = (ev: ChatEvent) => boolean;
 
 /**
- * US3 节拍器（演示模式）：只释放真实收到的 SSE 事件，SHALL NOT 插入不存在步骤。
- * - 步骤与终局帧（final/error）按「最短展示时长内的均匀节拍」释放：已知事件越多，slot 越密，终局帧恰落在 t0+MIN；
- *   流到得慢（真实节奏 ≥ MIN）时到点即放，不额外拖长。
- * - 回答 token 不占节拍：轮到队头即放（回答文字流仍按事件真实顺序）。
- * - 每次入队重算节拍（清旧定时器重布拍）：已知事件数增长只会让后续拍点提前，均匀补间不被早拍的稀疏信息拖偏。
+ * US3 节奏器（演示模式，总时长兜底制）：只释放真实收到的 SSE 事件，SHALL NOT 插入不存在步骤。
+ * - 步骤与回答 token 到达即放（自然速度）；相邻步骤仅保留 MIN_STEP_GAP_MS 最小可读间隔防同批闪跳。
+ * - 仅当整个思考流快于最短展示时长（final 提前到达）时，final 展示落点兜底至 t0+minMs；流到得慢
+ *   （真实节奏 ≥ minMs）时 2.5s 截止后到点即放，不额外拖长。
+ * - 展示顺序 = 事件真实顺序：兜底的 final/error 不越过缓冲中未展示的步骤。
+ * - 拍点只取决于队头与固定锚点（t0 / lastStepAt），已在等的定时器不必因后续入队重排。
  */
 class StepPacer {
   private queue: ChatEvent[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private pacedReleased = 0;
+  private lastStepAt: number;
   private stopped = false;
 
   constructor(
     private readonly t0: number,
     private readonly minMs: number,
     private readonly out: Dispatch,
-  ) {}
+  ) {
+    this.lastStepAt = t0;
+  }
 
   /** 入队一个真实事件；返回是否终局帧（final/error），供 SSE 读流循环提前退出 */
   push(ev: ChatEvent): boolean {
@@ -130,7 +136,7 @@ class StepPacer {
       return terminal;
     }
     this.queue.push(ev);
-    this.schedule();
+    if (!this.timer) this.pump();
     return terminal;
   }
 
@@ -144,15 +150,6 @@ class StepPacer {
     this.queue = [];
   }
 
-  private schedule(): void {
-    if (this.stopped) return;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    this.pump();
-  }
-
   private pump = (): void => {
     this.timer = null;
     for (;;) {
@@ -160,7 +157,7 @@ class StepPacer {
       if (!head || this.stopped) return;
       const now = Date.now();
       if (now >= this.t0 + this.minMs) {
-        // 已到最短展示时长：剩余真实事件立即放行，不再拉长
+        // 已到最短展示时长：剩余真实事件立即放行，不再拉长（到点即放）
         while (this.queue.length > 0 && !this.stopped) this.releaseHead();
         return;
       }
@@ -168,8 +165,8 @@ class StepPacer {
         this.releaseHead();
         continue;
       }
-      const pacedTotal = this.pacedReleased + this.queue.filter((p) => p.kind !== 'token').length;
-      const due = this.t0 + ((this.pacedReleased + 1) * this.minMs) / Math.max(1, pacedTotal);
+      // step：相邻步骤最小可读间隔；final/error：总时长兜底落点
+      const due = head.kind === 'step' ? this.lastStepAt + MIN_STEP_GAP_MS : this.t0 + this.minMs;
       if (now < due) {
         this.timer = setTimeout(this.pump, due - now);
         return;
@@ -181,7 +178,7 @@ class StepPacer {
   private releaseHead(): void {
     const head = this.queue.shift();
     if (!head) return;
-    if (head.kind !== 'token') this.pacedReleased += 1;
+    if (head.kind === 'step') this.lastStepAt = Date.now();
     if (this.out(head)) {
       // 终局帧已出 → 停拍弃队
       this.stopped = true;

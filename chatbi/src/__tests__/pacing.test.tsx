@@ -55,6 +55,7 @@ function instantSse(steps: StepInfo[]) {
 function makeCollector() {
   const c = {
     steps: [] as StepInfo[],
+    stepAt: [] as number[],
     finals: [] as FinalResult[],
     ended: [] as string[],
     sendAt: 0,
@@ -62,7 +63,10 @@ function makeCollector() {
     callbacks: null as unknown as StreamCallbacks,
   };
   c.callbacks = {
-    onStep: (s) => c.steps.push(s),
+    onStep: (s) => {
+      c.steps.push(s);
+      c.stepAt.push(Date.now());
+    },
     onToken: () => undefined,
     onFinal: (r) => {
       c.finals.push(r);
@@ -73,14 +77,14 @@ function makeCollector() {
   return c;
 }
 
-describe('US3 节奏补间（演示模式开，节拍器由真实 SSE 步骤事件驱动）', () => {
+describe('US3 演示节奏（演示模式开，总时长兜底：步骤自然速度＋final 落点 ≥2.5s）', () => {
   const steps3: StepInfo[] = [
     { n: 1, title: '意图路由', status: 'ok', detail: 'd1' },
     { n: 2, title: '口径声明', status: 'ok', detail: 'd2' },
     { n: 3, title: '下推执行', status: 'ok', detail: 'd3' },
   ];
 
-  it('SSE 秒回时：final 不得早于 2.5s 出现，展示时长被真实时钟拉到 ≥2.5s', async () => {
+  it('SSE 秒回时：中间步骤不被拖慢（首步 <1000ms 量级自然出现），final 展示落点兜底 ≥2.5s', async () => {
     vi.stubGlobal('fetch', instantSse(steps3));
     const t = makeCollector();
     const { result } = renderHook(() =>
@@ -95,18 +99,18 @@ describe('US3 节奏补间（演示模式开，节拍器由真实 SSE 步骤事�
       await vi.advanceTimersByTimeAsync(0);
     });
 
-    // 补间中段：步骤按节拍逐步出现（非一次性闪现）
+    // ① 中间步骤不被拖慢：真实步骤在 1s 内全部出现（不再被节拍器均匀铺满压住）
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(700);
-    });
-    expect(t.steps.length).toBeGreaterThanOrEqual(1);
-    expect(t.steps.length).toBeLessThan(steps3.length);
-
-    // 2.4s（<2.5s）：真实事件已全部到达，但 final 不得提前收尾
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(MIN_THINKING_MS - 800);
+      await vi.advanceTimersByTimeAsync(1000);
     });
     expect(t.steps).toHaveLength(steps3.length);
+    expect(t.stepAt[0] - t.sendAt).toBeLessThan(1000); // 首步 <1000ms 量级
+    expect(t.finals).toHaveLength(0); // 步骤放完 ≠ 提前收尾
+
+    // ② final 展示落点 ≥2.5s：2.4s 时不得提前收尾
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MIN_THINKING_MS - 1000 - 400);
+    });
     expect(t.finals).toHaveLength(0);
     expect(t.ended).toEqual([]);
 
