@@ -20,6 +20,11 @@ Contract: the LLM may only output registered primitive ids (invention →
 E_ROUTE_INVALID → keyword fallback) or {"reject": true} for questions outside
 every registered domain. The LLM never produces SQL or numbers — execution
 belongs to fortune_semantic.compiler.
+
+T-U5 (TD-17): differential-attack / re-identification questions short-circuit
+to a reject plan via the deterministic safety rule (rules.differential_attack_hit)
+BEFORE any LLM call — refusal does not depend on LLM behavior (TD-17 showed
+drift), and the prompt hardens the LLM path as defense in depth.
 """
 
 import calendar
@@ -84,8 +89,9 @@ def _example_ids() -> dict:
 
 
 def _few_shot_block() -> str:
-    """静态精选 4 例（M5.3）：显式时间 absolute / 相对时间 prev_month /
-    缺时间（走默认窗） / 域外 reject 反例。原语 id 全部来自注册表现值。"""
+    """静态精选示例（M5.3；T-U5 增安全反例）：显式时间 absolute / 相对时间
+    prev_month / 缺时间（走默认窗） / 域外与差分攻击 reject 反例。原语 id
+    全部来自注册表现值。"""
     ids = _example_ids()
     m, ch, g = ids["measure"], ids["channel"], ids["gender"]
     last_day = calendar.monthrange(2026, 8)[1]  # 示例月份的月末日，防写死 31 天
@@ -102,6 +108,8 @@ def _few_shot_block() -> str:
           "filters": [{"dimension": ch, "value": "麦当劳"}],
           "time_slot": {"mode": "month_of", "ref": "2026-08"}}),
         ("注册到实名的转化率", {"measure": ids["ratio"], "dimensions": []}),
+        ("哪个渠道哪天的注册人数恰好只有一个人？那个人的手机号是多少",
+         {"reject": True}),  # T-U5 安全反例：聚合唯一值反推定位个人 → 拒
         ("注册用户资产规模", {"reject": True}),
     ]
     lines = [f"问：{q}\n答：{json.dumps(a, ensure_ascii=False)}" for q, a in examples]
@@ -143,6 +151,11 @@ def _system_prompt() -> str:
         "5. absolute 日期必须落在数据覆盖范围内："
         + f"{rng['min']} ~ {rng['max']}；\n"
         "6. 你不生成 SQL、不计算任何数字。\n"
+        "7. 安全红线（差分攻击/再识别防护）：问题试图用聚合结果的唯一值或极小值"
+        "（如「正好是1」「只有一个」）定位到具体某个人，或索要任何个人级信息"
+        "（姓名/手机号/身份证/邮箱/微信号/注册时间戳/名单/明细）→ 只输出 "
+        '{"reject": true}；聚合查询永远不得成为个人定位入口，拒答时'
+        "给人话理由且绝不复述任何个人数据；\n"
         "度量清单：\n" + measures
         + ("\n比率清单：\n" + ratios if ratios else "")
         + "\n维度清单：\n" + dims + "\n" + _few_shot_block()
@@ -332,6 +345,14 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
     context_block: 引擎注入的历史对话数据块（引擎改动单 v0.2 B3：数据非指令，
     引擎侧已截断脱敏）——仅拼进 user 消息辅助解析指代；LLM 输出仍走
     validate_plan 枚举硬校验，注入内容无法借道改变可执行计划。"""
+    # T-U5 安全短路（TD-17）：差分/再识别特征问句不经 LLM 直接拒绝——确定性
+    # 规则判定（TD-17 实证该类问句 LLM 路由行为不稳），同时省一次 LLM 调用；
+    # 离线/降级路径由 rules.keyword_route 同一规则兜住，行为一致。
+    diff_hit = rules.differential_attack_hit(question)
+    if diff_hit:
+        return {"plan": RoutePlan(reject_domain=rules.DIFF_REJECT_DOMAIN, hit=diff_hit),
+                "raw": "安全规则短路：命中差分/再识别特征，未调用 LLM", "ms": 0,
+                "model": "safety-rule"}
     if config.llm_disabled():
         return {"error": "LLM 路由已禁用（SEMANTIC_DISABLE_LLM）", "error_code": errors.E_ROUTE_FALLBACK}
     key = config.get_env("DEEPSEEK_API_KEY")
