@@ -58,25 +58,59 @@ DIFF_REJECT_DOMAIN = "个人数据防护（差分/再识别）"
 # 模式一（差分攻击核心，TD-17）：聚合结果被钉到唯一值/极小值 × 个人级信息索求
 _DIFF_UNIQUE_RE = re.compile(r"(?:正好|恰好|刚好)(?:是|为|等于)?[0-9０-９]+")
 _DIFF_UNIQUE_WORDS = ("唯一", "只有一", "就一", "仅有一", "单独一")
-_DIFF_INFO_WORDS = ("个人信息", "人的信息", "人信息", "注册人", "那个人", "这个人",
-                    "是谁", "手机号", "电话号", "身份证", "姓名", "邮箱", "微信号",
-                    "联系方式", "时间戳", "注册时间")
+_DIFF_INFO_WORDS = (
+    "个人信息",
+    "人的信息",
+    "人信息",
+    "注册人",
+    "那个人",
+    "这个人",
+    "是谁",
+    "手机号",
+    "电话号",
+    "身份证",
+    "姓名",
+    "邮箱",
+    "微信号",
+    "联系方式",
+    "时间戳",
+    "注册时间",
+)
 
 # 模式二（记录级出口）：记录粒度/导出形态 × PII 字段（「小区/年龄段」这类聚合
 # 统计维度不入字段清单——GLM-safety_pii-003 类统计问必须放行；「明细/导出」
 # 不入粒度词——多轮承接会把历史问句拼进路由文本，宽词在合法链路上误伤
 # （tests/semantic/test_clarify_continuation 链路级测试锁定既有校验路径））
-_DIFF_RECORD_WORDS = ("每个人", "逐人", "个人级", "行级", "名单", "清单",
-                      "排名", "排行", "CSV", "Excel")
+_DIFF_RECORD_WORDS = (
+    "每个人",
+    "逐人",
+    "个人级",
+    "行级",
+    "名单",
+    "清单",
+    "排名",
+    "排行",
+    "CSV",
+    "Excel",
+)
 _DIFF_RECORD_RE = re.compile(r"前\s*[0-9０-９]+\s*[个位人名条]")
-_DIFF_FIELD_WORDS = ("手机号", "电话", "身份证", "姓名", "邮箱", "微信号", "微信",
-                     "联系方式", "时间戳", "注册时间")
+_DIFF_FIELD_WORDS = (
+    "手机号",
+    "电话",
+    "身份证",
+    "姓名",
+    "邮箱",
+    "微信号",
+    "微信",
+    "联系方式",
+    "时间戳",
+    "注册时间",
+)
 
 # 模式三（再识别核验）：个人标识号（含打码形态）× 存在性/日期反查
 _DIFF_ID_RE = re.compile(r"[0-9０-９]{3}[*＊]{2,}[0-9０-９]{4}")
 _DIFF_ID_WORDS = ("手机号", "电话号", "这个号", "该号码", "该号", "身份证")
-_DIFF_PROBE_WORDS = ("是不是", "是否", "有没有", "注册日期", "哪天注册",
-                     "什么时候注册")
+_DIFF_PROBE_WORDS = ("是不是", "是否", "有没有", "注册日期", "哪天注册", "什么时候注册")
 
 
 def _any_word_in(text: str, words: tuple[str, ...]) -> bool:
@@ -87,14 +121,17 @@ def differential_attack_hit(question: str) -> str | None:
     """差分攻击/再识别特征判定（T-U5）：命中 → 返回可读命中理由（人话、不含
     数字，可安全拼进拒答文案——文案无数字红线）；未命中 → None。
     三组模式均为 AND 组合（见上方块注释），规则可解释、特征收窄防误伤。"""
-    if ((_DIFF_UNIQUE_RE.search(question) or _any_word_in(question, _DIFF_UNIQUE_WORDS))
-            and _any_word_in(question, _DIFF_INFO_WORDS)):
+    if (
+        _DIFF_UNIQUE_RE.search(question) or _any_word_in(question, _DIFF_UNIQUE_WORDS)
+    ) and _any_word_in(question, _DIFF_INFO_WORDS):
         return "聚合唯一值反推定位个人（差分攻击特征）"
-    if ((_any_word_in(question, _DIFF_RECORD_WORDS) or _DIFF_RECORD_RE.search(question))
-            and _any_word_in(question, _DIFF_FIELD_WORDS)):
+    if (
+        _any_word_in(question, _DIFF_RECORD_WORDS) or _DIFF_RECORD_RE.search(question)
+    ) and _any_word_in(question, _DIFF_FIELD_WORDS):
         return "记录级个人信息名单/明细索求（再识别特征）"
-    if ((_DIFF_ID_RE.search(question) or _any_word_in(question, _DIFF_ID_WORDS))
-            and _any_word_in(question, _DIFF_PROBE_WORDS)):
+    if (
+        _DIFF_ID_RE.search(question) or _any_word_in(question, _DIFF_ID_WORDS)
+    ) and _any_word_in(question, _DIFF_PROBE_WORDS):
         return "以个人标识号反查注册状态（再识别核验特征）"
     return None
 
@@ -115,7 +152,9 @@ _DIMENSION_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _MEASURE_KEYWORDS = ("注册", "用户数")  # any hit selects the registration measure
-_REGISTRATION_MEASURE = "reg_user_cnt"  # 「注册」关键词的等价原语（未注册则退回首个度量）
+_REGISTRATION_MEASURE = (
+    "reg_user_cnt"  # 「注册」关键词的等价原语（未注册则退回首个度量）
+)
 
 
 def keyword_route(question: str) -> RoutePlan:
@@ -138,11 +177,17 @@ def keyword_route(question: str) -> RoutePlan:
                 hit = hit or kw
                 break
     if any(kw in question for kw in _MEASURE_KEYWORDS):
-        measure = _REGISTRATION_MEASURE if _REGISTRATION_MEASURE in REGISTRY.measures \
+        measure = (
+            _REGISTRATION_MEASURE
+            if _REGISTRATION_MEASURE in REGISTRY.measures
             else next(iter(REGISTRY.measures), None)
+        )
         if measure:
-            return RoutePlan(measure=measure, dimensions=tuple(dimensions),
-                             hit=hit or next(kw for kw in _MEASURE_KEYWORDS if kw in question))
+            return RoutePlan(
+                measure=measure,
+                dimensions=tuple(dimensions),
+                hit=hit or next(kw for kw in _MEASURE_KEYWORDS if kw in question),
+            )
     return RoutePlan()  # no confident mapping → unregistered
 
 
@@ -185,7 +230,9 @@ _REJECT_VARIANTS = (
 def build_reject_answer(keyword: str | None, seed: str) -> str:
     """按命中词 + 句式变体生成拒答（seed 决定变体序，同请求重试稳定）。"""
     kw = keyword or "这个问题"
-    idx = int(hashlib.sha256(seed.encode("utf-8")).hexdigest(), 16) % len(_REJECT_VARIANTS)
+    idx = int(hashlib.sha256(seed.encode("utf-8")).hexdigest(), 16) % len(
+        _REJECT_VARIANTS
+    )
     return _REJECT_VARIANTS[idx].format(kw=kw, ready=_ready_labels())
 
 
@@ -196,10 +243,16 @@ SENSITIVE_FIELDS = ["usr_phone_erpt", "usr_idcardno_erpt"]
 def build_profile() -> dict:
     """Appendix-C profile schema; viz_map/rule_hints derived from the registry."""
     reg = REGISTRY
-    status = ", ".join(f"{rid}({rule.status})" for rid, rule in sorted(reg.rules.items()))
+    status = ", ".join(
+        f"{rid}({rule.status})" for rid, rule in sorted(reg.rules.items())
+    )
     rule_hints: dict = {}
     for mid, m in reg.measures.items():
-        rule_hints[mid] = {"caliber": f"{m.description}；口径规则 {status}" if status else m.description}
+        rule_hints[mid] = {
+            "caliber": f"{m.description}；口径规则 {status}"
+            if status
+            else m.description
+        }
     for did, d in reg.dimensions.items():
         rule_hints[did] = {"caliber": d.description}
     viz_map: dict = {}

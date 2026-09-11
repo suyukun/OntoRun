@@ -56,12 +56,18 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_ATTEMPTS = 2  # 首发 + 错误回喂重试 1 次（M5.4）
 
 # fortune_semantic 目录不可读时的硬编码降级位（few-shot 原语 id，防改名漂移的兜底）
-_EXAMPLE_IDS_FALLBACK = {"measure": "reg_user_cnt", "channel": "channel_l2",
-                         "gender": "gender", "ratio": "reg_to_real_rate"}
+_EXAMPLE_IDS_FALLBACK = {
+    "measure": "reg_user_cnt",
+    "channel": "channel_l2",
+    "gender": "gender",
+    "ratio": "reg_to_real_rate",
+}
 
 # M6.1 引导式拒答模板：{prefix}=命中词、{ready}=注册表人话清单、{example}=示例问法。
 # 演示红线：拒答文案不含任何数字（含示例问法——「拒答话术无数字」是已锁定的旧不变量）。
-_GUIDED_REJECT_TEMPLATE = '{prefix}这个问题我答不了。我能答：{ready} × 任意时间窗；例如："{example}"'
+_GUIDED_REJECT_TEMPLATE = (
+    '{prefix}这个问题我答不了。我能答：{ready} × 任意时间窗；例如："{example}"'
+)
 
 
 def _short_label(description: str) -> str:
@@ -77,13 +83,27 @@ def _ratio_label(description: str) -> str:
 def _example_ids() -> dict:
     """few-shot 原语 id：从注册表现值生成，防改名漂移；目录不可读 → 硬编码。"""
     try:
-        measure = "reg_user_cnt" if "reg_user_cnt" in REGISTRY.measures \
+        measure = (
+            "reg_user_cnt"
+            if "reg_user_cnt" in REGISTRY.measures
             else next(iter(REGISTRY.measures))
-        channel = "channel_l2" if "channel_l2" in REGISTRY.dimensions \
-            else next((d for d in REGISTRY.dimensions if d.startswith("channel_l")), "channel_l2")
+        )
+        channel = (
+            "channel_l2"
+            if "channel_l2" in REGISTRY.dimensions
+            else next(
+                (d for d in REGISTRY.dimensions if d.startswith("channel_l")),
+                "channel_l2",
+            )
+        )
         gender = "gender"  # 维度 id 由并行注册表保证；缺失属目录级异常，走 except 降级
         ratio = next(iter(REGISTRY.ratios), "reg_to_real_rate")
-        return {"measure": measure, "channel": channel, "gender": gender, "ratio": ratio}
+        return {
+            "measure": measure,
+            "channel": channel,
+            "gender": gender,
+            "ratio": ratio,
+        }
     except Exception:  # noqa: BLE001 目录不可读 → 硬编码降级（模块 docstring 已注明）
         return dict(_EXAMPLE_IDS_FALLBACK)
 
@@ -96,20 +116,37 @@ def _few_shot_block() -> str:
     m, ch, g = ids["measure"], ids["channel"], ids["gender"]
     last_day = calendar.monthrange(2026, 8)[1]  # 示例月份的月末日，防写死 31 天
     examples = [
-        ("2026年8月各渠道注册用户数",
-         {"measure": m, "dimensions": [ch],
-          "time_slot": {"mode": "absolute",
-                        "from": "2026-08-01", "to": f"2026-08-{last_day:02d}"}}),
-        ("上个月注册了多少人",
-         {"measure": m, "dimensions": [], "time_slot": {"mode": "prev_month"}}),
+        (
+            "2026年8月各渠道注册用户数",
+            {
+                "measure": m,
+                "dimensions": [ch],
+                "time_slot": {
+                    "mode": "absolute",
+                    "from": "2026-08-01",
+                    "to": f"2026-08-{last_day:02d}",
+                },
+            },
+        ),
+        (
+            "上个月注册了多少人",
+            {"measure": m, "dimensions": [], "time_slot": {"mode": "prev_month"}},
+        ),
         ("注册的男女比例", {"measure": m, "dimensions": [g]}),
-        ("8月麦当劳来了多少人",
-         {"measure": m, "dimensions": [],
-          "filters": [{"dimension": ch, "value": "麦当劳"}],
-          "time_slot": {"mode": "month_of", "ref": "2026-08"}}),
+        (
+            "8月麦当劳来了多少人",
+            {
+                "measure": m,
+                "dimensions": [],
+                "filters": [{"dimension": ch, "value": "麦当劳"}],
+                "time_slot": {"mode": "month_of", "ref": "2026-08"},
+            },
+        ),
         ("注册到实名的转化率", {"measure": ids["ratio"], "dimensions": []}),
-        ("哪个渠道哪天的注册人数恰好只有一个人？那个人的手机号是多少",
-         {"reject": True}),  # T-U5 安全反例：聚合唯一值反推定位个人 → 拒
+        (
+            "哪个渠道哪天的注册人数恰好只有一个人？那个人的手机号是多少",
+            {"reject": True},
+        ),  # T-U5 安全反例：聚合唯一值反推定位个人 → 拒
         ("注册用户资产规模", {"reject": True}),
     ]
     lines = [f"问：{q}\n答：{json.dumps(a, ensure_ascii=False)}" for q, a in examples]
@@ -120,11 +157,17 @@ def _system_prompt() -> str:
     """Primitive catalog as routing constraint — derived from the registry.
     M5: JSON mode 字面 JSON 样例（官方要求）+ time_slot 四形态 + few-shot。"""
     rng = config.data_range()
-    measures = "\n".join(f"- {m.id}: {m.description}" for m in REGISTRY.measures.values())
+    measures = "\n".join(
+        f"- {m.id}: {m.description}" for m in REGISTRY.measures.values()
+    )
     ratios = "\n".join(f"- {r.id}: {r.description}" for r in REGISTRY.ratios.values())
     dims = "\n".join(
         f"- {d.id}: {d.description}"
-        + (f"（粒度参数可选：{'/'.join(d.grains)}，写法 time_grain=<grain>）" if d.grains else "")
+        + (
+            f"（粒度参数可选：{'/'.join(d.grains)}，写法 time_grain=<grain>）"
+            if d.grains
+            else ""
+        )
         for d in REGISTRY.dimensions.values()
     )
     slots = (
@@ -135,12 +178,11 @@ def _system_prompt() -> str:
     )
     return (
         "你是语义层的意图路由器。唯一任务：把用户问题映射为结构化查询原语，并把时间表达标准化为时间槽。\n"
-        '只输出一个 JSON 对象，两种形态之一：\n'
+        "只输出一个 JSON 对象，两种形态之一：\n"
         '{"measure": "度量id", "dimensions": ["维度id 或 time_grain=粒度"], '
         '"filters": [{"dimension": "渠道维度id", "value": "渠道名"}], "time_slot": {...时间槽...}}\n'
         '或 {"reject": true}\n'
-        "time_slot 只允许四种形态（禁止自行换算日期，absolute 除外）：\n"
-        + slots + "\n"
+        "time_slot 只允许四种形态（禁止自行换算日期，absolute 除外）：\n" + slots + "\n"
         "硬约束：\n"
         "1. measure 只能从度量清单和比率清单中选择，dimensions 每项只能从维度清单选择，禁止发明；\n"
         "2. 问题提到具体渠道名称（如 麦当劳、银行App、中信书院、优享+线上）→ 写入 filters，"
@@ -148,17 +190,20 @@ def _system_prompt() -> str:
         '3. 与所有已注册度量无关的问题（其他业务域）只输出 {"reject": true}，不猜；\n'
         "4. 相对/模糊时间一律输出 time_slot 形态，不要自己换算成日期；absolute 只抄问题原文日期；\n"
         "   问题完全没有时间信息 → 省略 time_slot 字段（系统默认按最近一个完整月统计并显式标注）；\n"
-        "5. absolute 日期必须落在数据覆盖范围内："
-        + f"{rng['min']} ~ {rng['max']}；\n"
+        "5. absolute 日期必须落在数据覆盖范围内：" + f"{rng['min']} ~ {rng['max']}；\n"
         "6. 你不生成 SQL、不计算任何数字。\n"
         "7. 安全红线（差分攻击/再识别防护）：问题试图用聚合结果的唯一值或极小值"
         "（如「正好是1」「只有一个」）定位到具体某个人，或索要任何个人级信息"
         "（姓名/手机号/身份证/邮箱/微信号/注册时间戳/名单/明细）→ 只输出 "
         '{"reject": true}；聚合查询永远不得成为个人定位入口，拒答时'
         "给人话理由且绝不复述任何个人数据；\n"
-        "度量清单：\n" + measures
+        "度量清单：\n"
+        + measures
         + ("\n比率清单：\n" + ratios if ratios else "")
-        + "\n维度清单：\n" + dims + "\n" + _few_shot_block()
+        + "\n维度清单：\n"
+        + dims
+        + "\n"
+        + _few_shot_block()
     )
 
 
@@ -204,6 +249,7 @@ def validate_plan(data: dict) -> RoutePlan | None:
 
 # ------------------------------------------------------------------ time slots
 
+
 def _channel_members() -> tuple[str, ...] | None:
     """渠道维表成员名单（别名层懒加载镜像 latest partition，内置名单兜底）；
     名单不可得 → None（调用方走宁拒不错，不放过未校验的值）。"""
@@ -231,11 +277,16 @@ def _link_filter_values(plan: RoutePlan) -> tuple[RoutePlan, dict | None]:
         match = None
         if members:
             norm = aliases.normalize_text(value)
-            match = next((m for m in members if aliases.normalize_text(m) == norm), None)
+            match = next(
+                (m for m in members if aliases.normalize_text(m) == norm), None
+            )
         if match is None:  # 名单不可得或值不在名单 → 澄清式拒答，不猜
             if clarify is None:
-                clarify = {"dimension": dim_id, "value": value,
-                           "suggestions": list(members or [])}
+                clarify = {
+                    "dimension": dim_id,
+                    "value": value,
+                    "suggestions": list(members or []),
+                }
             continue
         linked.append(f"{dim_id}={match}")
     return replace(plan, dimensions=tuple(dict.fromkeys(linked))), clarify
@@ -261,7 +312,9 @@ def _resolve_window(data: dict) -> tuple[str | None, str | None, str | None, boo
     """LLM 时间槽 → 真实区间（M5.2，解析权在代码）。
     Returns (time_from, time_to, retryable_error, defaulted)。"""
     slot = data.get("time_slot")
-    if slot is None or (isinstance(slot, dict) and not str(slot.get("mode") or "").strip()):
+    if slot is None or (
+        isinstance(slot, dict) and not str(slot.get("mode") or "").strip()
+    ):
         t_from, t_to = _default_window()
         return t_from, t_to, None, True
     if not isinstance(slot, dict):
@@ -277,13 +330,17 @@ def _resolve_window(data: dict) -> tuple[str | None, str | None, str | None, boo
         return None, None, f"时间解析结果非法: {rng!r}", False
     # M2 模块未就位的降级：仅 absolute 直通原文日期（显式日期无解析歧义）；
     # 其余模式无解析器可依，交回引擎关键词时间抽取（extract_params），不猜日期。
-    if slot.get("mode") == "absolute" and DATE_RE.match(str(slot.get("from") or "")) \
-            and DATE_RE.match(str(slot.get("to") or "")):
+    if (
+        slot.get("mode") == "absolute"
+        and DATE_RE.match(str(slot.get("from") or ""))
+        and DATE_RE.match(str(slot.get("to") or ""))
+    ):
         return slot["from"], slot["to"], None, False
     return None, None, None, False  # 非错误：时间留给引擎回退抽取
 
 
 # ------------------------------------------------------------ LLM interaction
+
 
 def _chat(client, messages: list) -> tuple[str, str | None, int]:
     """One JSON-mode call → (content, finish_reason, ms)。"""
@@ -304,7 +361,10 @@ def _interpret(raw: str, finish_reason: str | None, ms: int) -> tuple[str, objec
     """解析+校验一次 LLM 输出 → ("ok", out_dict) | ("retry", 错误信息)。
     JSON 坏 / 枚举校验失败 / 未知时间模式 / 截断 / 空 content 全部可重试（M5.4）。"""
     if finish_reason == "length":
-        return "retry", "输出被截断（finish_reason=length），JSON 可能不完整，请精简后重新输出"
+        return (
+            "retry",
+            "输出被截断（finish_reason=length），JSON 可能不完整，请精简后重新输出",
+        )
     if not raw.strip():
         return "retry", "返回空 content，未输出任何 JSON"
     match = JSON_RE.search(raw)
@@ -320,8 +380,12 @@ def _interpret(raw: str, finish_reason: str | None, ms: int) -> tuple[str, objec
     if plan is None:  # enum hard validation: invented primitives are rejected
         return "retry", f"输出了未注册原语或结构非法（枚举校验拒绝）: {raw[:80]}"
     plan, clarify = _link_filter_values(plan)  # Gap A 防幻觉：渠道值 ∈ 维表成员
-    out: dict = {"plan": plan, "raw": sanitize.sanitize_llm_text(raw), "ms": ms,
-                 "model": config.LLM_MODEL}
+    out: dict = {
+        "plan": plan,
+        "raw": sanitize.sanitize_llm_text(raw),
+        "ms": ms,
+        "model": config.LLM_MODEL,
+    }
     if clarify:
         out["filter_clarify"] = clarify  # 引擎转为澄清式拒答「未找到该渠道」
     if plan.rejected:  # 域外拒答不携带时间参数，也不触发默认窗
@@ -350,25 +414,40 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
     # 离线/降级路径由 rules.keyword_route 同一规则兜住，行为一致。
     diff_hit = rules.differential_attack_hit(question)
     if diff_hit:
-        return {"plan": RoutePlan(reject_domain=rules.DIFF_REJECT_DOMAIN, hit=diff_hit),
-                "raw": "安全规则短路：命中差分/再识别特征，未调用 LLM", "ms": 0,
-                "model": "safety-rule"}
+        return {
+            "plan": RoutePlan(reject_domain=rules.DIFF_REJECT_DOMAIN, hit=diff_hit),
+            "raw": "安全规则短路：命中差分/再识别特征，未调用 LLM",
+            "ms": 0,
+            "model": "safety-rule",
+        }
     if config.llm_disabled():
-        return {"error": "LLM 路由已禁用（SEMANTIC_DISABLE_LLM）", "error_code": errors.E_ROUTE_FALLBACK}
+        return {
+            "error": "LLM 路由已禁用（SEMANTIC_DISABLE_LLM）",
+            "error_code": errors.E_ROUTE_FALLBACK,
+        }
     key = config.get_env("DEEPSEEK_API_KEY")
     if not key:
-        return {"error": "未配置 DEEPSEEK_API_KEY", "error_code": errors.E_ROUTE_FALLBACK}
+        return {
+            "error": "未配置 DEEPSEEK_API_KEY",
+            "error_code": errors.E_ROUTE_FALLBACK,
+        }
     try:
         from openai import OpenAI
+
         client = OpenAI(
             api_key=key,
             base_url=config.get_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             timeout=config.LLM_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001 有意兜底：LLM 任何失败都降级，不砸断链路
-        return {"error": f"LLM 客户端初始化失败: {type(exc).__name__}", "error_code": errors.E_ROUTE_FALLBACK}
+        return {
+            "error": f"LLM 客户端初始化失败: {type(exc).__name__}",
+            "error_code": errors.E_ROUTE_FALLBACK,
+        }
 
-    user_content = f"{context_block}\n当前问题：{question}" if context_block else question
+    user_content = (
+        f"{context_block}\n当前问题：{question}" if context_block else question
+    )
     messages: list = [
         {"role": "system", "content": _system_prompt()},
         {"role": "user", "content": user_content},
@@ -378,7 +457,10 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
         try:
             raw, finish_reason, ms = _chat(client, messages)
         except Exception as exc:  # noqa: BLE001 网络/鉴权等基础设施失败：不重试，直接降级
-            return {"error": f"LLM 调用失败: {type(exc).__name__}", "error_code": errors.E_ROUTE_FALLBACK}
+            return {
+                "error": f"LLM 调用失败: {type(exc).__name__}",
+                "error_code": errors.E_ROUTE_FALLBACK,
+            }
         outcome, payload = _interpret(raw, finish_reason, ms)
         if outcome == "ok":
             return payload
@@ -386,13 +468,21 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
         if attempt + 1 < MAX_ATTEMPTS:  # 错误信息回喂 LLM 重试（M5.4）
             messages = messages + [
                 {"role": "assistant", "content": raw},
-                {"role": "user", "content": f"上一次输出不合格：{last_err}。请修正后只重新输出一个合法的 JSON 对象。"},
+                {
+                    "role": "user",
+                    "content": f"上一次输出不合格：{last_err}。请修正后只重新输出一个合法的 JSON 对象。",
+                },
             ]
-    return {"error": last_err, "raw": sanitize.sanitize_llm_text(raw), "ms": ms,
-            "error_code": errors.E_ROUTE_INVALID}
+    return {
+        "error": last_err,
+        "raw": sanitize.sanitize_llm_text(raw),
+        "ms": ms,
+        "error_code": errors.E_ROUTE_INVALID,
+    }
 
 
 # ------------------------------------------- enhanced keyword fallback (M5.5)
+
 
 def keyword_route(question: str) -> RoutePlan:
     """M5.5 增强版关键词路由（LLM 降级时的兜底，引擎同名调用）：
@@ -413,8 +503,10 @@ def keyword_route(question: str) -> RoutePlan:
     if plan.measure is None:
         # 关键词表缺口语 → 别名度量候选兜底；仅采信已注册度量（比率度量
         # 不进 RoutePlan，引擎不认）。
-        measure = next((m for m in hints.get("measure_hints") or []
-                        if m in REGISTRY.measures), None)
+        measure = next(
+            (m for m in hints.get("measure_hints") or [] if m in REGISTRY.measures),
+            None,
+        )
         if measure is None:
             return plan  # 度量仍无命中：维度/值候选单独无意义，维持原判（宁拒不错）
         plan = replace(plan, measure=measure)
@@ -429,7 +521,11 @@ def keyword_route(question: str) -> RoutePlan:
         if isinstance(hint, dict):
             dim_id = str(hint.get("dimension") or hint.get("dim") or "").strip()
             value = str(hint.get("value") or "").strip()
-            if dim_id in REGISTRY.dimensions and value and f"{dim_id}={value}" not in dims:
+            if (
+                dim_id in REGISTRY.dimensions
+                and value
+                and f"{dim_id}={value}" not in dims
+            ):
                 dims.append(f"{dim_id}={value}")
         elif isinstance(hint, str) and hint:
             candidates.append(hint)
@@ -437,7 +533,11 @@ def keyword_route(question: str) -> RoutePlan:
         entry = f"channel_l2={candidates[0]}"
         if entry not in dims:
             dims.append(entry)
-    elif len(candidates) > 1 and "channel_l2" in REGISTRY.dimensions and "channel_l2" not in dims:
+    elif (
+        len(candidates) > 1
+        and "channel_l2" in REGISTRY.dimensions
+        and "channel_l2" not in dims
+    ):
         dims.append("channel_l2")
     if dims != list(plan.dimensions):
         return replace(plan, dimensions=tuple(dict.fromkeys(dims)))
@@ -446,12 +546,17 @@ def keyword_route(question: str) -> RoutePlan:
 
 # ------------------------------------------------- guided refusal copy (M6.1)
 
+
 def _example_question() -> str:
     """示例问法从注册表现值生成（人话标签），不引用可能漂移的原语 id。"""
     ids = _example_ids()
     m_label = _short_label(REGISTRY.measures[ids["measure"]].description)
     channel_ids = [d for d in REGISTRY.dimensions if d.startswith("channel_l")]
-    d_label = _short_label(REGISTRY.dimensions[channel_ids[0]].description) if channel_ids else "渠道"
+    d_label = (
+        _short_label(REGISTRY.dimensions[channel_ids[0]].description)
+        if channel_ids
+        else "渠道"
+    )
     base = "渠道" if "渠道" in d_label else d_label
     return f"上个月各{base}{m_label}"
 
@@ -460,9 +565,15 @@ def guided_reject_answer(keyword: str | None = None) -> str:
     """M6.1 引导式拒答：模板 + 注册表现生成（度量/维度人话清单 + 示例问法）。
     演示红线：宁拒不错，文案不含任何数字；reject_card 结构不变，仅文案升级。"""
     try:
-        measures = "、".join(_short_label(m.description) for m in REGISTRY.measures.values())
-        ratios = "、".join(_ratio_label(r.description) for r in REGISTRY.ratios.values())
-        dims = "、".join(_short_label(d.description) for d in REGISTRY.dimensions.values())
+        measures = "、".join(
+            _short_label(m.description) for m in REGISTRY.measures.values()
+        )
+        ratios = "、".join(
+            _ratio_label(r.description) for r in REGISTRY.ratios.values()
+        )
+        dims = "、".join(
+            _short_label(d.description) for d in REGISTRY.dimensions.values()
+        )
         example = _example_question()
         ready = f"{measures}、{ratios} × {dims}" if ratios else f"{measures} × {dims}"
     except Exception:  # noqa: BLE001 目录不可读 → 硬编码降级（与注册表现值同步维护）
