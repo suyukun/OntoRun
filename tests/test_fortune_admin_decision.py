@@ -12,7 +12,7 @@ SPEC docs/plans/开工门槛-管理台重构_v0.2.md §A2-US2 / §A4-7 / §B3 / 
 from __future__ import annotations
 
 import json
-import shutil
+import re
 import subprocess
 from pathlib import Path
 
@@ -39,11 +39,31 @@ def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+_R8_BLOCK_START_RE = re.compile(r'^\s*"R8": CaliberRule\($', re.MULTILINE)
+
+
+def _reset_r8_to_unverified(source: str) -> str:
+    """把拷贝中的 R8 块打回未验证基线：剥掉写回的 status= 行（缺省即 unverified）。
+
+    真实 registry 的 R8 可能已被演示真实裁决写为 confirmed（数据态漂移），
+    沙箱只隔离数据、不复制其结论，用例基线一律从"未验证"出发（T-FIX1）。
+    """
+    start = _R8_BLOCK_START_RE.search(source)
+    assert start, "registry.py 中找不到 R8 规则块"
+    end = source.index("\n    ),", start.end())
+    block = re.sub(r'\n\s*status="[^"]*",', "", source[start.end() : end], count=1)
+    return source[: start.end()] + block + source[end:]
+
+
 @pytest.fixture()
 def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """独立 tmp git 仓：registry.py 拷自本仓，confirmations.json 置空。"""
+    """独立 tmp git 仓：registry.py 拷自本仓（R8 重置为未验证基线），
+    confirmations.json 置空——用例不依赖真实确认数据态（T-FIX1）。"""
     (tmp_path / REGISTRY_PATH.parent).mkdir(parents=True)
-    shutil.copyfile(Path(ontology.REGISTRY_PATH), tmp_path / REGISTRY_PATH)
+    registry_text = Path(ontology.REGISTRY_PATH).read_text(encoding="utf-8")
+    (tmp_path / REGISTRY_PATH).write_text(
+        _reset_r8_to_unverified(registry_text), encoding="utf-8"
+    )
     (tmp_path / CONFIRM_PATH.parent).mkdir(parents=True)
     (tmp_path / CONFIRM_PATH).write_text("[]\n", encoding="utf-8")
     assert _run_git(tmp_path, "init", "-q").returncode == 0

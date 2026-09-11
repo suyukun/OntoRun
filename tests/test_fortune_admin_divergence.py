@@ -11,9 +11,12 @@ SPEC docs/plans/开工门槛-管理台重构_v0.2.md §A2-US2 / §B3 / §C1-T201
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+from src.fortune_admin import ontology
 
 
 @pytest.fixture(scope="module")
@@ -51,14 +54,45 @@ def test_r8_divergence_dual_options_with_numeric_evidence(client: TestClient):
         assert re.search(r"\d{4}-\d{2}(-\d{2})?", opt["value_evidence"]), opt["key"]
 
 
-def test_r8_decision_defaults_none(client: TestClient):
-    """decision 默认 None，随 T202 裁决写入。"""
+@pytest.fixture()
+def empty_confirmations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """确认记录隔离到空的受控文件：默认态断言不依赖真实 confirmations.json。"""
+    controlled = tmp_path / "confirmations.json"
+    controlled.write_text("[]\n", encoding="utf-8")
+    monkeypatch.setattr(ontology, "CONFIRMATIONS_PATH", controlled)
+    return controlled
+
+
+def _expected_r8_decision() -> dict | None:
+    """按 payload 契约从真实确认记录推导 R8 decision（§A2-US2：最新记录回流，
+    commit 缺失按短码反查补全）——断言"与实际数据态一致"而非钉死具体值。"""
+    r8_records = [r for r in ontology.load_confirmations() if r["rule_id"] == "R8"]
+    if not r8_records:
+        return None
+    rec = dict(r8_records[-1])
+    if rec.get("commit") is None and rec.get("code"):
+        rec["commit"] = ontology._commit_for_code(rec["code"])
+    return ontology._decision_from_record(rec)
+
+
+def test_r8_decision_defaults_none(client: TestClient, empty_confirmations: Path):
+    """decision 默认 None，随 T202 裁决写入（受控空确认记录，数据态无关）。"""
     rule = next(r for r in _ontology(client)["rules"] if r["id"] == "R8")
     assert rule["decision"] is None
 
 
-def test_non_r8_rules_divergence_is_none(client: TestClient):
-    """无分歧规则 divergence/decision 为 None（缺省语义）。"""
+def test_r8_decision_matches_real_confirmation_records(client: TestClient):
+    """数据态感知：payload decision 与真实确认记录回流一致（T-FIX1）。
+
+    真实 confirmations.json 随演示/验收追加（如 D3 已真实裁决 R8），
+    断言与最新记录推导值相等（无记录/普通确认 → None），不钉死 None。
+    """
+    rule = next(r for r in _ontology(client)["rules"] if r["id"] == "R8")
+    assert rule["decision"] == _expected_r8_decision()
+
+
+def test_non_r8_rules_divergence_is_none(client: TestClient, empty_confirmations: Path):
+    """无分歧规则 divergence 为 None；decision 默认 None（受控空确认记录）。"""
     others = [r for r in _ontology(client)["rules"] if r["id"] != "R8"]
     assert others, "registry 应存在 R8 以外的口径规则"
     for r in others:
