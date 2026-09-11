@@ -22,6 +22,6 @@ describe("smoke", () => {
       <RuleCard rule={smokeRule} confirmer="王工" onDone={() => {}} readOnly />
     );
     expect(screen.getByText(/R1/)).toBeTruthy();
-    expect(screen.getByText("未确认")).toBeTruthy();
+    expect(screen.getByText("待确认")).toBeTruthy();
   });
 });
