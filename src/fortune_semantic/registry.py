@@ -314,6 +314,7 @@ RULES = {
             "账户数 >= 用户数方向恒成立"
         ),
         source_script=f"{WAREHOUSE_SCRIPT_DIR}/ADS层/核心指标/授权/脚本ads_chnl_auth_qty_df.sql",
+        status="confirmed",
     ),
     "R9": CaliberRule(
         id="R9",

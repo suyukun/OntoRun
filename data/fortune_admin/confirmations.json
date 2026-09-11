@@ -26,5 +26,18 @@
     "confirmer": "苏",
     "code": "d94bbb",
     "time": "2026-09-11T16:04:25+08:00"
+  },
+  {
+    "rule_id": "R8",
+    "verdict": "confirmed",
+    "confirmer": "苏",
+    "code": "49195d",
+    "time": "2026-09-11T16:04:28+08:00",
+    "decision": {
+      "option_key": "both",
+      "decided_by": "苏",
+      "time": "2026-09-11T16:04:28+08:00",
+      "commit": null
+    }
   }
 ]
