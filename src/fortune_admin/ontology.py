@@ -147,6 +147,20 @@ _DIVERGENCES: dict[str, list[DivergenceOption]] = {
 }
 
 
+def _decision_from_record(rec: dict | None) -> dict | None:
+    """T202：确认记录内嵌的 decision（含 escalate 留痕）回流 payload。
+
+    记录落 confirmations.json 时 commit 尚未产生（追加式，靠短码反查联结），
+    故 decision.commit 缺失时用记录上已反查的 commit 补全；json 降级保持 None。
+    """
+    if rec is None or rec.get("decision") is None:
+        return None
+    decision = {**rec["decision"]}
+    if not decision.get("commit"):
+        decision["commit"] = rec.get("commit")
+    return decision
+
+
 def ontology_payload() -> dict:
     registry = load_registry()
     confirmations = load_confirmations()
@@ -206,13 +220,13 @@ def ontology_payload() -> dict:
                 "status": r.status,
                 "related_tables": _tables_from_script(r.source_script),
                 "last_record": last_by_rule.get(r.id),
-                # T201：R8 双口径对照（无分歧规则为 None）；decision 随 T202 裁决写入。
+                # T201：R8 双口径对照（无分歧规则为 None）；T202：decision 由最新确认记录回流。
                 "divergence": (
                     [opt.model_dump(mode="json") for opt in divergence]
                     if divergence
                     else None
                 ),
-                "decision": None,
+                "decision": _decision_from_record(last_by_rule.get(r.id)),
             }
         )
 
