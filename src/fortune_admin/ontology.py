@@ -78,14 +78,23 @@ class CaliberRule(BaseModel):
 _commit_cache: dict[str, str | None] = {}
 
 
-def load_registry():
-    """现场加载 registry.py（确认写路径会改它，不能吃进程内旧缓存）。"""
+def load_registry_module():
+    """现场加载 registry.py 模块本体（确认写路径会改它，不能吃进程内旧缓存）。
+
+    返回模块而非 REGISTRY：T501 数字目录还需模块级域登记块
+    TABLE_DOMAINS / DOMAINS（度量所用表反查所属业务域）。
+    """
     spec = importlib.util.spec_from_file_location(
         "fortune_semantic_registry_live", REGISTRY_PATH
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.REGISTRY
+    return module
+
+
+def load_registry():
+    """现场加载 registry 的语义注册表（trial.py 等既有调用方入口不变）。"""
+    return load_registry_module().REGISTRY
 
 
 def _tables_from_script(source_script: str) -> list[str]:
@@ -166,22 +175,97 @@ def _decision_from_record(rec: dict | None) -> dict | None:
     return decision
 
 
+def _rule_measures() -> dict[str, str]:
+    """规则 -> 试算度量映射（唯一来源 = trial._RULE_MEASURES，反查防两处漂移）。
+
+    函数内延迟 import：trial.py 模块级 import ontology，模块级反向引用会成环。
+    """
+    from src.fortune_admin.trial import _RULE_MEASURES
+
+    return _RULE_MEASURES
+
+
+def _measure_caliber(
+    rule_ids: list[str],
+    registry_rules: dict,
+    last_by_rule: dict[str, dict],
+) -> dict | None:
+    """数字卡版本行：口径锚规则 + 其最新确认状态（T501，不造数据）。
+
+    锚规则选取（确定性）：关联规则中有确认记录的取**最新一条**（按记录时间，
+    同 A4-6「UI 显示最新记录」）；全无记录取登记顺序第一条。
+    状态以 registry 现状为准（确认写路径会改写 registry，它是真值源）；
+    存档编号/确认人/时间取该锚规则最新确认记录，取不到如实 None。
+    无关联规则 -> None（前端显示待确认标记、不出试算入口）。
+    """
+    if not rule_ids:
+        return None
+    candidates = [
+        (rid, last_by_rule[rid])
+        for rid in rule_ids
+        if rid in registry_rules and rid in last_by_rule
+    ]
+    if candidates:
+        anchor_id, record = max(candidates, key=lambda kv: kv[1]["time"])
+    else:
+        anchor_id, record = rule_ids[0], None
+    return {
+        "rule_id": anchor_id,
+        "status": registry_rules[anchor_id].status,
+        "code": record.get("code") if record else None,
+        "confirmer": record.get("confirmer") if record else None,
+        "time": record.get("time") if record else None,
+        "commit": record.get("commit") if record else None,
+        # 最新记录可能是驳回（如 R7）：verdict 随行，前端按人话区分展示，不冒充确认。
+        "verdict": record.get("verdict") if record else None,
+    }
+
+
 def ontology_payload() -> dict:
-    registry = load_registry()
+    module = load_registry_module()
+    registry = module.REGISTRY
     confirmations = load_confirmations()
 
-    measures = [
-        {
-            "id": m.id,
-            "description": m.description,
-            "expression": m.expression,
-            "source_table": m.source_table,
-            "source_alias": m.source_alias,
-            "time_field": m.time_field,
-            "filters": list(m.filters),
+    last_by_rule: dict[str, dict] = {}
+    for rec in confirmations:
+        enriched = {
+            **rec,
+            "commit": rec.get("commit") or (
+                _commit_for_code(rec["code"]) if rec.get("code") else None
+            ),
         }
-        for m in registry.measures.values()
-    ]
+        last_by_rule[rec["rule_id"]] = enriched  # 追加式记录，后者覆盖 = 最新一次
+
+    rule_measures = _rule_measures()
+    measures = []
+    for m in registry.measures.values():
+        # T501 所属域：度量所用表反查 TABLE_DOMAINS（登记制；无登记 -> None 不猜，
+        # 禁表名前缀兜底）；人话名由 DOMAINS 现值回填，取不到 None。
+        domain_key = module.TABLE_DOMAINS.get(m.source_table)
+        domain_name = (
+            next((d.name for d in module.DOMAINS if d.key == domain_key), None)
+            if domain_key is not None
+            else None
+        )
+        measures.append(
+            {
+                "id": m.id,
+                "description": m.description,
+                "expression": m.expression,
+                "source_table": m.source_table,
+                "source_alias": m.source_alias,
+                "time_field": m.time_field,
+                "filters": list(m.filters),
+                "domain": domain_key,
+                "domain_name": domain_name,
+                # T501 版本行：关联规则（_RULE_MEASURES 反查）最新确认状态摘要。
+                "caliber": _measure_caliber(
+                    [rid for rid, mid in rule_measures.items() if mid == m.id],
+                    registry.rules,
+                    last_by_rule,
+                ),
+            }
+        )
     dimensions = [
         {
             "id": d.id,
@@ -203,16 +287,6 @@ def ontology_payload() -> dict:
         }
         for d in registry.dimensions.values()
     ]
-
-    last_by_rule: dict[str, dict] = {}
-    for rec in confirmations:
-        enriched = {
-            **rec,
-            "commit": rec.get("commit") or (
-                _commit_for_code(rec["code"]) if rec.get("code") else None
-            ),
-        }
-        last_by_rule[rec["rule_id"]] = enriched  # 追加式记录，后者覆盖 = 最新一次
 
     rules = []
     for r in registry.rules.values():

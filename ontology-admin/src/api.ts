@@ -2,6 +2,18 @@
 
 export type RuleStatus = "unverified" | "confirmed";
 
+// T501 数字目录：数字卡版本行（口径锚规则 + 最新确认状态摘要；取不到如实 null）。
+export interface MeasureCaliber {
+  rule_id: string;
+  status: RuleStatus;
+  code: string | null;
+  confirmer: string | null;
+  time: string | null;
+  commit: string | null;
+  /** 最新记录可能是驳回（confirmed | rejected）；无记录为 null，不冒充确认。 */
+  verdict: string | null;
+}
+
 export interface Measure {
   id: string;
   description: string;
@@ -10,6 +22,10 @@ export interface Measure {
   source_alias: string;
   time_field: string;
   filters: string[];
+  /** T501 增量可选字段：后端现值恒带；可选以保持既有夹具向后兼容。 */
+  domain?: string | null;
+  domain_name?: string | null;
+  caliber?: MeasureCaliber | null;
 }
 
 export interface JoinSpec {
