@@ -162,7 +162,7 @@ def _route(ctx: Ctx):
     Returns (plan, llm, route_code, why)."""
     llm = llm_route(ctx.question)
     if "error" not in llm:
-        return llm["plan"], llm, None, f"DeepSeek 路由 {llm['ms']}ms · 原始输出: {llm['raw']}"
+        return llm["plan"], llm, None, f"LLM 路由（{config.LLM_MODEL}）{llm['ms']}ms · 原始输出: {llm['raw']}"
     plan = keyword_route(ctx.question)  # M5.5 增强版：别名归一 + value_hints 维度补带
     hit = plan.hit or plan.reject_domain or "无命中"
     why = f"LLM 路由不可用（{llm['error']}），退回关键词匹配 → {hit}"
@@ -306,7 +306,7 @@ def _run_gates(ctx: Ctx):
         yield from _finish_blocked_param(ctx, blocked)
         return None, None, None
     if llm and llm.get("time_from"):
-        src_note = "DeepSeek 抽取"
+        src_note = f"LLM 抽取（{config.LLM_MODEL}）"
         if llm.get("time_defaulted"):  # M6.2：时间缺失默认最近完整月，假设显式化
             src_note += f"（默认最近完整月，按 {params['time_from'][:7]} 统计）"
     else:

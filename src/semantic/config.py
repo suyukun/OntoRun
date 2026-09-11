@@ -14,8 +14,11 @@ MIRROR_DB = Path(os.environ.get("FORTUNE_MIRROR_DB") or ROOT_DIR / "data" / "for
 APP_DB = Path(os.environ.get("SEMANTIC_APP_DB") or DATA_DIR / "app.db")
 TRACE_LOG = Path(os.environ.get("SEMANTIC_TRACE_LOG") or DATA_DIR / "trace_log.jsonl")
 
-LLM_MODEL = os.environ.get("SEMANTIC_LLM_MODEL", "deepseek-chat")
-LLM_TIMEOUT_S = float(os.environ.get("SEMANTIC_LLM_TIMEOUT_S", "6"))
+def _env_float(key: str, default: str) -> float:
+    val = get_env(key, default)
+    return float(val or default)
+
+# get_env = os.environ 优先 + 项目根 .env 兜底——切换 provider 时 .env 三件套（key/base_url/model）必须同时生效
 HEARTBEAT_S = float(os.environ.get("SEMANTIC_HEARTBEAT_S", "14"))  # SSE comment ping (appendix A: 15s)
 HISTORY_DEFAULT_LIMIT = 50
 
@@ -43,6 +46,10 @@ def get_env(key: str, default: str | None = None) -> str | None:
     if val is not None:
         return val
     return _ENV.get(key, default)
+
+
+LLM_MODEL = get_env("SEMANTIC_LLM_MODEL", "deepseek-chat")
+LLM_TIMEOUT_S = _env_float("SEMANTIC_LLM_TIMEOUT_S", "30")  # reasoning 模型首答常 >6s，默认 30
 
 
 def llm_disabled() -> bool:
