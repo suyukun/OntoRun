@@ -15,11 +15,11 @@
 | TD-9 | E6 审查 F3：action_runs.executed_by 无 CHECK 白名单（audit_log.actor 有，schema 层不齐，store.py:200 vs :22） | 独立审查发现 | P6 治理 | 关闭（executed_by CHECK 已落地 + 存量库迁移，commit c3cea1c，见 §偿还记录） |
 | TD-10 | E6 审查 F4：audit_ref 无外键约束（store.py:203） | 独立审查发现 | P6 治理 | 决策=低风险备选（维持应用层对账 + 发布期 Postgres 原生 FK，不擅改 DDL，见 §偿还记录） |
 | TD-11 | E6 审查 F5：after 快照重读异常冒泡 → action_runs 缺行（对账缺口，action_runs.py:168-182） | 独立审查发现 | P6 收口 | 已修复（S1 收口：降级 failed run 不丢行，见 §偿还记录） |
-| TD-12 | E6 审查 F6-F9（nit）：同秒排序不稳 / GET runs 无鉴权读快照 / dry_run 被拒语义 / 快照明文返回 | 独立审查发现 | P6 终审复核闭环时 | 部分处置（F6 已满足；F7-F9 保留发布期，见 §偿还记录） |
-| TD-13 | E6 审查测试缺口：failed+有 effects 分支（after 重读源库新值）、dry_run+前置被拒组合（status=rejected 且 audit_ref 非空）无测试锁定 | 独立审查发现（E6 核心已被 15 用例锁定，此二为边界覆盖） | P6 全链路 E2E + 三问回归时补 | 已修复（S1 收口：tests/test_builder_p4.py 补 2 用例，见 §偿还记录） |
-| TD-14 | 链接反向/入向遍历 404：前端 LinkNav 的 link_name 不随 direction 换名（out 传 name / in 应传 inverse_name），后端按名严格匹配即 404；React StrictMode 双请求致一次报两次 | Jack 试用发现（2026-08-20），根因已定位（web/src/components/LinkNav.tsx + src/runtime/query.py::_other_type） | Jack 拍板修复时（修法二选一：前端按 direction 传名，或后端按名解析定义再决定方向） | 开放 |
-| TD-15 | 会话历史无持久化：前端消息内存态 + 后端 SessionManager 内存映射（刷新/重启即失） | MVP 简化 | 发布期（S2 用户体系/多进程时迁 Redis/DB） | 开放 |
-| TD-16 | ontology 两库无任何副本/备份机制（33+37 published 为 E4 终态、无 unpublish API，回退只能靠文件还原） | S3 收口未覆盖备份面（2026-08-27 handoff 列为最高优先债务） | 即刻偿还 | 关闭（当日：backup_risk_demo.py 扩入本体组，backup 实测 8 库落盘；真相源澄清=s3_risk_ontology.db 为 S3 风险本体库、ontology.db 为 S1 零售运行时库，均 *.db 不入 git） || TD-18 | registry self_check：LINK_FK_MISSING（codebt.for_customer 的 FK customer_id 不在 CoDebtCustomer 模型字段中） | S3 本体建模历史遗留（2026-09-01 M2 交付时按边界未顺手修，registry.self_check 唯一 error） | 下次动 builder seed/本体模型时一并修 | 开放（2026-09-01 M2 交付时登记） |
+| TD-19 | E6 审查 F6-F9（nit）：同秒排序不稳 / GET runs 无鉴权读快照 / dry_run 被拒语义 / 快照明文返回 | 独立审查发现 | P6 终审复核闭环时 | 部分处置（F6 已满足；F7-F9 保留发布期，见 §偿还记录） |
+| TD-20 | E6 审查测试缺口：failed+有 effects 分支（after 重读源库新值）、dry_run+前置被拒组合（status=rejected 且 audit_ref 非空）无测试锁定 | 独立审查发现（E6 核心已被 15 用例锁定，此二为边界覆盖） | P6 全链路 E2E + 三问回归时补 | 已修复（S1 收口：tests/test_builder_p4.py 补 2 用例，见 §偿还记录） |
+| TD-21 | 链接反向/入向遍历 404：前端 LinkNav 的 link_name 不随 direction 换名（out 传 name / in 应传 inverse_name），后端按名严格匹配即 404；React StrictMode 双请求致一次报两次 | Jack 试用发现（2026-08-20），根因已定位（web/src/components/LinkNav.tsx + src/runtime/query.py::_other_type） | Jack 拍板修复时（修法二选一：前端按 direction 传名，或后端按名解析定义再决定方向） | 开放 |
+| TD-22 | 会话历史无持久化：前端消息内存态 + 后端 SessionManager 内存映射（刷新/重启即失） | MVP 简化 | 发布期（S2 用户体系/多进程时迁 Redis/DB） | 开放 |
+| TD-23 | ontology 两库无任何副本/备份机制（33+37 published 为 E4 终态、无 unpublish API，回退只能靠文件还原） | S3 收口未覆盖备份面（2026-08-27 handoff 列为最高优先债务） | 即刻偿还 | 关闭（当日：backup_risk_demo.py 扩入本体组，backup 实测 8 库落盘；真相源澄清=s3_risk_ontology.db 为 S3 风险本体库、ontology.db 为 S1 零售运行时库，均 *.db 不入 git） || TD-18 | registry self_check：LINK_FK_MISSING（codebt.for_customer 的 FK customer_id 不在 CoDebtCustomer 模型字段中） | S3 本体建模历史遗留（2026-09-01 M2 交付时按边界未顺手修，registry.self_check 唯一 error） | 下次动 builder seed/本体模型时一并修 | 开放（2026-09-01 M2 交付时登记） |
 
 ---
 
