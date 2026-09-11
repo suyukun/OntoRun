@@ -1,6 +1,6 @@
 """FastAPI service for the fortune-registration profile (T1).
 
-Endpoints: GET /api/profile · POST /api/chat (SSE) · GET /api/history ·
+Endpoints: GET /api/insights · GET /api/profile · POST /api/chat (SSE) · GET /api/history ·
 GET /api/trace/{rid} · DELETE /api/history/{rid} (hide) · /api/sessions CRUD.
 SSE frames: step / token / final (+ terminal error frame), heartbeat comment
 frames while a blocking engine step runs (product doc appendix A).
@@ -10,11 +10,12 @@ import asyncio
 import json
 from contextlib import asynccontextmanager, suppress
 
+import duckdb
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, engine, storage
+from . import config, engine, insights, storage
 from .rules import build_profile
 
 
@@ -136,6 +137,24 @@ async def chat(body: ChatRequest):
 @app.get("/api/profile")
 def profile():
     return build_profile()
+
+
+# ---------------------------------------------------- proactive insights (T-U2)
+
+@app.get("/api/insights")
+def list_insights():
+    """主动洞察（B3 契约冻结）：命中 → insights；无命中/镜像不可读 → 常用查询兜底。
+
+    只读、零请求参数（无用户输入进查询，阈值来自 insights 模块数值常量）；
+    响应为纯事实字段：零 SQL、零表结构、零归因。
+    """
+    try:
+        found = insights.detect_insights()
+    except (duckdb.Error, OSError):
+        found = []  # 镜像不可读 → 诚实降级兜底态，不 500、不编造
+    if found:
+        return {"insights": found}
+    return {"insights": [], "fallback": "common_queries"}
 
 
 # ------------------------------------------------------- history & trace audit

@@ -113,3 +113,20 @@ export interface SessionItem {
   /** 最近更新时间（服务端排序/前端时间分组用；本地降级可缺省） */
   updatedAt?: string;
 }
+
+/** T-U2 主动洞察（GET /api/insights，B3 冻结契约；无命中 → {insights:[], fallback:'common_queries'}） */
+export interface InsightDrilldown {
+  measure: string;
+  dimensions: string[];
+  time: { from: string; to: string };
+}
+
+export interface InsightItem {
+  type: string;
+  channel: string | null;
+  metric: string;
+  current: number;
+  baseline: number;
+  delta_pct: number;
+  drilldown: InsightDrilldown;
+}
