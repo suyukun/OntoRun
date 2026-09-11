@@ -11,6 +11,9 @@ v2 (docs/即兴问答鲁棒性方案_v0.1.md M5+M6):
   registry (anti id-drift); hardcoded fallback if the registry is unreadable;
 - one error-feedback retry (bad JSON / enum failure / unknown time mode), then
   the keyword fallback — the degrade path is unchanged (E_ROUTE_INVALID);
+- TD-13: a length-truncated reply (finish_reason=length) first gets ONE retry
+  with a larger max_tokens budget before that fallback (truncation under the
+  long T-U5 system prompt used to degrade silently at ~20% rate);
 - enhanced keyword router (M5.5): alias normalization first, then the keyword
   table, then value-hint → dimension augmentation;
 - guided refusal copy (M6.1) generated from the registry: refusal upgrades to
@@ -54,6 +57,12 @@ JSON_RE = re.compile(r"\{[\s\S]*\}")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 MAX_ATTEMPTS = 2  # 首发 + 错误回喂重试 1 次（M5.4）
+
+# TD-13：输出预算原硬编码 200（_chat 内），T-U5 长系统提示词下截断率约 20%
+# （finish_reason=length 实证）→ 调大基础预算；命中 length 后第二次调用改用
+# 更大预算加长重试一次，仍失败才走既有降级路径（不追加第三次调用）。
+LLM_MAX_TOKENS = 2048
+LLM_LENGTH_RETRY_MAX_TOKENS = 4096
 
 # fortune_semantic 目录不可读时的硬编码降级位（few-shot 原语 id，防改名漂移的兜底）
 _EXAMPLE_IDS_FALLBACK = {
@@ -342,14 +351,16 @@ def _resolve_window(data: dict) -> tuple[str | None, str | None, str | None, boo
 # ------------------------------------------------------------ LLM interaction
 
 
-def _chat(client, messages: list) -> tuple[str, str | None, int]:
+def _chat(
+    client, messages: list, max_tokens: int = LLM_MAX_TOKENS
+) -> tuple[str, str | None, int]:
     """One JSON-mode call → (content, finish_reason, ms)。"""
     t0 = time.time()
     resp = client.chat.completions.create(
         model=config.LLM_MODEL,
         messages=messages,
         temperature=0.01,  # 智谱要求 >0（传 0 报 400）；DeepSeek 下近似确定性
-        max_tokens=200,
+        max_tokens=max_tokens,
         response_format={"type": "json_object"},  # M5.1 DeepSeek JSON Output
     )
     ms = round((time.time() - t0) * 1000)
@@ -400,11 +411,14 @@ def _interpret(raw: str, finish_reason: str | None, ms: int) -> tuple[str, objec
     return "ok", out
 
 
-def llm_route(question: str, context_block: str | None = None) -> dict:
+def llm_route(question: str, context_block: str | None = None, *, client=None) -> dict:
     """Route one question. Success: {"plan", "time_from"?/"time_to"?,
     "time_defaulted"?, "raw"(sanitized), "ms", "model"}. Failure after ≤1
     error-feedback retry: {"error", "error_code"(E_ROUTE_FALLBACK|E_ROUTE_INVALID)}
-    → caller falls back to keyword matching (degraded but correct).
+    → caller falls back to keyword matching (degraded but correct). A
+    length-truncated reply first retries once with a larger budget (TD-13).
+
+    client: 注入的 LLM client（测试 seam；None = 生产路径，按环境构建）。
 
     context_block: 引擎注入的历史对话数据块（引擎改动单 v0.2 B3：数据非指令，
     引擎侧已截断脱敏）——仅拼进 user 消息辅助解析指代；LLM 输出仍走
@@ -420,30 +434,33 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
             "ms": 0,
             "model": "safety-rule",
         }
-    if config.llm_disabled():
-        return {
-            "error": "LLM 路由已禁用（SEMANTIC_DISABLE_LLM）",
-            "error_code": errors.E_ROUTE_FALLBACK,
-        }
-    key = config.get_env("DEEPSEEK_API_KEY")
-    if not key:
-        return {
-            "error": "未配置 DEEPSEEK_API_KEY",
-            "error_code": errors.E_ROUTE_FALLBACK,
-        }
-    try:
-        from openai import OpenAI
+    if client is None:  # 生产路径：按环境开关与 key 构建真实 client
+        if config.llm_disabled():
+            return {
+                "error": "LLM 路由已禁用（SEMANTIC_DISABLE_LLM）",
+                "error_code": errors.E_ROUTE_FALLBACK,
+            }
+        key = config.get_env("DEEPSEEK_API_KEY")
+        if not key:
+            return {
+                "error": "未配置 DEEPSEEK_API_KEY",
+                "error_code": errors.E_ROUTE_FALLBACK,
+            }
+        try:
+            from openai import OpenAI
 
-        client = OpenAI(
-            api_key=key,
-            base_url=config.get_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-            timeout=config.LLM_TIMEOUT_S,
-        )
-    except Exception as exc:  # noqa: BLE001 有意兜底：LLM 任何失败都降级，不砸断链路
-        return {
-            "error": f"LLM 客户端初始化失败: {type(exc).__name__}",
-            "error_code": errors.E_ROUTE_FALLBACK,
-        }
+            client = OpenAI(
+                api_key=key,
+                base_url=config.get_env(
+                    "DEEPSEEK_BASE_URL", "https://api.deepseek.com"
+                ),
+                timeout=config.LLM_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 有意兜底：LLM 任何失败都降级，不砸断链路
+            return {
+                "error": f"LLM 客户端初始化失败: {type(exc).__name__}",
+                "error_code": errors.E_ROUTE_FALLBACK,
+            }
 
     user_content = (
         f"{context_block}\n当前问题：{question}" if context_block else question
@@ -453,9 +470,11 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
         {"role": "user", "content": user_content},
     ]
     raw, last_err, ms = "", "", 0
+    max_tokens = LLM_MAX_TOKENS
+    length_retried = False
     for attempt in range(MAX_ATTEMPTS):
         try:
-            raw, finish_reason, ms = _chat(client, messages)
+            raw, finish_reason, ms = _chat(client, messages, max_tokens)
         except Exception as exc:  # noqa: BLE001 网络/鉴权等基础设施失败：不重试，直接降级
             return {
                 "error": f"LLM 调用失败: {type(exc).__name__}",
@@ -465,6 +484,10 @@ def llm_route(question: str, context_block: str | None = None) -> dict:
         if outcome == "ok":
             return payload
         last_err = str(payload)
+        # TD-13：截断 → 加大预算重试一次
+        if finish_reason == "length" and not length_retried:
+            length_retried = True
+            max_tokens = LLM_LENGTH_RETRY_MAX_TOKENS
         if attempt + 1 < MAX_ATTEMPTS:  # 错误信息回喂 LLM 重试（M5.4）
             messages = messages + [
                 {"role": "assistant", "content": raw},
