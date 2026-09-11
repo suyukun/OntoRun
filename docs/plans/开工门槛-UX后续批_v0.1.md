@@ -32,8 +32,8 @@ M 级，填 A + D + C1 + NC；S 级任务（T-N1~T-N4）按模板免填只带一
   - T-N4 [S] 节奏改总时长制：chatbi/src/hooks/useChatStream.ts StepPacer——步骤事件到达即放（保留最小可读间隔），仅当整体 <2.5s 时把 final 展示落点兜底至 2.5s；假步骤零断言不变。判据：pacing.test 新断言（首步不被拖慢＋final ≥2500ms）＋chatbi 全套件绿。〔spec 修订：UX优化_v0.2 A3-US3「按真实步骤事件补间至 2.5s」释义收窄为总时长兜底，Jack 2026-09-11 裁决〕
   - T-N5 [M] 确认式澄清路由硬化：src/semantic/llm_route.py＋rules.py（＋time_normalizer.py 口语时间）——NC-3 裁定 c 档全量：①错别字/未注册别名 ②口径歧义词（新客/新增） ③语流混乱句 → 复用 clarify 卡确认，不出数；④NC-4 并入：域外零信息输入体面澄清（「？？？」「930」→CLARIFY 不 REJECT）、「八月份」口语时间解析、「优享加线上」符号变体高置信映射应答（want ANSWER）、留存率口径确认。判据：HUMAN-engineering_edge-001/002/005/009＋QW/GLM-caliber_trap-001＋GLM-engineering_edge-002/003＋QW-engineering_edge-006＋QW-caliber_trap-002 按 3c 口径转 CLARIFY/ANSWER＋HUMAN-engineering_edge-006 转 ANSWER＋engineering_edge 现有 PASS 零误伤。
   - T-N6 [M] 对抗考卷更新：tests/fixtures/对抗问法集_v0.2.json（multi_turn 12 条期望回写＋D 类 4 条 want CLARIFY）＋scripts/phrasing_eval.py（turns 承接模拟重写：T2 拼接基于 T1 答句上下文，不再要求 T1=CLARIFY 前置）。判据：改卷后 multi_turn 类复跑转绿；fixture diff 逐条对照裁决清单，无搭车。
-  - T-N7 [M] 本体级溯源替代表名：chatbi/src/components/DetailDrawer.tsx（＋CaliberPanel 视需要）——移除层·表名展示，改显「涉及本体对象＋命中实体/口径规则」；数据源开工前探明（engine 返回已有则纯前端；需后端补结构化字段则本任务升级 L 并串行 T-N8）。判据：抽屉零表名/零层名 vitest 断言＋对象/规则信息可见。
-  - T-N8 [M] UX 后端补口：①GET 口径卡数据带 confirm_history 结构化下发（来源按 NC-2）②POST /api/rewrite/answer：{kind,answer,facts}→glm 改写→{text}，后端 numbersMatch 双层校验（LLM 输出不可信）。判据：前端确认历史接线（NC-2=c 则空态保留＋管道就绪并报告）＋rewrite offline 冒烟＋数字漂移拒收测试。
+  - T-N7 [M] 本体级溯源替代表名＋砍确认历史：chatbi/src/components/DetailDrawer.tsx＋CaliberPanel.tsx——①移除层·表名展示，改显「涉及本体对象＋命中实体/口径规则」②整个移除「确认历史」区块（Jack 2026-09-11 裁决砍掉该设计，面板只留口径卡），trace.test 对应断言同步更新（规格变更非凑绿）；数据源开工前探明（engine 返回已有则纯前端；需后端补结构化字段则本任务升级 L 并串行 T-N8）。判据：抽屉与口径面板零表名/零层名/零「确认历史」区块 vitest 断言＋对象/规则信息可见。
+  - T-N8 [M] 改写旁路端点：src/semantic/app.py 增 POST /api/rewrite/answer：{kind,answer,facts}→glm 改写→{text}，后端 numbersMatch 双层校验（LLM 输出不可信）；确认历史下发已随 NC-2 裁决砍除，不在本任务。判据：端点 offline 冒烟＋数字漂移拒收测试＋前端接通后 offline 全走模板路径不回归。
 - **C3 并行/串行**：T-N1 先行（格式先行保 diff 干净）→ T-N2/T-N3/T-N4 可并行 [P]；T-N5 与 T-N3 同文件串行（T-N3→T-N5）；T-N6 验收复跑依赖 T-N5 落地；T-N7/T-N8 后端同族串行，前端部分可与 T-N2~4 并行。并发 ≤4。
 - **C4 止损**：各任务预期 1 轮；返工 ≥2 轮停回本稿修 spec，禁第 3 次 patch。
 
@@ -47,9 +47,9 @@ M 级，填 A + D + C1 + NC；S 级任务（T-N1~T-N4）按模板免填只带一
 | 编号 | 问题 | Rose 建议 | 状态 |
 |---|---|---|---|
 | NC-1 | 溯源面板（替代表名）展示什么？ | a 本体对象名＋命中规则名（如「注册记录 · 渠道｜R1 注册口径」） b a＋口径说明全文 c 其他 | NC-RESOLVED: Jack 选 1a（2026-09-11） |
-| NC-2 | 确认历史数据从哪来？ | a 审计层已有确认记录直接透出（开工前先探明） b 新增「确认」动作落库（涉本体动作，按边界制度需你单独批） c 本期只铺字段管道、界面保持空态（推荐：探明无现成数据则 c） | NC-OPEN |
+| NC-2 | 确认历史数据从哪来？ | a 审计层已有确认记录直接透出（开工前先探明） b 新增「确认」动作落库（涉本体动作，按边界制度需你单独批） c 本期只铺字段管道、界面保持空态（推荐：探明无现成数据则 c） | NC-RESOLVED: Jack 裁决整个砍掉确认历史设计（2026-09-11）——面板只留口径卡，不做数据管道不加确认功能 |
 | NC-3 | 确认式澄清触发范围？ | a 仅错别字/未注册别名 b a＋口径歧义词（新客/新增） c a＋b＋语流混乱句（推荐，最贴合「不要猜着答」） | NC-RESOLVED: Jack 选 3c（2026-09-11） |
 | NC-4 | B 类其余真缺口（域外体面澄清/「八月份」口语时间/「优享加线上」映射/留存率口径）并入本批吗？ | a 并入（推荐，都是路由/规则小改，趁 T-N5 同族一次做） b 留下批 | NC-RESOLVED: Jack 选 4a 并入（2026-09-11） |
 | NC-5 | 技术债表系统性撞号（表内 TD-12~16 与对抗系列 TD-12~16 共五处重号，不止 17）：表内老条目顺延改号 TD-19~23、对抗系列 12~17 保号 | a 按建议一次改清（推荐） b 只改已拍板的 17→18，其余挂起 | NC-RESOLVED: Jack 选 5a，已执行（2026-09-11） |
 
-派活前检查：NC 状态列存在未解决项时禁派任何编码活（机器检查 grep 状态标记计数须为 0）。当前未解决 1 项：NC-2 等 Jack 答复。
+派活前检查：NC 状态列存在未解决项时禁派任何编码活（机器检查 grep 状态标记计数须为 0）。当前未解决 0 项，NC 已清零（2026-09-11 Jack 五题全裁决）。
