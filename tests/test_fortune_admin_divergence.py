@@ -2,12 +2,15 @@
 
 SPEC docs/plans/开工门槛-管理台重构_v0.2.md §A2-US2 / §B3 / §C1-T201：
 - [US2] WHEN 打开 R8 THEN SHALL 呈现双口径对照而非二值按钮（数据侧：
-  divergence 含 account/user 两口径，value_evidence 带 595/552/55 数字证据）；
+  divergence 含 account/user 两口径，value_evidence 带 595/607/55 数字证据
+  且两口径均注明数据日期：user 607=试算端点实跑、account/55=2026-08 历史实证）；
 - 非 R8 规则 divergence 为 None；decision 默认 None（随 T202 裁决写入）；
 - import 冒烟：ontology_payload() 不炸，rules 计数与 live registry 一致。
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,9 +41,14 @@ def test_r8_divergence_dual_options_with_numeric_evidence(client: TestClient):
         assert opt["applies_to"], opt["key"]
         assert any(ch.isdigit() for ch in opt["value_evidence"]), opt["key"]
     evidence = " ".join(opt["value_evidence"] for opt in divergence)
-    # 595 账户 / 552 去重用户 / 55 名被内联注册表丢弃（"55 名"避免被 "552" 子串误中）
-    for num in ("595", "552", "55 名"):
+    # user 口径 607=2026-09-11 试算端点实跑真值（与 /api/trial/R8 同源）；
+    # account 595 / 55 名被内联注册表丢弃=2026-08 镜像历史实证（"55 名"
+    # 避免被 "595"/"607" 子串误中）
+    for num in ("595", "607", "55 名"):
         assert num in evidence, num
+    # 来源日期透明（证据刷新原则）：两口径证据文本均注明数据日期
+    for opt in divergence:
+        assert re.search(r"\d{4}-\d{2}(-\d{2})?", opt["value_evidence"]), opt["key"]
 
 
 def test_r8_decision_defaults_none(client: TestClient):
