@@ -278,7 +278,7 @@ def _chat(client, messages: list) -> tuple[str, str | None, int]:
     resp = client.chat.completions.create(
         model=config.LLM_MODEL,
         messages=messages,
-        temperature=0,
+        temperature=0.01,  # 智谱要求 >0（传 0 报 400）；DeepSeek 下近似确定性
         max_tokens=200,
         response_format={"type": "json_object"},  # M5.1 DeepSeek JSON Output
     )
