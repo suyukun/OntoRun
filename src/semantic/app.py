@@ -8,12 +8,15 @@ frames while a blocking engine step runs (product doc appendix A).
 
 import asyncio
 import json
+import re
+import unicodedata
 from contextlib import asynccontextmanager, suppress
+from typing import Literal
 
 import duckdb
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import config, engine, insights, storage
 from .rules import build_profile
@@ -236,3 +239,87 @@ def delete_session(session_id: str):
         if msg.get("request_id"):
             storage.hide_history(msg["request_id"])
     return {"hidden": 1, "id": session_id}
+
+
+# ------------------------------------------------------- rewrite bypass (T-N8)
+
+# 旁路小改写（T-N8）：REJECT/CLARIFY 话术只润措辞，独立于主路由模型；
+# 与主链路唯一交集是 client 构造方式（config 三件套同款，llm_route 零改动）。
+REWRITE_LLM_MODEL = config.get_env("SEMANTIC_REWRITE_LLM_MODEL", "glm-5.3-flash")
+REWRITE_TIMEOUT_S = 2  # 硬判据：2s 内不返回即静默回原文案
+REWRITE_MAX_TOKENS = 1000  # answer ≤500 字符，输出同量级留余量防截断
+_REWRITE_SYSTEM_PROMPT = (
+    "你是文案润色器：只改下面文案的措辞使其更通顺自然，"
+    "所有数字与事实必须一字不动，禁止增删任何数字，直接输出改写后的全文。"
+)
+
+
+class RewriteAnswerRequest(BaseModel):
+    kind: Literal["reject", "clarify"]
+    answer: str = Field(max_length=500)  # 进 prompt 前硬上限（防注入面）
+    facts: dict = Field(default_factory=dict)  # 契约字段，不进 prompt
+
+
+_NUM_SEQ_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _number_seq(text: str) -> list[str]:
+    """NFKC 归一（全角→半角等）+ 千分位剔除后的数字序列（T-N8 硬判据归一层）。"""
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = re.sub(r"(?<=\d)[,，](?=\d)", "", normalized)
+    return _NUM_SEQ_RE.findall(normalized)
+
+
+def _numbers_match(original: str, rewritten: str) -> bool:
+    """后端硬判据：改写前后数字序列逐一相等（LLM 输出不可信，漂移即拒收）。"""
+    return _number_seq(original) == _number_seq(rewritten)
+
+
+def _rewrite_via_llm(answer: str) -> str | None:
+    """阻塞式旁路改写一次调用 → 改写文本；离线/无 key → None（静默兜底原文案）。
+    client 构造与 llm_route 同款（DEEPSEEK_* 三件套），异常向上抛由端点统一兜底。"""
+    if config.llm_disabled():
+        return None
+    key = config.get_env("DEEPSEEK_API_KEY")
+    if not key:
+        return None
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key=key,
+        base_url=config.get_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        timeout=REWRITE_TIMEOUT_S,
+    )
+    resp = client.chat.completions.create(
+        model=REWRITE_LLM_MODEL,
+        messages=[
+            {"role": "system", "content": _REWRITE_SYSTEM_PROMPT},
+            {"role": "user", "content": answer},
+        ],
+        temperature=0.01,  # 与主路由同款（智谱要求 >0，DeepSeek 下近似确定性）
+        max_tokens=REWRITE_MAX_TOKENS,
+    )
+    return (resp.choices[0].message.content or "").strip() or None
+
+
+@app.post("/api/rewrite/answer")
+async def rewrite_answer(body: RewriteAnswerRequest):
+    """T-N8 改写旁路：REJECT/CLARIFY 话术措辞润色（契约冻结，恒 200）。
+
+    成功 {"text": 改写文, "rewritten": true}；漂移/超时(2s)/异常/限流 →
+    {"text": 原文案, "rewritten": false} 静默兜底，不 500。只读安全：不落库、
+    不改审计、无 SQL；kind/facts 仅契约校验不进 prompt。
+    """
+    original = body.answer
+    try:
+        rewritten = await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(
+                None, _rewrite_via_llm, original
+            ),
+            timeout=REWRITE_TIMEOUT_S,
+        )
+    except Exception:  # noqa: BLE001 有意兜底：超时/异常/限流一律静默回原文案
+        rewritten = None
+    if rewritten and _numbers_match(original, rewritten):
+        return {"text": rewritten, "rewritten": True}
+    return {"text": original, "rewritten": False}
