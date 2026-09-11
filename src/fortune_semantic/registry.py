@@ -336,9 +336,11 @@ RULES = {
 }
 
 
-# ---- 业务域登记块（管理台 M1 前置 T0c，DX-1 已批）----
-# 表→域 = 登记制元数据（docs/design/管理台重设计-域级总览图专项_v0.1.md §1.3，
-# 7 域框架 Jack 已认可；DX-2 一表唯一主域，转化链主表归注册域）。
+# ---- 业务域登记块（管理台 M1 前置 T0c，2026-09-11 Jack 终版裁决改判重登记）----
+# 唯一依据：docs/research/数据域划分调研-管理台域图_v0.1.md §5（逐表映射）+ §9（七条拍板）。
+# 登记口径 = 非 ADS（§9 裁决 4/6）：数据域只对事实表和 DIM 层才有用，ADS 是应用层表
+# 不按数据域登记——lineage 实盘 30 张中的 8 张 rec.ads_* 全部不登记（BS 域因此 0 表）；
+# ADS 指标在域图节点另给指标数量徽标，不占表登记（M2 T401/T403 处理，§9 裁决 7）。
 # 表 id 与 lineage_edges.json 实盘一致（含 schema 前缀），禁表名前缀猜测兜底。
 
 
@@ -353,55 +355,98 @@ class Domain(BaseModel):
 
 
 DOMAINS: list[Domain] = [
-    Domain(key="reg", name="注册域", description="用户从注册到激活进 KPI 的全过程"),
-    Domain(key="real", name="实名认证域", description="完成实名的人口与渠道分布"),
     Domain(
-        key="auth", name="授权域", description="客户授权开户与账户口径（R8 所在域）"
+        key="cu",
+        name="用户域",
+        description=(
+            "用户信息，以及与用户相关联的各类实体对象，例如设备信息、卡信息等"
+            "（Customer Domain）"
+        ),
     ),
-    Domain(key="chnl", name="渠道域", description="渠道主数据与渠道-客户关系"),
-    Domain(key="cust", name="客户主数据域", description="客户统一视图与触点"),
-    Domain(key="pub", name="公共维表域", description="日期/节假日/交易日历等公共维度"),
-    Domain(key="behav", name="行为埋点域", description="页面浏览与采集行为明细"),
+    Domain(key="or", name="运营域", description="对客营销数据（Operate Domain）"),
+    Domain(key="bs", name="经营域", description="渠道考核类的指标（Business Domain）"),
+    Domain(
+        key="rc",
+        name="风控域",
+        description=("记录业务经营过程中开展的风险管理相关信息（Risk Control Domain）"),
+    ),
+    Domain(
+        key="ps",
+        name="产品域",
+        description=(
+            "销售或提供给客户的产品或服务，包括各类信贷、保险，"
+            "以及未来可能会有的会员权益等（Product And Service Domain）"
+        ),
+    ),
+    Domain(
+        key="tr",
+        name="交易域",
+        description=(
+            "记录金控与各业务参与方之间发生的各类业务交互活动（Transaction Domain）"
+        ),
+    ),
+    Domain(
+        key="ac",
+        name="账务域",
+        description=("记录各类金融账户，例如各类客户账、资金账等（Accounting Domain）"),
+    ),
+    Domain(
+        key="pb",
+        name="公共域",
+        description=(
+            "共用信息及暂时无法分类的数据，例如内部组织机构、人员职级、"
+            "地域划分，外部数据等信息（Public Domain）"
+        ),
+    ),
+    Domain(
+        key="lm",
+        name="日志域",
+        description=(
+            "为使用和存储非结构化或是半结构化的数据，例如埋点、影像等"
+            "（Logs And Messages Domain）"
+        ),
+    ),
+    Domain(
+        key="ch",
+        name="渠道域",
+        description=(
+            "为使用和存储渠道相关数据的数据，例如子公司渠道、金控渠道信息等，"
+            "暂时只放渠道维表（Channel Domain）"
+        ),
+    ),
 ]
 
 TABLE_DOMAINS: dict[str, str] = {
-    # reg 注册域（7）：注册/激活明细 + 渠道注册三张 ADS + 转化链主表（DX-2 主域）
-    "cdm.dwd_cu_rgst_fin_di": "reg",
-    "cdm.dwd_cu_rgst_nonfin_di": "reg",
-    "cdm.dwd_cu_actv_df": "reg",
-    "rec.ads_rgst_chnl_cnt_df": "reg",
-    "rec.ads_rgst_raw_chnl_cnt_df": "reg",
-    "rec.ads_rgst_act_chnl_cnt_df": "reg",
-    "rec.ads_chnl_rgst_to_real_auth_dau_df": "reg",
-    # real 实名认证域（4）
-    "cdm.dwd_cu_real_df": "real",
-    "ods.ods_usms_sub_company_real_name_sync_record_df": "real",
-    "rec.ads_chnl_real_info_df": "real",
-    "rec.ads_chnl_real_user_df": "real",
-    # auth 授权域（4）：R8 所在域
-    "ods.ods_usms_lml_account_t_df": "auth",
-    "ods.ods_usms_lm_agreement_version_t_df": "auth",
-    "rec.ads_chnl_auth_qty_df": "auth",
-    "rec.ads_chnl_rltv_chnl_df": "auth",
-    # chnl 渠道域（5）：渠道维 + 用户关系 + 渠道主数据三张 ODS
-    "cdm.dim_ch_chl_df": "chnl",
-    "cdm.dwd_ch_usr_rltv_df": "chnl",
-    "ods.ods_usms_lm_channel_base_t_df": "chnl",
-    "ods.ods_usms_lm_channel_group_base_t_df": "chnl",
-    "ods.ods_usms_lm_channel_user_t_df": "chnl",
-    # cust 客户主数据域（3）
-    "cdm.dim_cu_usr_info_df": "cust",
-    "ods.ods_usms_lm_user_t_df": "cust",
-    "ods.ods_lm_user_wechat_t_df": "cust",
-    # pub 公共维表域（5）：日期维三份镜像（cdm/<default>/cfgl_iml_data）+ 节假日 + 交易日历
-    "cdm.dim_pb_date_yf": "pub",
-    "<default>.dim_pb_date_yf": "pub",
-    "cfgl_iml_data.dim_pb_date_yf": "pub",
-    "cfgl_iml_data.dim_date_holiday": "pub",
-    "cfgl_itl_data.cwmp_wind_citic_asharecalendar_yf": "pub",
-    # behav 行为埋点域（2）
-    "cdm.dwd_lm_pv_df": "behav",
-    "ods.madp_collect_all": "behav",
+    # cu 用户域（11）：注册/激活/实名过程明细 + 用户主数据及关联实体
+    # （判据 1 动作归主体；§9 裁决 3 用户-渠道关系表归 CU）
+    "cdm.dwd_cu_rgst_fin_di": "cu",
+    "cdm.dwd_cu_rgst_nonfin_di": "cu",
+    "cdm.dwd_cu_actv_df": "cu",
+    "cdm.dwd_cu_real_df": "cu",
+    # 待王工核实（§5 #9）：若实为系统同步日志则归 lm
+    "ods.ods_usms_sub_company_real_name_sync_record_df": "cu",
+    # 待王工核实（§5 #13）：若为全局共用配置则归 pb
+    "ods.ods_usms_lm_agreement_version_t_df": "cu",
+    "cdm.dwd_ch_usr_rltv_df": "cu",
+    "ods.ods_usms_lm_channel_user_t_df": "cu",
+    "cdm.dim_cu_usr_info_df": "cu",
+    "ods.ods_usms_lm_user_t_df": "cu",
+    "ods.ods_lm_user_wechat_t_df": "cu",
+    # ch 渠道域（3）：渠道主数据（金控 CH「暂时只放渠道维表」）
+    "cdm.dim_ch_chl_df": "ch",
+    "ods.ods_usms_lm_channel_base_t_df": "ch",
+    "ods.ods_usms_lm_channel_group_base_t_df": "ch",
+    # pb 公共域（5）：日期维三副本（cdm/<default>/cfgl_iml_data）+ 节假日 + 外部交易日历
+    "cdm.dim_pb_date_yf": "pb",
+    "<default>.dim_pb_date_yf": "pb",
+    "cfgl_iml_data.dim_pb_date_yf": "pb",
+    "cfgl_iml_data.dim_date_holiday": "pb",
+    "cfgl_itl_data.cwmp_wind_citic_asharecalendar_yf": "pb",
+    # lm 日志域（2）：埋点明细与采集平台原始数据
+    "cdm.dwd_lm_pv_df": "lm",
+    "ods.madp_collect_all": "lm",
+    # ac 账务域（1）：账户线金融账户表（lml=账户线）
+    "ods.ods_usms_lml_account_t_df": "ac",
 }
 
 

@@ -1,11 +1,12 @@
-"""T0c 域声明块硬断言：DOMAINS 7 域 + TABLE_DOMAINS 30 表登记完整性。
+"""T0c 域声明块硬断言：DOMAINS 金控 10 域 + TABLE_DOMAINS 非 ADS 22 表登记完整性。
 
-登记来源：docs/design/管理台重设计-域级总览图专项_v0.1.md §1.3（7 域框架
-Jack 已认可，门槛稿 NC「域框架」行）；已注册表集合 = lineage_edges.json
-实盘 30 张（与 fortune_admin/lineage.py 同源同推导，schema 前缀齐全）。
+登记来源（2026-09-11 Jack 终版改判重登记）：docs/research/数据域划分调研-管理台域图_v0.1.md
+§5（逐表映射）+ §9（七条拍板）。登记口径 = 非 ADS（§9 裁决 4/6）：rec.ads_* 8 张
+应用层表不按数据域登记；已登记表集合 = lineage_edges.json 实盘 30 张 − ADS
+（与 fortune_admin/lineage.py 同源同推导，schema 前缀齐全）。
 
 跑法（禁跑全量）：
-    uv run pytest tests/test_fortune_domains.py -q
+    pytest tests/test_fortune_domains.py -q
 """
 
 import json
@@ -21,16 +22,20 @@ LINEAGE_PATH = (
     / "lineage_edges.json"
 )
 
-# 门槛稿 NC「域框架」行：注册7/实名4/授权4/渠道5/客户主数据3/公共维表5/行为埋点2
+# 调研文档 §9 终态：CU 11 / CH 3 / PB 5 / LM 2 / AC 1；
+# or/bs/rc/ps/tr 5 域 0 表（BS 原映射 7 张全为 ADS，随裁决 4 出局）
 EXPECTED_TABLE_COUNTS = {
-    "reg": 7,
-    "real": 4,
-    "auth": 4,
-    "chnl": 5,
-    "cust": 3,
-    "pub": 5,
-    "behav": 2,
+    "cu": 11,
+    "ch": 3,
+    "pb": 5,
+    "lm": 2,
+    "ac": 1,
 }
+
+EMPTY_DOMAIN_KEYS = {"or", "bs", "rc", "ps", "tr"}
+
+EXPECTED_LINEAGE_TABLES = 30
+EXPECTED_NON_ADS_TABLES = 22
 
 
 def _registered_tables():
@@ -38,13 +43,20 @@ def _registered_tables():
     return {e["source"] for e in edges} | {e["target"] for e in edges}
 
 
-def test_domains_exactly_seven():
-    assert len(DOMAINS) == 7
+def _non_ads_tables():
+    """§9 裁决 4/6：ADS 应用层表不按数据域登记，rec.ads_* 全部排除。"""
+    return {t for t in _registered_tables() if not t.startswith("rec.ads_")}
 
 
-def test_table_domains_cover_registered_tables_exactly():
-    """集合相等：无遗漏（每张已注册表都有域）、无悬空（key 不指向不存在的表）。"""
-    assert set(TABLE_DOMAINS) == _registered_tables()
+def test_domains_exactly_ten():
+    assert len(DOMAINS) == 10
+
+
+def test_table_domains_cover_non_ads_tables_exactly():
+    """集合双向相等：无遗漏（每张非 ADS 实盘表都有域）、无悬空（key 不指向不存在的表）。"""
+    assert len(_registered_tables()) == EXPECTED_LINEAGE_TABLES
+    assert len(_non_ads_tables()) == EXPECTED_NON_ADS_TABLES
+    assert set(TABLE_DOMAINS) == _non_ads_tables()
 
 
 def test_table_domain_keys_are_registered_domains():
@@ -52,5 +64,6 @@ def test_table_domain_keys_are_registered_domains():
     assert set(TABLE_DOMAINS.values()) <= {d.key for d in DOMAINS}
 
 
-def test_per_domain_table_counts_match_framework():
+def test_per_domain_table_counts_match_ruling():
     assert dict(Counter(TABLE_DOMAINS.values())) == EXPECTED_TABLE_COUNTS
+    assert {d.key for d in DOMAINS} - set(TABLE_DOMAINS.values()) == EMPTY_DOMAIN_KEYS
