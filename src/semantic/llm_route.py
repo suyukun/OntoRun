@@ -289,6 +289,11 @@ def _link_filter_values(plan: RoutePlan) -> tuple[RoutePlan, dict | None]:
             match = next(
                 (m for m in members if aliases.normalize_text(m) == norm), None
             )
+            if match is None:  # T-N5 符号变体（加↔+）高置信归一：优享加线上→优享+线上
+                norm = norm.translate(_VALUE_VARIANT_TRANS)
+                match = next(
+                    (m for m in members if aliases.normalize_text(m) == norm), None
+                )
         if match is None:  # 名单不可得或值不在名单 → 澄清式拒答，不猜
             if clarify is None:
                 clarify = {
@@ -434,6 +439,49 @@ def llm_route(question: str, context_block: str | None = None, *, client=None) -
             "ms": 0,
             "model": "safety-rule",
         }
+    # T-N5 确认式澄清硬化：确定性规则先于 LLM（安全差分之后），LLM/离线两路同判。
+    caliber_hit = rules.unregistered_caliber_hit(question)
+    if caliber_hit:  # 显式索求未注册口径 → 拒答，不确认不出数
+        return {
+            "plan": RoutePlan(
+                reject_domain=rules.UNREGISTERED_CALIBER_DOMAIN, hit=caliber_hit
+            ),
+            "raw": "口径规则短路：显式索求未注册口径，未调用 LLM",
+            "ms": 0,
+            "model": "caliber-rule",
+        }
+    confirm = confirm_clarify_hit(question)
+    if confirm is not None:
+        if "resolve" in confirm:  # 确认承接：应答已确认/补全 → 按候选口径出数
+            out = dict(confirm["resolve"])
+            out.update(
+                {
+                    "raw": "确认承接规则：应答已确认/补全，按候选口径出数（未调用 LLM）",
+                    "ms": 0,
+                    "model": "clarify-rule",
+                }
+            )
+            return out
+        out = dict(confirm["clarify"])  # 确认式澄清：先确认再出数
+        out.update(
+            {
+                "raw": "确认式澄清规则命中：先确认再出数，未调用 LLM",
+                "ms": 0,
+                "model": "clarify-rule",
+            }
+        )
+        return out
+    oral = _oral_window(question)
+    if oral:  # 口语中文数字月份（「八月份」）→ 代码解析时间窗，直答不反问
+        plan = keyword_route(question)
+        if not plan.rejected and plan.measure is not None:
+            return {
+                "plan": plan,
+                **oral,
+                "raw": "口语时间规则：中文数字月份由代码解析（未调用 LLM）",
+                "ms": 0,
+                "model": "oral-time-rule",
+            }
     if client is None:  # 生产路径：按环境开关与 key 构建真实 client
         if config.llm_disabled():
             return {
@@ -504,6 +552,184 @@ def llm_route(question: str, context_block: str | None = None, *, client=None) -
     }
 
 
+# ------------------------------------- T-N5 确认式澄清（Jack 裁决「不要猜着答，要确认」）
+# 高置信符号变体（加↔+）：仅用于渠道值匹配（优享加线上 → 优享+线上），直接映射；
+# 错别字/未注册别名（赢行/bank App/祖册）与口径歧义词（新客/新增/激活/上次口径）
+# → 确认式澄清（带候选名，不出数）——别名归一直接出数的行为废止。
+_VALUE_VARIANT_TRANS = str.maketrans({"加": "+"})
+
+_CONFIRM_VALUE_ALIASES = {"赢行": "银行App", "bankapp": "银行App"}
+_CONFIRM_MEASURE_WORD = "reg_user_cnt"  # 候选口径（须已注册，下方用时校验）
+_CONFIRM_MEASURE_ALIASES = {
+    "祖册": "注册用户数",
+    "新客": "注册用户数",
+    "新增": "注册用户数",
+}
+_CONFIRM_DEFAULT_CALIBER = "注册用户数（默认口径）"  # 激活/上次口径 → 默认口径确认
+_COMPOUND_SUGGESTION = "各渠道注册数"  # 复合问主问候选
+_ZERO_INFO_VALUE = "（未能识别）"  # 零信息输入的澄清值哨兵（文案引导，不回显原文）
+_CONFIRM_CHANNEL_GROUP_RE = re.compile(r"各渠道|分渠道|按渠道")
+_CONFIRM_CHANNEL_ASK_RE = re.compile(r"哪些渠道|哪个渠道|什么渠道")
+_DIGIT_MONTH_RE = re.compile(
+    r"\d{1,2}\s*月"
+)  # 数字月份在场则口语解析不抢（交既有链路）
+# 确认承接语：独立确认词（左右边界约束，「对应」不误伤）+「默认」（默认口径接受语）
+_CONFIRM_AFFIRM_RE = re.compile(
+    r"(?<![一-龥a-zA-Z0-9])(?:确认|确定|可以|好的?|嗯|是|对|ok|yes)(?![一-龥])",
+    re.IGNORECASE,
+)
+
+
+def _confirm_plan(base: RoutePlan) -> RoutePlan:
+    """确认场景的理解计划：候选度量补带（仅采信已注册度量，供 trace 与承接）。"""
+    if base.measure is None and _CONFIRM_MEASURE_WORD in REGISTRY.measures:
+        return replace(base, measure=_CONFIRM_MEASURE_WORD)
+    return base
+
+
+def _oral_window(question: str) -> dict:
+    """口语中文数字月份 → 真实窗口（T-N5）；数字月份在场则不抢（交既有链路），
+    解析失败返回空 dict（不砸链路）。"""
+    if time_normalizer is None or _DIGIT_MONTH_RE.search(question):
+        return {}
+    try:
+        rng = time_normalizer.extract_oral_month(question, today=date.today())  # noqa: DTZ011 本地日
+    except Exception:  # noqa: BLE001 口语解析失败不砸主链路
+        return {}
+    if rng and rng.get("time_from") and rng.get("time_to"):
+        return {"time_from": rng["time_from"], "time_to": rng["time_to"]}
+    return {}
+
+
+def _zero_content(question: str) -> bool:
+    """零信息输入判定（T-N5 ④）：剥掉渠道成员名后不再含任何中文 → 纯标点/
+    裸数字/转义垃圾（？？？/930/转义炸弹）→ 体面澄清引导。域外有信息问句
+    （如「附近有什么好吃的餐厅」）与纯月份短语（「9月」，多轮承接信号）保留
+    中文 → 不触发，维持既有路径（零信息澄清不扩大化）。"""
+    cjk = "".join(ch for ch in question if "一" <= ch <= "鿿")  # 一=U+4E00, 鿿=U+9FFF
+    if not cjk:
+        return True
+    if aliases is None:
+        return False
+    try:
+        members = _channel_members() or ()
+    except Exception:  # noqa: BLE001 名单不可得不判零信息（宁走原路径）
+        return False
+    for member in members:
+        norm_member = "".join(
+            ch for ch in aliases.normalize_text(member) if "一" <= ch <= "鿿"
+        )
+        if norm_member:
+            cjk = cjk.replace(norm_member, "")
+    return not cjk
+
+
+def confirm_clarify_hit(question: str) -> dict | None:
+    """确定性确认式澄清判定（T-N5；llm_route 于 LLM 调用前短路，离线降级同判）。
+    返回 None=不触发；{"clarify": {"filter_clarify", "plan"}}=须向用户确认；
+    {"resolve": {"plan", "time_from"?/"time_to"?}}=应答已确认/补全，按候选出数。
+    安全优先：差分/未注册口径特征由调用方先判，本函数不放行任何安全问题。
+    口径歧义词（新客/新增/祖册/激活/上次口径）与渠道别名在度量意图判定之前
+    处理——「新增用户数」这类问句本身带「用户数」关键词，不能据此跳过确认。"""
+    try:
+        norm = aliases.normalize_text(question) if aliases is not None else question
+    except Exception:  # noqa: BLE001 别名层异常不砸澄清判定
+        norm = question
+    affirm = bool(_CONFIRM_AFFIRM_RE.search(question)) or "默认" in question
+
+    # ① 渠道错别字/未注册别名（最高优先）：候选成员值已随应答回来 → 视为确认
+    for keyword, member in _CONFIRM_VALUE_ALIASES.items():
+        if keyword in norm:
+            confirmed = affirm or (
+                aliases is not None and aliases.normalize_text(member) in norm
+            )
+            plan = keyword_route(question)
+            if confirmed:
+                dims = list(plan.dimensions)
+                entry = f"channel_l2={member}"
+                if "channel_l2" in REGISTRY.dimensions and entry not in dims:
+                    dims.append(entry)
+                return {
+                    "resolve": {
+                        "plan": replace(plan, dimensions=tuple(dims)),
+                        **_oral_window(question),
+                    }
+                }
+            return {
+                "clarify": {
+                    "filter_clarify": {
+                        "dimension": "channel_l2",
+                        "value": keyword,
+                        "suggestions": [member],
+                    },
+                    "plan": _confirm_plan(plan),
+                }
+            }
+
+    # ② 口径歧义词：翻译出理解（按注册口径理解？）确认后再查，不直接出数
+    caliber_labels = dict(_CONFIRM_MEASURE_ALIASES)
+    if "激活" in norm:
+        caliber_labels["激活"] = _CONFIRM_DEFAULT_CALIBER
+    if "上次" in question and "口径" in question:
+        caliber_labels.setdefault("上次", _CONFIRM_DEFAULT_CALIBER)
+    for keyword, label in caliber_labels.items():
+        if keyword in norm:
+            plan = _confirm_plan(keyword_route(question))
+            if affirm:  # 确认承接：应答「对/默认」→ 按候选口径出数
+                return {"resolve": {"plan": plan, **_oral_window(question)}}
+            return {
+                "clarify": {
+                    "filter_clarify": {
+                        "dimension": "measure",
+                        "value": keyword,
+                        "suggestions": [label],
+                    },
+                    "plan": plan,
+                }
+            }
+
+    # ③ 语流混乱复合问（各渠道分组 × 哪些渠道枚举双问并存）→ 选主问确认
+    if _CONFIRM_CHANNEL_GROUP_RE.search(question) and _CONFIRM_CHANNEL_ASK_RE.search(
+        question
+    ):
+        plan = keyword_route(question)
+        if affirm:
+            return {"resolve": {"plan": plan, **_oral_window(question)}}
+        return {
+            "clarify": {
+                "filter_clarify": {
+                    "dimension": "compound",
+                    "value": "复合问题",
+                    "suggestions": [_COMPOUND_SUGGESTION],
+                },
+                "plan": plan,
+            }
+        }
+
+    # ④ 域外零信息输入：无任何度量/维度意图且剥成员后无中文 → 引导澄清
+    base = keyword_route(question)
+    if base.rejected or base.measure is not None or base.dimensions:
+        return None  # 已有可执行意图（含「注册注册注册」类），走既有链路
+    try:
+        hints = aliases.expand_candidates(question) if aliases is not None else {}
+    except Exception:  # noqa: BLE001
+        hints = {}
+    if hints.get("measure_hints") or hints.get("dimension_hints"):
+        return None
+    if not _zero_content(question):
+        return None
+    return {
+        "clarify": {
+            "filter_clarify": {
+                "dimension": "input",
+                "value": _ZERO_INFO_VALUE,
+                "suggestions": [],
+            },
+            "plan": base,
+        }
+    }
+
+
 # ------------------------------------------- enhanced keyword fallback (M5.5)
 
 
@@ -518,6 +744,16 @@ def keyword_route(question: str) -> RoutePlan:
         try:
             text = aliases.normalize_text(question) or question
             hints = aliases.expand_candidates(question) or {}
+            # T-N5 高置信符号变体（加↔+）：仅并值候选（优享加线上 → 优享+线上），
+            # 直接映射应答；错别字/未注册别名不走此处（确认式澄清见上方短路）。
+            variant = question.translate(_VALUE_VARIANT_TRANS)
+            if variant != question:
+                v_hints = aliases.expand_candidates(variant) or {}
+                merged = list(hints.get("value_hints") or [])
+                for value in v_hints.get("value_hints") or []:
+                    if value not in merged:
+                        merged.append(value)
+                hints["value_hints"] = merged
         except Exception:  # noqa: BLE001 别名层任何异常不得砸断兜底链路
             text, hints = question, {}
     plan = rules.keyword_route(text)
@@ -608,8 +844,20 @@ def guided_reject_answer(keyword: str | None = None) -> str:
 
 def channel_clarify_answer(value: str, suggestions: list) -> str:
     """Gap A 澄清式拒答：渠道值不在维表成员名单（宁拒不错 + 引导改问）。
+    T-N5 确认式澄清复用本出口：单候选 → 「您是指『候选』吗？」（Jack 裁决：
+    别名命中带候选名确认，不出数）；零候选且值为零信息哨兵 → 输入引导。
     文案不含任何数字（演示红线与旧不变量一致）。"""
-    shown = "、".join(suggestions[:8]) if suggestions else ""
+    if not suggestions:
+        if str(value or "").strip() == _ZERO_INFO_VALUE:
+            example = _example_question()
+            return (
+                "没有识别到您想查询的内容。请直接说明要查的指标和时间，"
+                f"例如：「{example}」。"
+            )
+        return f"未找到该渠道「{value}」。也可以先问「各渠道分布」看看有哪些渠道。"
+    if len(suggestions) == 1:  # 确认式澄清：带候选名（生产确认载荷恒单候选）
+        return f"您是指「{suggestions[0]}」吗？确认后我来查询。"
+    shown = "、".join(suggestions[:8])
     tail = "等" if len(suggestions) > 8 else ""
-    known = f"我能答的渠道有：{shown}{tail}。" if shown else ""
+    known = f"我能答的渠道有：{shown}{tail}。"
     return f"未找到该渠道「{value}」。{known}也可以先问「各渠道分布」看看有哪些渠道。"

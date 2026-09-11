@@ -19,6 +19,9 @@ llm_route 归为可重试错误。
       {"mode": "month_of", "ref": "2026-08"} | {"mode": "month_end", "ref"?: "2026-08"}
       {"mode": "half_of", "ref": "2026-H1"|"H2"}
 
+  口语问句补充入口（T-N5）：extract_oral_month(question, today) 把问句里的中文
+  数字月份（「八月份」）解析为当月整月真实区间——解析权在代码，不交给 LLM。
+
 口径决策（属口径包，默认自然语义；见 docs/即兴问答鲁棒性方案_v0.1.md M2）：
 - 自然期间 vs 滚动窗口："上个月"=自然月整段（2026-08-01~08-31）；
   "最近N天"=含今日的滚动 N 天——两者是不同口径，中文都叫"30天"；
@@ -218,4 +221,36 @@ def normalize_time(slot: dict, today: date) -> dict:
     start, end = handler(slot, today)
     if start > end:
         raise ValueError(f"时间区间 from>to: {start} > {end}")
+    return {"time_from": start.isoformat(), "time_to": end.isoformat()}
+
+
+# 口语中文数字月份（T-N5「八月份」类语音说法）；数字月份不在此列（引擎
+# extract_params 已处理），非常规写法（「廿八」）不猜。
+_ORAL_MONTH_RE = re.compile(r"([一二三四五六七八九十]{1,2})月份?")
+_ORAL_MONTH_NUM = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "十一": 11,
+    "十二": 12,
+}
+
+
+def extract_oral_month(question: str, today: date) -> dict | None:
+    """口语问句 → 中文数字月份的真实区间（T-N5）：「八月份」→ 当年 8 月整月。
+    无中文数字月份 / 写法不识别 → None（调用方交回既有时间链路，不猜）。"""
+    match = _ORAL_MONTH_RE.search(str(question))
+    if match is None:
+        return None
+    month = _ORAL_MONTH_NUM.get(match.group(1))
+    if month is None:
+        return None
+    start, end = _month_range(today.year, month)
     return {"time_from": start.isoformat(), "time_to": end.isoformat()}

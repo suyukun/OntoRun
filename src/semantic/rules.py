@@ -180,6 +180,21 @@ def differential_attack_hit(question: str) -> str | None:
     return None
 
 
+# T-N5 确认式澄清硬化（Jack 裁决「不要猜着答，要确认」）：显式索求未注册口径
+# （且常伴预先否定默认口径的施压话术）→ 拒答，不做确认式反问、不以默认口径
+# 冒充出数。与差分特征同为确定性规则：llm_route 于 LLM 调用前短路，关键词
+# 降级路径（下方 keyword_route）同判，两路行为一致。「新客/新增」类易混词
+# 不在此列——那些走确认式澄清（见 llm_route.confirm_clarify_hit）。
+UNREGISTERED_CALIBER_DOMAIN = "未注册口径"
+_CALIBER_REJECT_WORDS = ("原始口径", "留资", "留存")
+
+
+def unregistered_caliber_hit(question: str) -> str | None:
+    """显式未注册口径索求判定（T-N5）→ 命中词（人话、不含数字，可安全拼进
+    拒答文案——文案无数字红线）；未命中 → None。"""
+    return next((w for w in _CALIBER_REJECT_WORDS if w in question), None)
+
+
 # Reject-first: unregistered business domains refuse before any data primitive.
 _REJECT_DOMAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("活跃/转化域", ("活动", "任务", "抽奖", "奖品", "导流", "日活", "活跃", "转化")),
@@ -208,6 +223,10 @@ def keyword_route(question: str) -> RoutePlan:
     diff_hit = differential_attack_hit(question)
     if diff_hit:
         return RoutePlan(reject_domain=DIFF_REJECT_DOMAIN, hit=diff_hit)
+    # T-N5：显式未注册口径索求次优先（先于业务域与关键词映射，不猜数）。
+    caliber_hit = unregistered_caliber_hit(question)
+    if caliber_hit:
+        return RoutePlan(reject_domain=UNREGISTERED_CALIBER_DOMAIN, hit=caliber_hit)
     for domain, keywords in _REJECT_DOMAINS:
         for kw in keywords:
             if kw in question:
