@@ -13,9 +13,11 @@ from src.fortune_admin import (
     lineage,
     object_detail,
     ontology,
+    trial,
 )
 
 router = APIRouter(prefix="/api")
+router.include_router(trial.router)  # T204 试算只读端点（独立装配 trial.py）
 
 VALID_VERDICTS = ("confirmed", "rejected")
 VALID_KINDS = ("measure", "dimension", "table")
