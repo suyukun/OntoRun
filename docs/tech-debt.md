@@ -113,3 +113,9 @@
 - 现状：tests/semantic 同会话全跑 4 failed（test_core x2 / test_l2_switch / test_t4_persistence）——根因 = config.py import 期锚定 APP_DB/TRACE_LOG 环境变量，各测试文件又在自身 import 期 setenv 并假设自己是首位收集者（字母序），非首位者锚定失效读空库。
 - 证据：加不加新测试文件 FAILED 集合逐字节相同（非新文件引入）；隔离跑单文件全绿。
 - 处置：派 conftest 统一前置 pin 修复单（修复后本条留痕不删）。
+
+### TD-13（2026-09-11，T002 交付发现；待派 src 修复单）
+
+- 现状：glm-5.3-flash 在长输入（系统提示词+few-shot）下输出截断率约 20%（三轮实测 5~7/30 路由降级，finish_reason=length，错误回喂重试无效），截断后按引擎同款降级关键词路由，time_grain 类槽位丢失 → LEGACY-004/018/021 类 FAIL。
+- 修法方向：src/semantic/llm_route.py 调 max_tokens 或截断重试策略（如检测 length 后加长重试一次）。超出对抗块「不动 src」边界，另派修复单。
+- 影响：口径类 ≥90% 达标判定受截断率影响，修 TD-13 前达标数字偏保守。

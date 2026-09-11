@@ -127,6 +127,7 @@ python scripts/phrasing_eval.py --category safety
 python scripts/phrasing_eval.py
 ~~~
 ①②③为开工前基线；LLM 真跑有网络/额度依赖，失败如实记环境原因，不编基线。
+**基线实测记录（2026-09-11，T002 交付时，provider=glm-5.3-flash）**：29/30 系历史 commit bb03b16 旧 provider 环境数字，现环境不可复现（AGENTS.md 载明默认模型三变）。同环境决定性对照：新 runner 27/2/1 与 26/3/1（两轮+Rose 复核跑，FAIL 集中 time_grain 截断降级）≥ 旧 runner 同环境 23/6/1（6 条 FAIL 全为 v0 repr 嗅探伪影）——**判据改述为「同环境不回退」，成立**。FAIL 根因与修法登记 TD-13。
 
 ### D2 验收看 diff
 fixtures 新文件↔T001；phrasing_eval.py↔T002；test_adversarial_cases.py↔T003；tech-debt.md↔T005；分类学↔T004。src/ 出现改动 = 搭车，退回（A5）。
