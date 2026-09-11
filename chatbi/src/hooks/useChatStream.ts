@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { MIN_THINKING_MS } from '../config';
 import { buildMockEvents } from '../mock/stream';
 import type { ChatEvent, EndReason, FinalResult, StepInfo, StreamError } from '../types';
 
@@ -32,8 +33,15 @@ export interface ChatStream {
  * - AbortController：stop() 用户取消；30s 无帧看门狗超时
  * - 断连/无 final 帧 → interrupted；error 帧 → error
  * - mock 模式不发起请求，按事件序列延时回放（独立开发不依赖后端）
+ * - US3 演示节奏补间（cfg.pacing）：SSE 全程快于 MIN_THINKING_MS 时，按真实步骤事件节拍补间展示至最短时长；
+ *   节拍器只释放真实收到的事件（展示步骤 ⊆ SSE 事件，假步骤零容忍），关掉开关即纯真实节奏
  */
-export function useChatStream(cfg: { endpoint: string; mock: boolean; callbacks: StreamCallbacks }): ChatStream {
+export function useChatStream(cfg: {
+  endpoint: string;
+  mock: boolean;
+  pacing?: boolean;
+  callbacks: StreamCallbacks;
+}): ChatStream {
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const userAbortRef = useRef(false);
@@ -76,10 +84,17 @@ export function useChatStream(cfg: { endpoint: string; mock: boolean; callbacks:
             return true;
         }
       };
-      if (cfg.mock) void runMock(question, dispatch, ctrl.signal, finish);
-      else void runSse(question, cfg.endpoint, extras, dispatch, ctrl, finish);
+      // US3：演示节奏补间——pacer 持有真实事件按节拍释放；流自身终局（取消/断流/异常）弃未展示缓冲
+      const pacer = cfg.pacing ? new StepPacer(Date.now(), MIN_THINKING_MS, dispatch) : null;
+      const finishNow = (why: EndReason, err?: StreamError) => {
+        if (pacer) pacer.cancel();
+        finish(why, err);
+      };
+      const sink: Dispatch = (ev) => (pacer ? pacer.push(ev) : dispatch(ev));
+      if (cfg.mock) void runMock(question, sink, ctrl.signal, finishNow);
+      else void runSse(question, cfg.endpoint, extras, sink, ctrl, finishNow);
     },
-    [cfg.endpoint, cfg.mock],
+    [cfg.endpoint, cfg.mock, cfg.pacing],
   );
 
   return { send, stop, busy };
@@ -87,6 +102,93 @@ export function useChatStream(cfg: { endpoint: string; mock: boolean; callbacks:
 
 type Terminal = (why: EndReason, err?: StreamError) => void;
 type Dispatch = (ev: ChatEvent) => boolean;
+
+/**
+ * US3 节拍器（演示模式）：只释放真实收到的 SSE 事件，SHALL NOT 插入不存在步骤。
+ * - 步骤与终局帧（final/error）按「最短展示时长内的均匀节拍」释放：已知事件越多，slot 越密，终局帧恰落在 t0+MIN；
+ *   流到得慢（真实节奏 ≥ MIN）时到点即放，不额外拖长。
+ * - 回答 token 不占节拍：轮到队头即放（回答文字流仍按事件真实顺序）。
+ * - 每次入队重算节拍（清旧定时器重布拍）：已知事件数增长只会让后续拍点提前，均匀补间不被早拍的稀疏信息拖偏。
+ */
+class StepPacer {
+  private queue: ChatEvent[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private pacedReleased = 0;
+  private stopped = false;
+
+  constructor(
+    private readonly t0: number,
+    private readonly minMs: number,
+    private readonly out: Dispatch,
+  ) {}
+
+  /** 入队一个真实事件；返回是否终局帧（final/error），供 SSE 读流循环提前退出 */
+  push(ev: ChatEvent): boolean {
+    const terminal = ev.kind === 'final' || ev.kind === 'error';
+    if (this.stopped) {
+      this.out(ev);
+      return terminal;
+    }
+    this.queue.push(ev);
+    this.schedule();
+    return terminal;
+  }
+
+  /** 流自身终局（用户取消/断流/异常）时调用：丢弃未展示缓冲，不补发表演帧 */
+  cancel(): void {
+    this.stopped = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.queue = [];
+  }
+
+  private schedule(): void {
+    if (this.stopped) return;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.pump();
+  }
+
+  private pump = (): void => {
+    this.timer = null;
+    for (;;) {
+      const head = this.queue[0];
+      if (!head || this.stopped) return;
+      const now = Date.now();
+      if (now >= this.t0 + this.minMs) {
+        // 已到最短展示时长：剩余真实事件立即放行，不再拉长
+        while (this.queue.length > 0 && !this.stopped) this.releaseHead();
+        return;
+      }
+      if (head.kind === 'token') {
+        this.releaseHead();
+        continue;
+      }
+      const pacedTotal = this.pacedReleased + this.queue.filter((p) => p.kind !== 'token').length;
+      const due = this.t0 + ((this.pacedReleased + 1) * this.minMs) / Math.max(1, pacedTotal);
+      if (now < due) {
+        this.timer = setTimeout(this.pump, due - now);
+        return;
+      }
+      this.releaseHead();
+    }
+  };
+
+  private releaseHead(): void {
+    const head = this.queue.shift();
+    if (!head) return;
+    if (head.kind !== 'token') this.pacedReleased += 1;
+    if (this.out(head)) {
+      // 终局帧已出 → 停拍弃队
+      this.stopped = true;
+      this.queue = [];
+    }
+  }
+}
 
 async function runMock(question: string, dispatch: Dispatch, signal: AbortSignal, finish: Terminal): Promise<void> {
   const events = buildMockEvents(question);

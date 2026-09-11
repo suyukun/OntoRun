@@ -7,7 +7,8 @@ const COPIED_RESET_MS = 1600;
 
 /**
  * 详情抽屉 = 审计视图（UX 2026-09-09 重定位）：回答「凭什么信/怎么复现」。
- * 决策步骤已在消息卡思考区展示，此处不再重复；这里收口径与校验、SQL、证据编号与元信息。
+ * 决策步骤已在消息卡思考区展示，此处不再重复；这里收口径与校验、证据编号与元信息。
+ * 用户可见层零 SQL（Jack 2026-09-11 裁决）：result.sql 仅存于审计链数据结构，不再渲染。
  */
 export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () => void }) {
   const r = msg.result;
@@ -90,13 +91,6 @@ export function DetailDrawer({ msg, onClose }: { msg: ChatMessage; onClose: () =
               )}
             </div>
           </div>
-
-          {r?.sql && (
-            <div className="basis-sql">
-              <b>执行 SQL：</b>
-              <pre className="sql">{r.sql}</pre>
-            </div>
-          )}
 
           <p className="hint">
             证据编号可完整复现本次过程与结果（报障/审计时报此编号）。LLM 原始输出经系统脱敏后记录；判断文字未经事实校验。

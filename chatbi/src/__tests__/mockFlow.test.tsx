@@ -54,9 +54,14 @@ describe('mock 模式核心流程（验收主链路）', () => {
 
     // final 后：路径徽章（业务化文案，附录 G） + 回答 + viz=bar → SVG 柱状图（D7：与表格同源同一 rows）
     await waitFor(() => expect(screen.getByText('明细即席计算')).toBeTruthy(), { timeout: 15000 });
-    expect(screen.getByText(/共 2,893 人/)).toBeTruthy();
+    // US1 数字可点击（T-U1 规格适配）：回答被 AnswerText 拆为文本片段＋数字按钮，整句不再落在单元素——
+    // 原断言意图（回答含「共 2,893 人」）改以 .ans textContent 校验，并新增数字按钮可点击断言
+    const ans = container.querySelector('.ans');
+    expect(ans?.textContent).toMatch(/共 2,893 人/);
+    expect(within(ans as HTMLElement).getByRole('button', { name: '2,893' })).toBeTruthy(); // 回答数字可点击（US1）
     expect(container.querySelectorAll('.bub svg rect').length).toBeGreaterThanOrEqual(4); // 4 渠道各一柱，来自同一 rows
-    expect(screen.getByText('1,240')).toBeTruthy(); // TOP1 APP 数值常显
+    const svgTexts = Array.from(container.querySelectorAll('.bub svg text')).map((t) => t.textContent);
+    expect(svgTexts).toContain('1,240'); // TOP1 APP 数值常显（US1 后回答区同值变为按钮，改以 svg 作用域断言）
     expect(screen.queryByRole('table')).toBeNull(); // viz=bar 走图表渲染器，非表格
 
     // 思考区：点击「已思考」展开步骤列表
@@ -74,7 +79,11 @@ describe('mock 模式核心流程（验收主链路）', () => {
     fireEvent.change(await screen.findByPlaceholderText('输入问题…'), { target: { value: '8月注册用户数是多少？' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(screen.getByText('月报口径（预聚合）')).toBeTruthy(), { timeout: 15000 });
-    expect(screen.getByText('2,893')).toBeTruthy(); // 大数字 = rows[0].total，同源不另算
+    // US1 数字可点击（T-U1 规格适配）：回答区数字同为按钮，与 KPI 大数字同值并存 → 按作用域/角色分别断言，
+    // 原断言意图（大数字 = rows[0].total，同源不另算）不变
+    const dataSec = screen.getByText('数据').closest('.sec');
+    expect(within(dataSec as HTMLElement).getByText('2,893')).toBeTruthy(); // KPI 大数字 = rows[0].total，同源不另算
+    expect(screen.getByRole('button', { name: '2,893' })).toBeTruthy(); // 回答区数字可点击（US1）
     expect(container.querySelector('.bub svg[role="img"]')).toBeNull(); // 无图表 svg（UI 功能图标 aria-hidden 不计入）
     expect(screen.queryByRole('table')).toBeNull();
   });

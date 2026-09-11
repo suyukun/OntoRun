@@ -68,12 +68,12 @@ describe('思考过程区（§3.2 #4，默认收起）', () => {
     const nos = Array.from(container.querySelectorAll('.stp-no')).map((el) => Number(el.textContent));
     expect(nos.length).toBeGreaterThanOrEqual(7); // 真实步数由事件流决定
     expect(nos).toEqual(Array.from({ length: nos.length }, (_, i) => i + 1)); // 1..N 无跳号
-    expect(container.querySelector('pre.sql')).toBeTruthy(); // SQL 步内嵌代码块
+    expect(container.querySelector('pre.sql')).toBeNull(); // 用户可见层零 SQL（Jack 2026-09-11 裁决：SQL 仅留审计层）
   });
 });
 
 describe('详情抽屉（§3.2 #5，审计视图重定位）', () => {
-  it('口径说明 + 命中规则 + 数据路径 + 校验记录 + 执行 SQL 一次性可查（无重复 tab）', async () => {
+  it('口径说明 + 命中规则 + 数据路径 + 校验记录（无重复 tab；用户可见层零 SQL，Jack 2026-09-11 裁决）', async () => {
     render(<App />);
     await ask('8月按渠道的注册用户数？');
     await screen.findByText('明细即席计算', {}, { timeout: 15000 });
@@ -84,7 +84,7 @@ describe('详情抽屉（§3.2 #5，审计视图重定位）', () => {
     expect(/REG_BY_CHANNEL/.test(text)).toBeTruthy();
     expect(/DWD · dwd_tr_rgst_df/.test(text)).toBeTruthy();
     expect(/同源交叉/.test(text)).toBeTruthy();
-    expect(/执行 SQL/.test(text)).toBeTruthy();
+    expect(/执行 SQL/.test(text)).toBeFalsy(); // 用户可见层零 SQL（Jack 2026-09-11 裁决：SQL 仅留审计层）
     expect(drawer.querySelectorAll('.tabs button').length).toBe(0); // 双 tab 已移除
   });
 });
@@ -106,7 +106,9 @@ describe('八状态 UI（§4.2 逐状态）', () => {
     expect(screen.getByText('月报口径（预聚合）')).toBeTruthy();
   });
 
-  it('参数追问：追问句 + chips 可点续查', async () => {
+  // US3 节拍地板导致的双流程超时预算：本用例串跑两次 mock 流程（ask_param + chip 续查），
+  // 演示补间将单流程展示拉至 2.5s、合计超 vitest 默认 5s 级 → 测试级放宽，断言语义不动
+  it('参数追问：追问句 + chips 可点续查', { timeout: 15000 }, async () => {
     render(<App />);
     await ask('注册用户数是多少？');
     await screen.findByText(/已思考 \d+ 步/, {}, FLOW); // 思考完成折叠后再断言（追问路径无 token 流）

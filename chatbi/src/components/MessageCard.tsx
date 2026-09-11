@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_PATH_LABELS } from '../mock/profile';
 import { Icon } from './Icon';
 import { deriveStatus, type AiStatus } from '../state/deriveStatus';
 import type { ChatMessage, FinalResult } from '../types';
+import { AnswerText, CaliberPanel } from './CaliberPanel';
 import { Chart } from './Chart';
 import { DataTable } from './DataTable';
 import { DetailDrawer } from './DetailDrawer';
@@ -10,6 +11,8 @@ import {
   BUSINESS_PATH_LABELS, DEFAULT_ERROR_TEXT, ERROR_COPY, LIFECYCLE_BADGE_LABELS,
   RESULT_BADGE_LABELS, copyText,
 } from './labels';
+import { usePoliteAnswer } from '../rewrite/usePoliteAnswer';
+import { pickThinkingPhrase } from './thinkingPhrases';
 import { StepList } from './StepList';
 import { WAIT_EGGS } from './eggs';
 
@@ -57,6 +60,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
   // 恢复/回放的消息以 done 态挂载 → 思考区收起；新消息流式挂载 → 展开直播
   const [thinkOpen, setThinkOpen] = useState(msg.phase === 'streaming');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [caliberOpen, setCaliberOpen] = useState(false);
   const [slow, setSlow] = useState(false);
   /** null=未操作，true/false=最近一次复制成败（三态反馈） */
   const [copiedData, setCopiedData] = useState<boolean | null>(null);
@@ -69,6 +73,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
   const r = msg.result;
   const streaming = status === 'loading';
   const badge = badgeText(status, r, pathLabels);
+  const polite = usePoliteAnswer(status, r); // T-U4：REJECT/CLARIFY 话术（模板先行 + 改写并行旁路）
 
   // 回答 token 开始输出 → 思考区自动折叠；终局（含无 token 的追问/拒答路径）同样折叠。
   // 用户手动展开/收起过则尊重用户选择。
@@ -112,10 +117,12 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
   // 生成期直播（§3.3：直播只在思考区头部体现）。成功路径步骤数不固定（D6 动态追加
   // 「数字校验」步），final 前总数未知——只报当前进度 n，不硬编码分母。
   const lastStep = msg.steps[msg.steps.length - 1];
+  // US3：思考流话术模板池——同步骤类型随机取词避免每次一字不差；按 step 记忆稳定，不随重渲染换句
+  const livePhrase = useMemo(() => (lastStep ? pickThinkingPhrase(lastStep.title) : ''), [lastStep]);
   const liveText = msg.streamedText
     ? '生成回答中…'
     : lastStep
-      ? `第 ${msg.steps.length} 步 · ${lastStep.title}`
+      ? `第 ${msg.steps.length} 步 · ${lastStep.title} · ${livePhrase}`
       : '正在建立连接…';
 
   const secs = r?.total_ms != null ? r.total_ms / 1000 : msg.steps.reduce((a, s) => a + (s.ms ?? 0), 0) / 1000;
@@ -152,7 +159,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
         return (
           <div className="ans">
             {status === 'success_degraded' && <span className="warnbadge">本次由简化路由回答</span>}
-            {r?.answer}
+            {r && <AnswerText text={r.answer} onNumber={() => setCaliberOpen(true)} />}
           </div>
         );
       case 'success_empty':
@@ -166,7 +173,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
       case 'ask_param':
         return (
           <div className="ans">
-            {r?.answer}
+            {polite.text}
             <span className="chips-inline">
               {PARAM_CHIPS.map((m) => (
                 <button key={m} onClick={() => onFollowUp(m + msg.text)}>{m}</button>
@@ -178,14 +185,14 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
       case 'out_of_range':
         return (
           <div className="ans">
-            {r?.answer}
+            {polite.text}
             <span className="hint">数据边界来自语义层元数据，请调整查询范围。</span>
           </div>
         );
       case 'rejected':
         return (
           <div className="ans">
-            {r?.answer}
+            {polite.text}
             {examples.length > 0 && (
               <span className="chips-inline">
                 {examples.slice(0, 3).map((ex) => (
@@ -199,7 +206,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
       case 'unregistered':
         return (
           <div className="ans">
-            {r?.answer}
+            {polite.text}
             <span className="hint">可将该问题提交为派生规则候选，纳入口径治理流程。</span>
           </div>
         );
@@ -314,7 +321,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
           </div>
         )}
 
-        {/* 操作行：详情（审计视图：口径/校验/SQL/证据编号） */}
+        {/* 操作行：详情（审计视图：口径/校验/证据编号）；回答数字点击 → 口径溯源面板（T-U1） */}
         {!streaming && r && (
           <div className="actrow">
             <button className="actbtn" onClick={() => setDrawerOpen(true)}>
@@ -324,6 +331,7 @@ export function MessageCard({ msg, pathLabels, examples = [], onRetry, onFollowU
         )}
       </div>
       {drawerOpen && <DetailDrawer msg={msg} onClose={() => setDrawerOpen(false)} />}
+      {caliberOpen && <CaliberPanel msg={msg} onClose={() => setCaliberOpen(false)} />}
     </div>
   );
 }

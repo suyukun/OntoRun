@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadProfile, type ProfileBundle } from './api';
+import { DEMO_PACING_ENABLED } from './config';
 import { ChatInput } from './components/ChatInput';
+import { InsightCard, loadInsights } from './components/InsightCard';
 import { MessageCard } from './components/MessageCard';
 import { SessionBar } from './components/SessionBar';
 import { fetchMessages, NEW_TITLE, useSessions } from './hooks/useSessions';
 import { useChatStream, type StreamCallbacks } from './hooks/useChatStream';
-import type { ChatMessage } from './types';
+import type { ChatMessage, InsightItem } from './types';
 
 function userMessage(id: number, text: string): ChatMessage {
   return { id, role: 'user', text, steps: [], streamedText: '', result: null, error: null, phase: 'done' };
@@ -28,6 +30,7 @@ const NEAR_BOTTOM_PX = 80;
 export default function App() {
   const [bundle, setBundle] = useState<ProfileBundle | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [insights, setInsights] = useState<InsightItem[]>([]);
   const idSeq = useRef(1);
   const loadSeq = useRef(0); // 会话切换竞态守卫：仅最后一次加载生效
   const activeMsgId = useRef<number | null>(null);
@@ -42,6 +45,11 @@ export default function App() {
   // profile 装配：后端未起 → loadProfile 内部降级 mock 模式
   useEffect(() => {
     void loadProfile().then(setBundle);
+  }, []);
+
+  // T-U2 主动洞察：打开页拉一次；无命中/失败 → 空数组（常用查询兜底，不出卡）
+  useEffect(() => {
+    void loadInsights().then(setInsights);
   }, []);
 
   // 跟随滚动：仅当用户停在消息区底部附近时新消息才自动滚底（上翻回看不被打断）
@@ -92,6 +100,7 @@ export default function App() {
   const { send, stop, busy } = useChatStream({
     endpoint: bundle?.profile.endpoint ?? '/api/chat',
     mock: bundle?.mockMode ?? true,
+    pacing: DEMO_PACING_ENABLED, // US3/NC-U4：演示节奏开关（config.ts，演示默认开）
     callbacks,
   });
 
@@ -158,6 +167,9 @@ export default function App() {
         />
         <main className="main">
           <div className="msgs" ref={msgsRef}>
+            {messages.length === 0 && insights.length > 0 && (
+              <InsightCard insights={insights} onAsk={handleSend} />
+            )}
             {messages.length === 0 && (
               <div className="emptywrap">
                 <div className="empty">

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from '../App';
 
 afterEach(cleanup); // vitest 未开 globals：显式清理，避免跨用例 DOM 叠加
@@ -85,12 +85,20 @@ describe('T4 会话恢复与持久化联调', () => {
 
     render(<App />);
     // 刷新恢复：不发问即见快照回答 + 数据表格（快照渲染，非重新执行）
-    expect(await screen.findByText('存量回答：2,893 人')).toBeTruthy();
+    // US1 数字可点击（T-U1 规格适配）：回答被 AnswerText 拆为文本片段＋数字按钮，整句不再落在单元素——
+    // 原断言意图（快照回答整句渲染）改以 .ans textContent 校验，并新增数字可点击断言
+    const restoredAns = (await screen.findByText('存量回答：')).closest('.ans');
+    expect(restoredAns?.textContent).toBe('存量回答：2,893 人');
+    expect(within(restoredAns as HTMLElement).getByRole('button', { name: '2,893' })).toBeTruthy(); // 回答数字可点击（US1）
     expect(screen.getByRole('table')).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('输入问题…'), { target: { value: '9月注册用户数是多少？' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await screen.findByText('新回答：2,893 人');
+    // US1 数字可点击（T-U1 规格适配，同上）：以首片段定位新回答的 .ans，整句 textContent 校验＋数字可点击
+    // 节拍器（US3）终局帧落在最短展示时长（2.5s）→ 默认 1s 查询超时不敷，放宽查询窗口（断言语义不变）
+    const newAns = (await screen.findByText('新回答：', {}, { timeout: 8000 })).closest('.ans');
+    expect(newAns?.textContent).toBe('新回答：2,893 人');
+    expect(within(newAns as HTMLElement).getByRole('button', { name: '2,893' })).toBeTruthy();
 
     expect(bodies.length).toBe(1);
     expect(bodies[0]['conversation_id']).toBe('s1');
