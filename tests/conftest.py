@@ -11,6 +11,25 @@ for p in (str(ROOT), str(ROOT / "src")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+# ----------------------------------------------------------------------
+# Session-level store pin (tests/semantic same-session collection fix).
+# src/semantic/config.py anchors APP_DB/TRACE_LOG from os.environ at
+# first import, but several tests/semantic modules setenv at module
+# import while assuming they are collected first; collected later, the
+# config is already imported and their pin is lost -> direct os.environ
+# reads hit an empty store (no such table). Pin ONE tmp store here,
+# before any test module (hence src.semantic) gets imported: per-module
+# setdefault calls become no-ops and direct os.environ reads stay
+# consistent with config.APP_DB. FORTUNE_MIRROR_DB stays untouched
+# (tests reconcile numbers against the real mirror); SEMANTIC_DISABLE_LLM
+# is read dynamically per query, so modules keep controlling it.
+# ----------------------------------------------------------------------
+import tempfile
+
+_SESSION_TMP = Path(tempfile.mkdtemp(prefix="semantic-pytest-session-"))
+os.environ.setdefault("SEMANTIC_APP_DB", str(_SESSION_TMP / "app.db"))
+os.environ.setdefault("SEMANTIC_TRACE_LOG", str(_SESSION_TMP / "trace.jsonl"))
+
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
     """手写 .env 解析（零依赖，仅支持 KEY=VALUE 行，忽略注释与空行）。"""

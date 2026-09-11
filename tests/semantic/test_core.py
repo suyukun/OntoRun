@@ -14,8 +14,8 @@ import tempfile
 from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="semantic-test-"))
-os.environ["SEMANTIC_APP_DB"] = str(_TMP / "app.db")
-os.environ["SEMANTIC_TRACE_LOG"] = str(_TMP / "trace.jsonl")
+os.environ.setdefault("SEMANTIC_APP_DB", str(_TMP / "app.db"))
+os.environ.setdefault("SEMANTIC_TRACE_LOG", str(_TMP / "trace.jsonl"))
 os.environ["SEMANTIC_DISABLE_LLM"] = "1"
 
 from fastapi.testclient import TestClient  # noqa: E402
