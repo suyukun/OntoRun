@@ -9,10 +9,10 @@ mkdir -p "$LOGDIR"
 
 start() {
   echo "== 1/3 前台语义服务 :8000 =="
-  nohup /opt/anaconda3/bin/python -m uvicorn src.app.main:app --port 8000 >"$LOGDIR/app.log" 2>&1 &
+  nohup "$VENV/python" -m uvicorn src.app.main:app --port 8000 >"$LOGDIR/app.log" 2>&1 &
   echo "  log=$LOGDIR/app.log"
   echo "== 2/3 后台管理台 API :8010 =="
-  nohup /opt/anaconda3/bin/python -m uvicorn src.fortune_admin.main:app --port 8010 >"$LOGDIR/admin.log" 2>&1 &
+  nohup "$VENV/python" -m uvicorn src.fortune_admin.main:app --port 8010 >"$LOGDIR/admin.log" 2>&1 &
   echo "  log=$LOGDIR/admin.log"
   echo "== 3/4 前台 ChatBI 壳 :5173 =="
   (cd chatbi && nohup npm run dev -- --port 5173 >"$LOGDIR/chatbi.log" 2>&1 &)
