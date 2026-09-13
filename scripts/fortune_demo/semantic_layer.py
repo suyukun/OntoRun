@@ -5,7 +5,7 @@ LLM 自由度 = 输出规则 ID + 参数（演示用关键词模拟；真实系�
 import sqlite3, time, uuid
 from datetime import date
 
-DB = "/Users/suyukun/Documents/OntoRun/data/fortune/fortune.db"
+DB = "/Users/suyukun/Projects/OntoRun/data/fortune/fortune.db"
 
 RULES = {
     "REG_TOTAL": {
@@ -138,7 +138,7 @@ def answer_assemble(rule_id, rows, params):
         return "、".join(f"{r['gender']} {r['cnt']:,}（{100*r['cnt']/s:.1f}%）" for r in rows) + f"。合计 {s:,} 人。"
     return ""
 
-TRACE_LOG = "/Users/suyukun/Documents/OntoRun/data/fortune/trace_log.jsonl"
+TRACE_LOG = "/Users/suyukun/Projects/OntoRun/data/fortune/trace_log.jsonl"
 
 def _persist(result: dict):
     """证据链落库（最小版）：每次查询全步 trace 追加至 JSONL。审计级（不可篡改/回放/导出）为待办。"""

@@ -4,7 +4,7 @@ import sqlite3, random, os
 from datetime import date, timedelta
 
 random.seed(42)
-DB = "/Users/suyukun/Documents/OntoRun/data/fortune/fortune.db"
+DB = "/Users/suyukun/Projects/OntoRun/data/fortune/fortune.db"
 os.makedirs(os.path.dirname(DB), exist_ok=True)
 
 CHANNELS = [  # (chnl_id, nm, fst_chnl_nm, fin_flg)

@@ -64,3 +64,6 @@ research/p4-session-archive/
 data/archive/
 uv.lock
 data/des/enterprises/ap_anping/.backup/
+
+# TS 构建产物
+*.tsbuildinfo
